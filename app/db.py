@@ -4,18 +4,24 @@ from pathlib import Path
 from contextlib import contextmanager
 
 # =========================
-# CONFIG
+# CONFIG (Render FREE friendly)
 # =========================
-# Su Render usa disco persistente /var/data (consigliato)
-DEFAULT_DB_PATH = "/var/data/spinza.db"
-DB_PATH = Path(os.getenv("DB_PATH", DEFAULT_DB_PATH))
+# Su Render FREE non puoi usare /var/data (dischi persistenti non disponibili).
+# Mettiamo il DB nella cartella "app/" (scrivibile a runtime).
+BASE_DIR = Path(__file__).resolve().parent
+
+# Puoi anche impostare una ENV "DB_PATH" su Render se vuoi cambiare posizione.
+# Default: app/spinza.db
+DB_PATH = Path(os.getenv("DB_PATH", str(BASE_DIR / "spinza.db")))
 
 # =========================
 # CONNECTION
 # =========================
 @contextmanager
 def connect():
+    # assicura che la cartella esista (di solito sì)
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     try:
@@ -33,7 +39,7 @@ def ensure_db_exists():
         DB_PATH.touch()
 
 # =========================
-# INIT DB
+# INIT DB (schema compatibile con main.py)
 # =========================
 def init_db():
     ensure_db_exists()
@@ -42,6 +48,9 @@ def init_db():
         cur = db.cursor()
 
         # ---- USERS ----
+        # Compatibile con:
+        # - make_password / verify_password
+        # - colonne: pw_salt, pw_hash, legacy_sha256
         cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
