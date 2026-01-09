@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% set title = "Log - Spinza" %}
+{% block content %}
+  <div class="card">
+    <div class="row" style="justify-content:space-between;align-items:center;">
+      <div>
+        <h2 style="margin:0;">Log modifiche</h2>
+        <div class="muted">Ultime {{ limit }} azioni.</div>
+      </div>
+      <a class="pill" href="/inventario" style="text-decoration:none;color:#111">← Inventario</a>
+    </div>
+    <div style="overflow:auto;margin-top:10px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Quando</th>
+            <th>Inventario</th>
+            <th>Utente</th>
+            <th>Azione</th>
+            <th>Categoria</th>
+            <th>Prodotto</th>
+            <th>Valore</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+            <tr>
+              <td>{{ r.ts }}</td>
+              <td><span class="pill">{{ stores.get(r.store, r.store) }}</span></td>
+              <td><strong>{{ r.username }}</strong></td>
+              <td>{{ r.action }}</td>
+              <td>{{ r.category }}</td>
+              <td>{{ r.name }}</td>
+              <td>{{ r.delta }}</td>
+            </tr>
+          {% endfor %}
+          {% if not rows %}
+            <tr><td colspan="7" class="muted">Nessun log.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

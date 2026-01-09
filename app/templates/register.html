@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% set title = "Registrazione" %}
+{% block content %}
+  <div class="card" style="max-width:420px;margin:20px auto;">
+    <h2 style="margin:0 0 6px 0;">Registrazione</h2>
+    <p class="muted" style="margin:0;">Inventario: <strong>{{ store_label }}</strong></p>
+    <p class="muted" style="margin-top:8px;">Crea il tuo account (dipendente). L'account vale solo per questo inventario.</p>
+
+    {% if error %}
+      <div class="danger" style="padding:10px 12px;border-radius:12px;margin:10px 0;">{{ error }}</div>
+    {% endif %}
+    {% if ok %}
+      <div class="ok" style="padding:10px 12px;border-radius:12px;margin:10px 0;background:#ecfdf5;border:1px solid #bbf7d0;">
+        Account creato. Ora puoi fare login.
+      </div>
+    {% endif %}
+
+    <form method="post" action="/register">
+      <div style="display:grid;gap:10px;">
+        <input name="username" placeholder="Username" autocomplete="username" required />
+        <input name="password" placeholder="Password" type="password" autocomplete="new-password" required />
+        <input name="confirm_password" placeholder="Conferma password" type="password" autocomplete="new-password" required />
+        <button class="btn" type="submit">Crea account</button>
+        <a class="pill" href="/select-store" style="text-decoration:none;color:#111;text-align:center;">↩ Cambia inventario</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}
