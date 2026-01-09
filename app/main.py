@@ -630,41 +630,46 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
     q = (q or "").strip().lower()
     cat = (cat or "ALL").strip()
 
+    from .db import using_postgres
+    ph = "%s" if using_postgres() else "?"
+
     with connect() as conn:
         cur = conn.cursor()
 
-        from .db import using_postgres
+        # --- categorie ---
+        cats_sql = "SELECT DISTINCT category FROM products"
+        cats_params = []
+        if active_store != "ALL":
+            cats_sql += f" WHERE store = {ph}"
+            cats_params.append(active_store)
+        cats_sql += " ORDER BY category"
 
-ph = "%s" if using_postgres() else "?"
+        if cats_params:
+            cats = [r["category"] for r in cur.execute(cats_sql, tuple(cats_params)).fetchall()]
+        else:
+            cats = [r["category"] for r in cur.execute(cats_sql).fetchall()]
 
-cats_sql = "SELECT DISTINCT category FROM products"
-cats_params = []
-if active_store != "ALL":
-    cats_sql += f" WHERE store = {ph}"
-    cats_params.append(active_store)
-cats_sql += " ORDER BY category"
-
-if cats_params:
-    cats = [r["category"] for r in cur.execute(cats_sql, tuple(cats_params)).fetchall()]
-else:
-    cats = [r["category"] for r in cur.execute(cats_sql).fetchall()]
-
+        # --- prodotti ---
         sql = "SELECT * FROM products WHERE 1=1"
         params = []
+
         if active_store != "ALL":
-            sql += " AND store = ?"
+            sql += f" AND store = {ph}"
             params.append(active_store)
+
         if cat != "ALL":
-            sql += " AND category = ?"
+            sql += f" AND category = {ph}"
             params.append(cat)
+
         if q:
-            sql += " AND (lower(name) LIKE ? OR lower(category) LIKE ?)"
+            sql += f" AND (lower(name) LIKE {ph} OR lower(category) LIKE {ph})"
             params.extend([f"%{q}%", f"%{q}%"])
+
         if only_low:
             sql += " AND qty <= min_qty"
-        sql += " ORDER BY category, name"
 
-        items = cur.execute(sql, params).fetchall()
+        sql += " ORDER BY category, name"
+        items = cur.execute(sql, tuple(params)).fetchall()
 
     return render(
         "inventario.html",
@@ -680,6 +685,7 @@ else:
         can_edit=(active_store != "ALL"),
         brand=active_store if active_store != "ALL" else "spinza",
     )
+
 
 @app.post("/items/{item_id}/delta")
 def item_delta(request: Request, item_id: int, delta: float = Form(...)):
