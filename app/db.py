@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
@@ -5,17 +6,17 @@ from contextlib import contextmanager
 # =========================
 # CONFIG
 # =========================
-
-BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "spinza.db"
+# Su Render usa disco persistente /var/data (consigliato)
+DEFAULT_DB_PATH = "/var/data/spinza.db"
+DB_PATH = Path(os.getenv("DB_PATH", DEFAULT_DB_PATH))
 
 # =========================
 # CONNECTION
 # =========================
-
 @contextmanager
 def connect():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -26,15 +27,14 @@ def connect():
 # =========================
 # ENSURE DB EXISTS
 # =========================
-
 def ensure_db_exists():
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not DB_PATH.exists():
         DB_PATH.touch()
 
 # =========================
 # INIT DB
 # =========================
-
 def init_db():
     ensure_db_exists()
 
@@ -47,8 +47,12 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             store TEXT NOT NULL,
             username TEXT NOT NULL,
-            password TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'staff',
+
+            pw_salt TEXT,
+            pw_hash TEXT,
+            legacy_sha256 TEXT,
+
             created_at TEXT DEFAULT (datetime('now'))
         )
         """)
