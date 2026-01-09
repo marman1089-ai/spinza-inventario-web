@@ -122,14 +122,61 @@ def ensure_admin_user():
 # =========================
 @app.on_event("startup")
 def _startup():
+    import os
+    from .db import init_db, ensure_db_exists, using_postgres, connect
+    from .security import make_password
+
+    print("====================================")
+    print("[STARTUP] Applicazione avviata")
+
+    db_url = os.getenv("DATABASE_URL")
+    print("[STARTUP] DATABASE_URL presente:", bool(db_url))
+    print("[STARTUP] DB TYPE:", "POSTGRES (Supabase)" if using_postgres() else "SQLITE (ATTENZIONE)")
+
     ensure_db_exists()
     init_db()
-    # Admin sempre disponibile (Render Free friendly)
-    ensure_admin_user()
+    print("[STARTUP] init_db() completato")
 
+    # === ADMIN FISSO (sempre disponibile) ===
+    admin_username = os.getenv("ADMIN_USERNAME", "admin")
+    admin_password = os.getenv("ADMIN_PASSWORD", "spinza2025")
+
+    with connect() as conn:
+        cur = conn.cursor()
+
+        if using_postgres():
+            row = cur.execute(
+                "SELECT id FROM users WHERE username=%s AND role='admin'",
+                (admin_username,),
+            ).fetchone()
+        else:
+            row = cur.execute(
+                "SELECT id FROM users WHERE username=? AND role='admin'",
+                (admin_username,),
+            ).fetchone()
+
+        if not row:
+            salt, h = make_password(admin_password)
+            if using_postgres():
+                cur.execute(
+                    "INSERT INTO users(store, username, role, pw_salt, pw_hash) VALUES(%s,%s,'admin',%s,%s)",
+                    ("spinza", admin_username, salt, h),
+                )
+            else:
+                cur.execute(
+                    "INSERT INTO users(store, username, role, pw_salt, pw_hash) VALUES(?,?,'admin',?,?)",
+                    ("spinza", admin_username, salt, h),
+                )
+            print(f"[STARTUP] Admin '{admin_username}' CREATO")
+        else:
+            print(f"[STARTUP] Admin '{admin_username}' già esistente")
+
+    # Migrazione opzionale (se la usi)
     if os.environ.get("MIGRATE_ON_START") == "1":
         data_dir = os.environ.get("OLD_DATA_DIR", ".")
         run_migration(data_dir)
+
+    print("====================================")
 
 
 # =========================
