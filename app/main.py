@@ -9,7 +9,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.status import HTTP_303_SEE_OTHER
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from .db import connect, init_db, ensure_db_exists
+from .db import connect, init_db, ensure_db_exists, using_postgres
 from .security import verify_password, legacy_sha256, make_password
 from .migrate_from_old import run_migration
 
@@ -39,6 +39,16 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+
+
+# =========================
+# DB HELPERS (SQLITE/POSTGRES)
+# =========================
+def _ph() -> str:
+    return "%s" if using_postgres() else "?"
+
+def _now() -> str:
+    return "NOW()" if using_postgres() else "datetime('now')"
 
 
 # =========================
@@ -74,46 +84,52 @@ def _render_admin(request: Request, *, user, users, msg=None, error=None):
         brand=admin_store,
     )
 
+def _admin_users_render_error(request: Request, user, error_msg: str):
+    with connect() as conn:
+        cur = conn.cursor()
+        users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
+    return _render_admin(request, user=user, users=users, error=error_msg)
+
 
 # =========================
 # ADMIN BOOTSTRAP (NO SHELL NEEDED)
 # =========================
 def ensure_admin_user():
     """
-    Crea (se manca) l'admin con credenziali fisse o da ENV.
-    - Default richiesto: admin / spinza2025
-    - Se vuoi cambiare senza modificare codice, usa ENV:
-        ADMIN_USERNAME, ADMIN_PASSWORD
-    - Se vuoi forzare reset password, usa:
-        RESET_ADMIN=1
-      (poi rimettilo a 0 o eliminalo)
+    Admin fisso:
+      username: admin
+      password: spinza2025
+    Modificabili con ENV:
+      ADMIN_USERNAME, ADMIN_PASSWORD
+    Reset forzato con:
+      RESET_ADMIN=1
     """
     admin_user = os.environ.get("ADMIN_USERNAME", "admin").strip()
     admin_pass = os.environ.get("ADMIN_PASSWORD", "spinza2025").strip()
     reset = os.environ.get("RESET_ADMIN", "0").strip() == "1"
-
     if not admin_user or not admin_pass:
         return
 
     salt, h = make_password(admin_pass)
+    ph = _ph()
 
     with connect() as conn:
         cur = conn.cursor()
         row = cur.execute(
-            "SELECT id FROM users WHERE username=? AND role='admin'",
+            f"SELECT id FROM users WHERE username={ph} AND role='admin'",
             (admin_user,),
         ).fetchone()
 
         if row:
             if reset:
                 cur.execute(
-                    "UPDATE users SET pw_salt=?, pw_hash=?, legacy_sha256=NULL, store=?, role='admin' WHERE id=?",
+                    f"UPDATE users SET pw_salt={ph}, pw_hash={ph}, legacy_sha256=NULL, store={ph}, role='admin' WHERE id={ph}",
                     (salt, h, "spinza", row["id"]),
                 )
         else:
             cur.execute(
-                "INSERT INTO users(store, username, role, pw_salt, pw_hash, legacy_sha256) VALUES(?,?,?,?,?,NULL)",
-                ("spinza", admin_user, "admin", salt, h),
+                f"INSERT INTO users(store, username, role, pw_salt, pw_hash, legacy_sha256) VALUES({ph},{ph},'admin',{ph},{ph},NULL)",
+                ("spinza", admin_user, salt, h),
             )
 
 
@@ -122,13 +138,8 @@ def ensure_admin_user():
 # =========================
 @app.on_event("startup")
 def _startup():
-    import os
-    from .db import init_db, ensure_db_exists, using_postgres, connect
-    from .security import make_password
-
     print("====================================")
     print("[STARTUP] Applicazione avviata")
-
     db_url = os.getenv("DATABASE_URL")
     print("[STARTUP] DATABASE_URL presente:", bool(db_url))
     print("[STARTUP] DB TYPE:", "POSTGRES (Supabase)" if using_postgres() else "SQLITE (ATTENZIONE)")
@@ -137,44 +148,13 @@ def _startup():
     init_db()
     print("[STARTUP] init_db() completato")
 
-    # === ADMIN FISSO (sempre disponibile) ===
-    admin_username = os.getenv("ADMIN_USERNAME", "admin")
-    admin_password = os.getenv("ADMIN_PASSWORD", "spinza2025")
+    ensure_admin_user()
+    print("[STARTUP] ensure_admin_user() completato")
 
-    with connect() as conn:
-        cur = conn.cursor()
-
-        if using_postgres():
-            row = cur.execute(
-                "SELECT id FROM users WHERE username=%s AND role='admin'",
-                (admin_username,),
-            ).fetchone()
-        else:
-            row = cur.execute(
-                "SELECT id FROM users WHERE username=? AND role='admin'",
-                (admin_username,),
-            ).fetchone()
-
-        if not row:
-            salt, h = make_password(admin_password)
-            if using_postgres():
-                cur.execute(
-                    "INSERT INTO users(store, username, role, pw_salt, pw_hash) VALUES(%s,%s,'admin',%s,%s)",
-                    ("spinza", admin_username, salt, h),
-                )
-            else:
-                cur.execute(
-                    "INSERT INTO users(store, username, role, pw_salt, pw_hash) VALUES(?,?,'admin',?,?)",
-                    ("spinza", admin_username, salt, h),
-                )
-            print(f"[STARTUP] Admin '{admin_username}' CREATO")
-        else:
-            print(f"[STARTUP] Admin '{admin_username}' già esistente")
-
-    # Migrazione opzionale (se la usi)
     if os.environ.get("MIGRATE_ON_START") == "1":
         data_dir = os.environ.get("OLD_DATA_DIR", ".")
         run_migration(data_dir)
+        print("[STARTUP] Migrazione completata")
 
     print("====================================")
 
@@ -210,25 +190,26 @@ def login_post(request: Request, username: str = Form(...), password: str = Form
     if not store or store not in STORES:
         return RedirectResponse("/select-store", status_code=HTTP_303_SEE_OTHER)
 
+    ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
         row = cur.execute(
-            "SELECT * FROM users WHERE username = ? AND store = ?",
-            (username, store)
+            f"SELECT * FROM users WHERE username={ph} AND store={ph}",
+            (username, store),
         ).fetchone()
 
         if not row:
             return render("login.html", error="Credenziali non valide.", store=store, store_label=STORES[store], brand=store)
 
         ok = False
-        if row["pw_salt"] and row["pw_hash"]:
+        if row.get("pw_salt") and row.get("pw_hash"):
             ok = verify_password(password, row["pw_salt"], row["pw_hash"])
-        elif row["legacy_sha256"]:
+        elif row.get("legacy_sha256"):
             ok = (legacy_sha256(password) == row["legacy_sha256"])
             if ok:
                 salt, h = make_password(password)
                 cur.execute(
-                    "UPDATE users SET pw_salt=?, pw_hash=?, legacy_sha256=NULL WHERE id=?",
+                    f"UPDATE users SET pw_salt={ph}, pw_hash={ph}, legacy_sha256=NULL WHERE id={ph}",
                     (salt, h, row["id"]),
                 )
 
@@ -273,19 +254,20 @@ def register_post(
         return render("register.html", error="Password troppo corta.", ok=False, user=None, store=store, store_label=STORES[store], brand=store)
 
     salt, h = make_password(password)
+    ph = _ph()
 
     with connect() as conn:
         cur = conn.cursor()
         exists = cur.execute(
-            "SELECT 1 FROM users WHERE username = ? AND store = ?",
-            (username, store)
+            f"SELECT 1 FROM users WHERE username={ph} AND store={ph}",
+            (username, store),
         ).fetchone()
         if exists:
             return render("register.html", error="Username già esistente.", ok=False, user=None, store=store, store_label=STORES[store], brand=store)
 
         cur.execute(
-            "INSERT INTO users(store, username, role, pw_salt, pw_hash, legacy_sha256) VALUES(?,?,?,?,?,NULL)",
-            (store, username, "staff", salt, h),
+            f"INSERT INTO users(store, username, role, pw_salt, pw_hash, legacy_sha256) VALUES({ph},{ph},'staff',{ph},{ph},NULL)",
+            (store, username, salt, h),
         )
 
     return render("register.html", error=None, ok=True, user=None, store=store, store_label=STORES[store], brand=store)
@@ -301,11 +283,12 @@ def admin_login_get(request: Request):
 @app.post("/admin-login", response_class=HTMLResponse)
 def admin_login_post(request: Request, username: str = Form(...), password: str = Form(...)):
     username = username.strip()
+    ph = _ph()
 
     with connect() as conn:
         cur = conn.cursor()
         row = cur.execute(
-            "SELECT * FROM users WHERE username = ? AND role='admin'",
+            f"SELECT * FROM users WHERE username={ph} AND role='admin'",
             (username,),
         ).fetchone()
 
@@ -313,14 +296,14 @@ def admin_login_post(request: Request, username: str = Form(...), password: str 
             return render("admin_login.html", error="Credenziali admin non valide.", user=None)
 
         ok = False
-        if row["pw_salt"] and row["pw_hash"]:
+        if row.get("pw_salt") and row.get("pw_hash"):
             ok = verify_password(password, row["pw_salt"], row["pw_hash"])
-        elif row["legacy_sha256"]:
+        elif row.get("legacy_sha256"):
             ok = (legacy_sha256(password) == row["legacy_sha256"])
             if ok:
                 salt, h = make_password(password)
                 cur.execute(
-                    "UPDATE users SET pw_salt=?, pw_hash=?, legacy_sha256=NULL WHERE id=?",
+                    f"UPDATE users SET pw_salt={ph}, pw_hash={ph}, legacy_sha256=NULL WHERE id={ph}",
                     (salt, h, row["id"]),
                 )
 
@@ -377,32 +360,25 @@ def admin_add_user(
         store = "spinza"
 
     salt, h = make_password(password)
+    ph = _ph()
 
     with connect() as conn:
         cur = conn.cursor()
         exists = cur.execute(
-            "SELECT 1 FROM users WHERE username=? AND store=?",
-            (username, store)
+            f"SELECT 1 FROM users WHERE username={ph} AND store={ph}",
+            (username, store),
         ).fetchone()
         if exists:
             users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
             return _render_admin(request, user=user, users=users, error="Username già esistente.")
 
         cur.execute(
-            "INSERT INTO users(store, username, role, pw_salt, pw_hash, legacy_sha256) VALUES(?,?,?,?,?,NULL)",
-            (store, username, "staff", salt, h),
+            f"INSERT INTO users(store, username, role, pw_salt, pw_hash, legacy_sha256) VALUES({ph},{ph},'staff',{ph},{ph},NULL)",
+            (store, username, salt, h),
         )
         users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
 
     return _render_admin(request, user=user, users=users, msg=f"Utente '{username}' creato per {STORES.get(store, store)}.")
-
-
-def _admin_users_render_error(request: Request, user, error_msg: str):
-    with connect() as conn:
-        cur = conn.cursor()
-        users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
-    return _render_admin(request, user=user, users=users, error=error_msg)
-
 
 @app.post("/admin/users/{user_id}/username", response_class=HTMLResponse)
 def admin_change_username(
@@ -420,22 +396,29 @@ def admin_change_username(
     if not new_username:
         return _admin_users_render_error(request, user, "Username non valido.")
 
+    ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
-        target = cur.execute("SELECT id, store, username, role FROM users WHERE id=?", (int(user_id),)).fetchone()
+        target = cur.execute(
+            f"SELECT id, store, username, role FROM users WHERE id={ph}",
+            (int(user_id),),
+        ).fetchone()
         if not target:
             return _admin_users_render_error(request, user, "Utente non trovato.")
         if target["role"] == "admin":
             return _admin_users_render_error(request, user, "Lo username admin si cambia dal Profilo.")
 
         exists = cur.execute(
-            "SELECT 1 FROM users WHERE store=? AND username=? AND id<>?",
+            f"SELECT 1 FROM users WHERE store={ph} AND username={ph} AND id<>{ph}",
             (target["store"], new_username, int(user_id)),
         ).fetchone()
         if exists:
             return _admin_users_render_error(request, user, "Username già esistente in questo negozio.")
 
-        cur.execute("UPDATE users SET username=? WHERE id=?", (new_username, int(user_id)))
+        cur.execute(
+            f"UPDATE users SET username={ph} WHERE id={ph}",
+            (new_username, int(user_id)),
+        )
 
         users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
 
@@ -463,16 +446,19 @@ def admin_change_password(
         return _admin_users_render_error(request, user, "Le password non coincidono.")
 
     salt, h = make_password(new_password)
+    ph = _ph()
 
     with connect() as conn:
         cur = conn.cursor()
-        target = cur.execute("SELECT id, store, username, role FROM users WHERE id=?", (int(user_id),)).fetchone()
+        target = cur.execute(
+            f"SELECT id, store, username, role FROM users WHERE id={ph}",
+            (int(user_id),),
+        ).fetchone()
         if not target:
             return _admin_users_render_error(request, user, "Utente non trovato.")
 
-        # admin può cambiare anche la propria password
         cur.execute(
-            "UPDATE users SET pw_salt=?, pw_hash=?, legacy_sha256=NULL WHERE id=?",
+            f"UPDATE users SET pw_salt={ph}, pw_hash={ph}, legacy_sha256=NULL WHERE id={ph}",
             (salt, h, int(user_id)),
         )
         users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
@@ -493,11 +479,15 @@ def admin_delete_user(request: Request, user_id: int):
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
     msg = None
+    ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
-        target = cur.execute("SELECT id, store, username, role FROM users WHERE id=?", (int(user_id),)).fetchone()
+        target = cur.execute(
+            f"SELECT id, store, username, role FROM users WHERE id={ph}",
+            (int(user_id),),
+        ).fetchone()
         if target and target["role"] != "admin":
-            cur.execute("DELETE FROM users WHERE id=?", (int(user_id),))
+            cur.execute(f"DELETE FROM users WHERE id={ph}", (int(user_id),))
             msg = f"Utente '{target['username']}' eliminato."
         users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
 
@@ -545,14 +535,14 @@ def profile_change_password(
     if len(new_password) < 4:
         return render("profile.html", user=user, msg=None, error="Password troppo corta.", brand=brand)
 
+    ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
-        # Admin by id, staff by store+username
         if user.get("role") == "admin" and user.get("id"):
-            row = cur.execute("SELECT * FROM users WHERE id=?", (int(user["id"]),)).fetchone()
+            row = cur.execute(f"SELECT * FROM users WHERE id={ph}", (int(user["id"]),)).fetchone()
         else:
             row = cur.execute(
-                "SELECT * FROM users WHERE username=? AND store=?",
+                f"SELECT * FROM users WHERE username={ph} AND store={ph}",
                 (user["username"], user.get("store")),
             ).fetchone()
 
@@ -561,9 +551,9 @@ def profile_change_password(
             return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
         ok = False
-        if row["pw_salt"] and row["pw_hash"]:
+        if row.get("pw_salt") and row.get("pw_hash"):
             ok = verify_password(current_password, row["pw_salt"], row["pw_hash"])
-        elif row["legacy_sha256"]:
+        elif row.get("legacy_sha256"):
             ok = (legacy_sha256(current_password) == row["legacy_sha256"])
 
         if not ok:
@@ -571,7 +561,7 @@ def profile_change_password(
 
         salt, h = make_password(new_password)
         cur.execute(
-            "UPDATE users SET pw_salt=?, pw_hash=?, legacy_sha256=NULL WHERE id=?",
+            f"UPDATE users SET pw_salt={ph}, pw_hash={ph}, legacy_sha256=NULL WHERE id={ph}",
             (salt, h, int(row["id"])),
         )
 
@@ -593,16 +583,20 @@ def profile_change_username(request: Request, new_username: str = Form(...)):
     if not new_username:
         return render("profile.html", user=user, msg=None, error="Username non valido.", brand=brand)
 
+    ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
         exists = cur.execute(
-            "SELECT 1 FROM users WHERE role='admin' AND username=? AND id<>?",
+            f"SELECT 1 FROM users WHERE role='admin' AND username={ph} AND id<>{ph}",
             (new_username, int(user.get("id", -1))),
         ).fetchone()
         if exists:
             return render("profile.html", user=user, msg=None, error="Username admin già esistente.", brand=brand)
 
-        cur.execute("UPDATE users SET username=? WHERE id=?", (new_username, int(user.get("id"))))
+        cur.execute(
+            f"UPDATE users SET username={ph} WHERE id={ph}",
+            (new_username, int(user.get("id"))),
+        )
 
     request.session["user"]["username"] = new_username
     return render("profile.html", user=request.session["user"], msg="Username aggiornato.", error=None, brand=brand)
@@ -629,9 +623,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
 
     q = (q or "").strip().lower()
     cat = (cat or "ALL").strip()
-
-    from .db import using_postgres
-    ph = "%s" if using_postgres() else "?"
+    ph = _ph()
 
     with connect() as conn:
         cur = conn.cursor()
@@ -640,25 +632,23 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
         cats_sql = "SELECT DISTINCT category FROM products"
         cats_params = []
         if active_store != "ALL":
-            cats_sql += f" WHERE store = {ph}"
+            cats_sql += f" WHERE store={ph}"
             cats_params.append(active_store)
         cats_sql += " ORDER BY category"
 
-        if cats_params:
-            cats = [r["category"] for r in cur.execute(cats_sql, tuple(cats_params)).fetchall()]
-        else:
-            cats = [r["category"] for r in cur.execute(cats_sql).fetchall()]
+        cats = [r["category"] for r in cur.execute(cats_sql, tuple(cats_params)).fetchall()] if cats_params \
+               else [r["category"] for r in cur.execute(cats_sql).fetchall()]
 
         # --- prodotti ---
         sql = "SELECT * FROM products WHERE 1=1"
         params = []
 
         if active_store != "ALL":
-            sql += f" AND store = {ph}"
+            sql += f" AND store={ph}"
             params.append(active_store)
 
         if cat != "ALL":
-            sql += f" AND category = {ph}"
+            sql += f" AND category={ph}"
             params.append(cat)
 
         if q:
@@ -698,9 +688,15 @@ def item_delta(request: Request, item_id: int, delta: float = Form(...)):
     if not active_store or active_store == "ALL":
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
+    ph = _ph()
+    now = _now()
+
     with connect() as conn:
         cur = conn.cursor()
-        row = cur.execute("SELECT * FROM products WHERE id=? AND store=?", (int(item_id), active_store)).fetchone()
+        row = cur.execute(
+            f"SELECT * FROM products WHERE id={ph} AND store={ph}",
+            (int(item_id), active_store),
+        ).fetchone()
         if not row:
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
@@ -708,9 +704,12 @@ def item_delta(request: Request, item_id: int, delta: float = Form(...)):
         if new_qty < 0:
             new_qty = 0.0
 
-        cur.execute("UPDATE products SET qty=? WHERE id=?", (new_qty, int(item_id)))
         cur.execute(
-            "INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES(datetime('now'),?,?,?,?,?,?)",
+            f"UPDATE products SET qty={ph}, updated_at={now} WHERE id={ph}",
+            (new_qty, int(item_id)),
+        )
+        cur.execute(
+            f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
             (active_store, user["username"], "DELTA", row["category"], row["name"], float(delta)),
         )
 
@@ -727,15 +726,24 @@ def item_set(request: Request, item_id: int, qty: float = Form(...)):
     if not active_store or active_store == "ALL":
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
+    ph = _ph()
+    now = _now()
+
     with connect() as conn:
         cur = conn.cursor()
-        row = cur.execute("SELECT * FROM products WHERE id=? AND store=?", (int(item_id), active_store)).fetchone()
+        row = cur.execute(
+            f"SELECT * FROM products WHERE id={ph} AND store={ph}",
+            (int(item_id), active_store),
+        ).fetchone()
         if not row:
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
-        cur.execute("UPDATE products SET qty=? WHERE id=?", (float(qty), int(item_id)))
         cur.execute(
-            "INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES(datetime('now'),?,?,?,?,?,?)",
+            f"UPDATE products SET qty={ph}, updated_at={now} WHERE id={ph}",
+            (float(qty), int(item_id)),
+        )
+        cur.execute(
+            f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
             (active_store, user["username"], "SET", row["category"], row["name"], float(qty)),
         )
 
@@ -761,16 +769,20 @@ def item_add(
     category = category.strip()
     name = name.strip()
 
+    ph = _ph()
+    now = _now()
+
     with connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            """INSERT INTO products(store, category, name, qty, min_qty)
-               VALUES(?,?,?,?,?)
-               ON CONFLICT(store, category, name) DO UPDATE SET qty=excluded.qty, min_qty=excluded.min_qty""",
+            f"""INSERT INTO products(store, category, name, qty, min_qty, updated_at)
+                VALUES({ph},{ph},{ph},{ph},{ph},{now})
+                ON CONFLICT(store, category, name)
+                DO UPDATE SET qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
             (active_store, category, name, float(qty), float(min_qty)),
         )
         cur.execute(
-            "INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES(datetime('now'),?,?,?,?,?,?)",
+            f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
             (active_store, user["username"], "ADD", category, name, float(qty)),
         )
 
@@ -796,18 +808,24 @@ def item_edit(
     category = category.strip()
     name = name.strip()
 
+    ph = _ph()
+    now = _now()
+
     with connect() as conn:
         cur = conn.cursor()
-        row = cur.execute("SELECT * FROM products WHERE id=? AND store=?", (int(item_id), active_store)).fetchone()
+        row = cur.execute(
+            f"SELECT * FROM products WHERE id={ph} AND store={ph}",
+            (int(item_id), active_store),
+        ).fetchone()
         if not row:
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
         cur.execute(
-            "UPDATE products SET category=?, name=?, min_qty=? WHERE id=?",
+            f"UPDATE products SET category={ph}, name={ph}, min_qty={ph}, updated_at={now} WHERE id={ph}",
             (category, name, float(min_qty), int(item_id)),
         )
         cur.execute(
-            "INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES(datetime('now'),?,?,?,?,?,?)",
+            f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
             (active_store, user["username"], "EDIT", category, name, float(min_qty)),
         )
 
@@ -824,13 +842,19 @@ def item_delete(request: Request, item_id: int):
     if not active_store or active_store == "ALL":
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
+    ph = _ph()
+    now = _now()
+
     with connect() as conn:
         cur = conn.cursor()
-        row = cur.execute("SELECT * FROM products WHERE id=? AND store=?", (int(item_id), active_store)).fetchone()
+        row = cur.execute(
+            f"SELECT * FROM products WHERE id={ph} AND store={ph}",
+            (int(item_id), active_store),
+        ).fetchone()
         if row:
-            cur.execute("DELETE FROM products WHERE id=?", (int(item_id),))
+            cur.execute(f"DELETE FROM products WHERE id={ph}", (int(item_id),))
             cur.execute(
-                "INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES(datetime('now'),?,?,?,?,?,?)",
+                f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
                 (active_store, user["username"], "DELETE", row["category"], row["name"], 0.0),
             )
 
@@ -851,10 +875,11 @@ def export_csv(request: Request):
     if not active_store or active_store == "ALL":
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
+    ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
         rows = cur.execute(
-            "SELECT category, name, qty, min_qty FROM products WHERE store=? ORDER BY category, name",
+            f"SELECT category, name, qty, min_qty FROM products WHERE store={ph} ORDER BY category, name",
             (active_store,),
         ).fetchall()
 
@@ -885,10 +910,12 @@ async def import_csv(request: Request, file: UploadFile = File(...)):
     buf = io.StringIO(content)
     reader = csv.DictReader(buf)
 
+    ph = _ph()
+    now = _now()
     count = 0
+
     with connect() as conn:
         cur = conn.cursor()
-
         for row in reader:
             cat = (row.get("category") or row.get("Categoria") or "").strip()
             name = (row.get("name") or row.get("Prodotto") or "").strip()
@@ -904,15 +931,16 @@ async def import_csv(request: Request, file: UploadFile = File(...)):
                 min_qty = 0.0
 
             cur.execute(
-                """INSERT INTO products(store, category, name, qty, min_qty)
-                   VALUES(?,?,?,?,?)
-                   ON CONFLICT(store, category, name) DO UPDATE SET qty=excluded.qty, min_qty=excluded.min_qty""",
+                f"""INSERT INTO products(store, category, name, qty, min_qty, updated_at)
+                    VALUES({ph},{ph},{ph},{ph},{ph},{now})
+                    ON CONFLICT(store, category, name)
+                    DO UPDATE SET qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
                 (active_store, cat, name, qty, min_qty),
             )
             count += 1
 
         cur.execute(
-            "INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES(datetime('now'),?,?,?,?,?,?)",
+            f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
             (active_store, user["username"], "IMPORT", "CSV", file.filename or "upload", float(count)),
         )
 
@@ -930,9 +958,13 @@ def logs_page(request: Request, limit: int = 200):
     if not is_admin(request):
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
+    ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
-        rows = cur.execute("SELECT * FROM logs ORDER BY id DESC LIMIT ?", (int(limit),)).fetchall()
+        rows = cur.execute(
+            f"SELECT * FROM logs ORDER BY id DESC LIMIT {ph}",
+            (int(limit),),
+        ).fetchall()
 
     brand = request.session.get("active_store") or "spinza"
     return render("logs.html", user=user, rows=rows, limit=limit, stores=STORES, brand=brand)
