@@ -534,8 +534,9 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
     q = (q or "").strip().lower()
     cat = (cat or "ALL").strip()
 
-    conn = connect()
+with connect() as conn:
     cur = conn.cursor()
+
 
     cats_sql = "SELECT DISTINCT category FROM products"
     cats_params = []
