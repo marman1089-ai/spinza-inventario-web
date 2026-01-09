@@ -633,13 +633,21 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
     with connect() as conn:
         cur = conn.cursor()
 
-        cats_sql = "SELECT DISTINCT category FROM products"
-        cats_params = []
-        if active_store != "ALL":
-            cats_sql += " WHERE store = ?"
-            cats_params.append(active_store)
-        cats_sql += " ORDER BY category"
-        cats = [r["category"] for r in cur.execute(cats_sql, cats_params).fetchall()]
+        from .db import using_postgres
+
+ph = "%s" if using_postgres() else "?"
+
+cats_sql = "SELECT DISTINCT category FROM products"
+cats_params = []
+if active_store != "ALL":
+    cats_sql += f" WHERE store = {ph}"
+    cats_params.append(active_store)
+cats_sql += " ORDER BY category"
+
+if cats_params:
+    cats = [r["category"] for r in cur.execute(cats_sql, tuple(cats_params)).fetchall()]
+else:
+    cats = [r["category"] for r in cur.execute(cats_sql).fetchall()]
 
         sql = "SELECT * FROM products WHERE 1=1"
         params = []
