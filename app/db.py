@@ -9,7 +9,6 @@ from contextlib import contextmanager
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "spinza.db"
 
-
 # =========================
 # CONNECTION
 # =========================
@@ -24,12 +23,21 @@ def connect():
     finally:
         conn.close()
 
+# =========================
+# ENSURE DB EXISTS
+# =========================
+
+def ensure_db_exists():
+    if not DB_PATH.exists():
+        DB_PATH.touch()
 
 # =========================
 # INIT DB
 # =========================
 
 def init_db():
+    ensure_db_exists()
+
     with connect() as db:
         cur = db.cursor()
 
