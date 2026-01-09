@@ -1,5 +1,4 @@
 import sqlite3
-import os
 from pathlib import Path
 from contextlib import contextmanager
 
@@ -79,3 +78,6 @@ def init_db():
             action TEXT NOT NULL,
             category TEXT NOT NULL,
             name TEXT NOT NULL,
+            delta REAL NOT NULL
+        )
+        """)
