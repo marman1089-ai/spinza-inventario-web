@@ -13,6 +13,36 @@ from .db import connect, init_db
 from .security import verify_password, legacy_sha256, make_password
 from .migrate_from_old import run_migration
 
+def ensure_admin_user():
+    admin_user = os.environ.get("ADMIN_USERNAME", "").strip()
+    admin_pass = os.environ.get("ADMIN_PASSWORD", "").strip()
+    reset = os.environ.get("RESET_ADMIN", "0").strip() == "1"
+
+    if not admin_user or not admin_pass:
+        return
+
+    salt, h = make_password(admin_pass)
+
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(
+            "SELECT id FROM users WHERE username=? AND role='admin'",
+            (admin_user,),
+        ).fetchone()
+
+        if row:
+            if reset:
+                cur.execute(
+                    "UPDATE users SET pw_salt=?, pw_hash=?, legacy_sha256=NULL, store=?, role='admin' WHERE id=?",
+                    (salt, h, "spinza", row["id"]),
+                )
+        else:
+            cur.execute(
+                "INSERT INTO users(store, username, role, pw_salt, pw_hash, legacy_sha256) VALUES(?,?,?,?,?,NULL)",
+                ("spinza", admin_user, "admin", salt, h),
+            )
+
+
 BASE_DIR = os.path.dirname(__file__)
 templates = Environment(
     loader=FileSystemLoader(os.path.join(BASE_DIR, "templates")),
