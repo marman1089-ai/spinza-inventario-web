@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% set title = "Scegli sezione" %}
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top:0">Scegli sezione</h2>
+    <div class="muted">Separa rapidamente <strong>sala</strong> e <strong>cucina</strong>: scegli dove vuoi lavorare adesso.</div>
+
+    <div class="row" style="margin-top:16px;gap:14px;">
+      <a href="/select-area?area=bibite" style="text-decoration:none;color:#111;flex:1;min-width:240px;">
+        <div class="card" style="margin:0;">
+          <h3 style="margin:0 0 6px 0">🥤 Bibite</h3>
+          <div class="muted">Sezione Sala / Bar</div>
+        </div>
+      </a>
+      <a href="/select-area?area=prodotti" style="text-decoration:none;color:#111;flex:1;min-width:240px;">
+        <div class="card" style="margin:0;">
+          <h3 style="margin:0 0 6px 0">🍽️ Prodotti</h3>
+          <div class="muted">Sezione Cucina</div>
+        </div>
+      </a>
+    </div>
+  </div>
+{% endblock %}

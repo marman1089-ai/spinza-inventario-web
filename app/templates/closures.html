@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% set title = "Chiusure" %}
+{% block content %}
+  <div class="card" style="margin-bottom:12px;">
+    <form method="get" action="/chiusure">
+      <div class="row">
+        <input name="q" value="{{ q or '' }}" placeholder="Cerca data (es. 23/01/2026 o 2026-01-23)" style="flex:1;min-width:240px" />
+        <button class="btn2" type="submit">Cerca</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <h2 style="margin-top:0">📸 Foto chiusure</h2>
+    <div class="muted">Carica la foto della chiusura, imposta la data e la ritrovi subito con la ricerca.</div>
+
+    <form method="post" action="/chiusure/upload" enctype="multipart/form-data" style="margin-top:12px;">
+      <div class="row">
+        <input type="date" name="closure_date" required />
+        <input type="file" name="file" accept="image/*" capture="environment" required />
+        <button class="btn" type="submit">Carica</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Archivio</h3>
+    <div style="overflow:auto;margin-top:8px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>File</th>
+            <th>Caricato da</th>
+            <th>Quando</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+            <tr>
+              <td><strong>{{ r.closure_date }}</strong></td>
+              <td><a class="pill" href="/chiusure/{{ r.id }}" target="_blank" style="text-decoration:none;color:#111">Apri</a> <span class="muted">{{ r.filename or '' }}</span></td>
+              <td>{{ r.uploaded_by }}</td>
+              <td class="muted">{{ r.ts }}</td>
+            </tr>
+          {% endfor %}
+          {% if not rows %}
+            <tr><td colspan="4" class="muted">Nessuna chiusura trovata.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

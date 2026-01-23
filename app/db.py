@@ -114,6 +114,7 @@ def init_db():
             store TEXT NOT NULL,
             category TEXT NOT NULL,
             name TEXT NOT NULL,
+            area TEXT NOT NULL DEFAULT 'prodotti',
             qty DOUBLE PRECISION NOT NULL DEFAULT 0,
             min_qty DOUBLE PRECISION NOT NULL DEFAULT 0,
             updated_at TIMESTAMP DEFAULT now()
@@ -123,6 +124,42 @@ def init_db():
         cur.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS ux_products_store_cat_name
         ON products(store, category, name)
+        """)
+
+        # --- MIGRATION SAFE: ensure 'area' column exists on older DBs ---
+        # SQLite e Postgres supportano entrambi "ALTER TABLE ... ADD COLUMN".
+        try:
+            cur.execute("ALTER TABLE products ADD COLUMN area TEXT NOT NULL DEFAULT 'prodotti'")
+        except Exception:
+            # Colonna già esistente
+            pass
+
+        # NEW: documenti (chiusure) con allegato persistente in DB
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS closures (
+            id SERIAL PRIMARY KEY,
+            store TEXT NOT NULL,
+            closure_date DATE NOT NULL,
+            uploaded_by TEXT NOT NULL,
+            ts TIMESTAMP DEFAULT now(),
+            filename TEXT,
+            content_type TEXT,
+            data BYTEA
+        )
+        """)
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS invoices_docs (
+            id SERIAL PRIMARY KEY,
+            store TEXT NOT NULL,
+            supplier TEXT NOT NULL,
+            doc_date DATE NOT NULL,
+            uploaded_by TEXT NOT NULL,
+            ts TIMESTAMP DEFAULT now(),
+            filename TEXT,
+            content_type TEXT,
+            data BYTEA
+        )
         """)
 
         # LOGS

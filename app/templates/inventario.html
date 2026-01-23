@@ -4,6 +4,9 @@
   <div class="card" style="margin-bottom:12px;">
     <form method="get" action="/inventario">
       <div class="row">
+        <a class="pill" href="/select-area" style="text-decoration:none;color:#111">
+          🧭 {{ areas.get(area, area) }}
+        </a>
         {% if admin %}
           <select name="store">
             <option value="ALL" {% if active_store=='ALL' %}selected{% endif %}>Tutti gli inventari</option>

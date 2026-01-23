@@ -1,6 +1,7 @@
 import os
 import csv
 import io
+from datetime import date
 
 from fastapi import FastAPI, Request, Form, UploadFile, File
 from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse
@@ -62,6 +63,12 @@ def get_selected_store(request: Request):
 
 def set_selected_store(request: Request, store: str):
     request.session["selected_store"] = store
+
+def get_selected_area(request: Request) -> str | None:
+    return request.session.get("selected_area")
+
+def set_selected_area(request: Request, area: str):
+    request.session["selected_area"] = area
 
 def is_admin(request: Request) -> bool:
     u = request.session.get("user")
@@ -165,6 +172,9 @@ def _startup():
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     if require_login(request):
+        # dopo login l'utente deve scegliere la sezione (bibite / prodotti)
+        if not get_selected_area(request):
+            return RedirectResponse("/select-area", status_code=HTTP_303_SEE_OTHER)
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
     return RedirectResponse("/select-store", status_code=HTTP_303_SEE_OTHER)
 
@@ -224,7 +234,27 @@ def login_post(request: Request, username: str = Form(...), password: str = Form
             "store_label": STORES.get(row["store"], row["store"]),
         }
 
-    return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+    # reset area ad ogni login per forzare la scelta sala/cucina
+    request.session.pop("selected_area", None)
+    return RedirectResponse("/select-area", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get("/select-area", response_class=HTMLResponse)
+def select_area_get(request: Request, area: str = ""):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    area = (area or "").strip().lower()
+    if area in ("bibite", "prodotti"):
+        set_selected_area(request, area)
+        return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+
+    # brand: store scelto
+    brand = (request.session.get("active_store") if is_admin(request) else user.get("store")) or "spinza"
+    if brand not in STORES and brand != "ALL":
+        brand = "spinza"
+    return render("select_area.html", user=user, brand=brand)
 
 
 @app.get("/register", response_class=HTMLResponse)
@@ -501,6 +531,32 @@ def logout(request: Request):
 
 
 # =========================
+# AREA SELECTION (BIBITE / PRODOTTI)
+# =========================
+AREAS = {
+    "bibite": "Bibite (Sala)",
+    "prodotti": "Prodotti (Cucina)",
+}
+
+@app.get("/select-area", response_class=HTMLResponse)
+def select_area_get(request: Request, area: str = ""):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    area = (area or "").strip()
+    if area in AREAS:
+        set_selected_area(request, area)
+        return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+
+    # brand: store selezionato (admin usa active_store se presente)
+    brand = (request.session.get("active_store") if is_admin(request) else user.get("store")) or "spinza"
+    if brand not in STORES:
+        brand = "spinza"
+    return render("select_area.html", user=user, areas=AREAS, brand=brand)
+
+
+# =========================
 # PROFILE (admin can change own username/password)
 # =========================
 @app.get("/profile", response_class=HTMLResponse)
@@ -611,6 +667,10 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
+    area = get_selected_area(request)
+    if not area or area not in AREAS:
+        return RedirectResponse("/select-area", status_code=HTTP_303_SEE_OTHER)
+
     admin = is_admin(request)
     if admin:
         active_store = (request.query_params.get("store") or request.session.get("active_store") or "spinza").strip()
@@ -629,10 +689,11 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
         cur = conn.cursor()
 
         # --- categorie ---
-        cats_sql = "SELECT DISTINCT category FROM products"
+        cats_sql = "SELECT DISTINCT category FROM products WHERE area=" + ph
         cats_params = []
+        cats_params.append(area)
         if active_store != "ALL":
-            cats_sql += f" WHERE store={ph}"
+            cats_sql += f" AND store={ph}"
             cats_params.append(active_store)
         cats_sql += " ORDER BY category"
 
@@ -642,6 +703,9 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
         # --- prodotti ---
         sql = "SELECT * FROM products WHERE 1=1"
         params = []
+
+        sql += f" AND area={ph}"
+        params.append(area)
 
         if active_store != "ALL":
             sql += f" AND store={ph}"
@@ -664,6 +728,8 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
     return render(
         "inventario.html",
         user=user,
+        area=area,
+        areas=AREAS,
         items=items,
         cats=cats,
         q=q,
@@ -691,6 +757,13 @@ def item_delta(request: Request, item_id: int, delta: float = Form(...)):
     ph = _ph()
     now = _now()
 
+    area = get_selected_area(request) or "prodotti"
+    if area not in AREAS:
+        area = "prodotti"
+    area = get_selected_area(request) or "prodotti"
+    if area not in AREAS:
+        area = "prodotti"
+
     with connect() as conn:
         cur = conn.cursor()
         row = cur.execute(
@@ -713,7 +786,9 @@ def item_delta(request: Request, item_id: int, delta: float = Form(...)):
             (active_store, user["username"], "DELTA", row["category"], row["name"], float(delta)),
         )
 
-    return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+    # dopo login deve scegliere la sezione (bibite / prodotti)
+    request.session.pop("selected_area", None)
+    return RedirectResponse("/select-area", status_code=HTTP_303_SEE_OTHER)
 
 @app.post("/items/{item_id}/set")
 def item_set(request: Request, item_id: int, qty: float = Form(...)):
@@ -775,11 +850,11 @@ def item_add(
     with connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            f"""INSERT INTO products(store, category, name, qty, min_qty, updated_at)
-                VALUES({ph},{ph},{ph},{ph},{ph},{now})
+            f"""INSERT INTO products(store, category, name, area, qty, min_qty, updated_at)
+                VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now})
                 ON CONFLICT(store, category, name)
-                DO UPDATE SET qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
-            (active_store, category, name, float(qty), float(min_qty)),
+                DO UPDATE SET area=excluded.area, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
+            (active_store, category, name, area, float(qty), float(min_qty)),
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
@@ -913,6 +988,9 @@ async def import_csv(request: Request, file: UploadFile = File(...)):
     ph = _ph()
     now = _now()
     count = 0
+    area = get_selected_area(request) or "prodotti"
+    if area not in AREAS:
+        area = "prodotti"
 
     with connect() as conn:
         cur = conn.cursor()
@@ -931,11 +1009,11 @@ async def import_csv(request: Request, file: UploadFile = File(...)):
                 min_qty = 0.0
 
             cur.execute(
-                f"""INSERT INTO products(store, category, name, qty, min_qty, updated_at)
-                    VALUES({ph},{ph},{ph},{ph},{ph},{now})
+                f"""INSERT INTO products(store, category, name, area, qty, min_qty, updated_at)
+                    VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now})
                     ON CONFLICT(store, category, name)
-                    DO UPDATE SET qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
-                (active_store, cat, name, qty, min_qty),
+                    DO UPDATE SET area=excluded.area, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
+                (active_store, cat, name, area, qty, min_qty),
             )
             count += 1
 
@@ -968,3 +1046,175 @@ def logs_page(request: Request, limit: int = 200):
 
     brand = request.session.get("active_store") or "spinza"
     return render("logs.html", user=user, rows=rows, limit=limit, stores=STORES, brand=brand)
+
+
+# =========================
+# CHIUSURE (foto) & FATTURE (documenti)
+# =========================
+def _effective_store(request: Request, user: dict) -> str:
+    if is_admin(request):
+        s = request.session.get("active_store") or "spinza"
+        if s == "ALL" or s not in STORES:
+            s = "spinza"
+        return s
+    return user.get("store") or "spinza"
+
+
+@app.get("/chiusure", response_class=HTMLResponse)
+def closures_page(request: Request, q: str = ""):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    brand = store
+
+    q = (q or "").strip()
+    ph = _ph()
+
+    with connect() as conn:
+        cur = conn.cursor()
+        sql = f"SELECT id, store, closure_date, uploaded_by, ts, filename, content_type FROM closures WHERE store={ph}"
+        params = [store]
+        if q:
+            # ricerca semplice: confronta stringa data
+            sql += f" AND CAST(closure_date AS TEXT) LIKE {ph}"
+            params.append(f"%{q}%")
+        sql += " ORDER BY closure_date DESC, id DESC"
+        rows = cur.execute(sql, tuple(params)).fetchall()
+
+    return render("closures.html", user=user, rows=rows, q=q, stores=STORES, brand=brand)
+
+
+@app.post("/chiusure/upload")
+async def closures_upload(request: Request, closure_date: str = Form(...), file: UploadFile = File(...)):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    content = await file.read()
+    filename = file.filename or "chiusura"
+    content_type = file.content_type or "application/octet-stream"
+
+    # parse data
+    try:
+        _ = date.fromisoformat(closure_date)
+    except Exception:
+        return RedirectResponse("/chiusure", status_code=HTTP_303_SEE_OTHER)
+
+    ph = _ph()
+    now = _now()
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"INSERT INTO closures(store, closure_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{now},{ph},{ph},{ph})",
+            (store, closure_date, user["username"], filename, content_type, content),
+        )
+
+    return RedirectResponse("/chiusure", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get("/chiusure/{doc_id}")
+def closures_download(request: Request, doc_id: int):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    store = _effective_store(request, user)
+
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(
+            f"SELECT filename, content_type, data FROM closures WHERE id={ph} AND store={ph}",
+            (int(doc_id), store),
+        ).fetchone()
+    if not row:
+        return PlainTextResponse("Not found", status_code=404)
+
+    from fastapi.responses import Response
+    headers = {"Content-Disposition": f"inline; filename=\"{row.get('filename') or 'chiusura'}\""}
+    return Response(content=row["data"], media_type=row.get("content_type") or "application/octet-stream", headers=headers)
+
+
+@app.get("/fatture", response_class=HTMLResponse)
+def invoices_page(request: Request, supplier: str = "", q_date: str = ""):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    brand = store
+
+    supplier = (supplier or "").strip()
+    q_date = (q_date or "").strip()
+
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        sql = f"SELECT id, store, supplier, doc_date, uploaded_by, ts, filename, content_type FROM invoices_docs WHERE store={ph}"
+        params = [store]
+        if supplier:
+            sql += f" AND lower(supplier) LIKE {ph}"
+            params.append(f"%{supplier.lower()}%")
+        if q_date:
+            sql += f" AND CAST(doc_date AS TEXT) LIKE {ph}"
+            params.append(f"%{q_date}%")
+        sql += " ORDER BY doc_date DESC, id DESC"
+        rows = cur.execute(sql, tuple(params)).fetchall()
+
+    return render("invoices.html", user=user, rows=rows, supplier=supplier, q_date=q_date, stores=STORES, brand=brand)
+
+
+@app.post("/fatture/upload")
+async def invoices_upload(request: Request, supplier: str = Form(...), doc_date: str = Form(...), file: UploadFile = File(...)):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    supplier = (supplier or "").strip()
+    if not supplier:
+        return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
+
+    try:
+        _ = date.fromisoformat(doc_date)
+    except Exception:
+        return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
+
+    content = await file.read()
+    filename = file.filename or "fattura"
+    content_type = file.content_type or "application/octet-stream"
+
+    ph = _ph()
+    now = _now()
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"INSERT INTO invoices_docs(store, supplier, doc_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{ph},{now},{ph},{ph},{ph})",
+            (store, supplier, doc_date, user["username"], filename, content_type, content),
+        )
+
+    return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get("/fatture/{doc_id}")
+def invoices_download(request: Request, doc_id: int):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    store = _effective_store(request, user)
+
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(
+            f"SELECT filename, content_type, data FROM invoices_docs WHERE id={ph} AND store={ph}",
+            (int(doc_id), store),
+        ).fetchone()
+    if not row:
+        return PlainTextResponse("Not found", status_code=404)
+
+    from fastapi.responses import Response
+    headers = {"Content-Disposition": f"inline; filename=\"{row.get('filename') or 'fattura'}\""}
+    return Response(content=row["data"], media_type=row.get("content_type") or "application/octet-stream", headers=headers)

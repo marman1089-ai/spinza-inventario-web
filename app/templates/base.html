@@ -56,6 +56,9 @@
         {% if user.store_label %} • {{ user.store_label }}{% endif %}
         {% if user.role == 'admin' %} • admin{% endif %}
       </span>
+      <a href="/select-area" class="pill" style="text-decoration:none;color:#111">🧭 Sezione</a>
+      <a href="/chiusure" class="pill" style="text-decoration:none;color:#111">📸 Chiusure</a>
+      <a href="/fatture" class="pill" style="text-decoration:none;color:#111">🧾 Fatture</a>
       <a href="/profile" class="pill" style="text-decoration:none;color:#111">⚙️ Profilo</a>
       {% if user.role == 'admin' %}
         <a href="/admin" class="pill" style="text-decoration:none;color:#111">🛠️ Admin</a>
