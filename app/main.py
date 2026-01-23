@@ -1199,28 +1199,6 @@ async def invoices_upload(request: Request, supplier: str = Form(...), doc_date:
     return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
 
 
-@app.get("/fatture/{doc_id}")
-def invoices_download(request: Request, doc_id: int):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    store = _effective_store(request, user)
-
-    ph = _ph()
-    with connect() as conn:
-        cur = conn.cursor()
-        row = cur.execute(
-            f"SELECT filename, content_type, data FROM invoices_docs WHERE id={ph} AND store={ph}",
-            (int(doc_id), store),
-        ).fetchone()
-    if not row:
-        return PlainTextResponse("Not found", status_code=404)
-
-    from fastapi.responses import Response
-    headers = {"Content-Disposition": f"inline; filename=\"{row.get('filename') or 'fattura'}\""}
-    return Response(content=row["data"], media_type=row.get("content_type") or "application/octet-stream", headers=headers)
-
-
 # =========================
 # IMPORT PRODOTTI DA FOTO FATTURA (GUIDATO)
 # =========================
@@ -1496,3 +1474,27 @@ async def invoice_import_confirm(request: Request, draft_id: int):
         )
 
     return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get("/fatture/{doc_id}")
+def invoices_download(request: Request, doc_id: int):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    store = _effective_store(request, user)
+
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(
+            f"SELECT filename, content_type, data FROM invoices_docs WHERE id={ph} AND store={ph}",
+            (int(doc_id), store),
+        ).fetchone()
+    if not row:
+        return PlainTextResponse("Not found", status_code=404)
+
+    from fastapi.responses import Response
+    headers = {"Content-Disposition": f"inline; filename=\"{row.get('filename') or 'fattura'}\""}
+    return Response(content=row["data"], media_type=row.get("content_type") or "application/octet-stream", headers=headers)
+
+
