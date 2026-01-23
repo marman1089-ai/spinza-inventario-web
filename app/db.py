@@ -134,11 +134,15 @@ def init_db():
         """)
 
         # ensure 'area' column exists on older DBs
-        try:
-            cur.execute("ALTER TABLE products ADD COLUMN area TEXT NOT NULL DEFAULT 'prodotti'")
-        except Exception:
-            pass
-
+        if using_postgres():
+            # Postgres: evita errore (e transazione abortita) se la colonna esiste già
+            cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS area TEXT NOT NULL DEFAULT 'prodotti'")
+        else:
+            # SQLite: IF NOT EXISTS non è garantito su versioni vecchie, quindi try/except
+            try:
+                cur.execute("ALTER TABLE products ADD COLUMN area TEXT NOT NULL DEFAULT 'prodotti'")
+            except Exception:
+                pass
         # CLOSURES (foto chiusure)
         cur.execute(f"""
         CREATE TABLE IF NOT EXISTS closures (
