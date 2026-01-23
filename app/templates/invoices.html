@@ -15,6 +15,10 @@
     <h2 style="margin-top:0">🧾 Archivio fatture</h2>
     <div class="muted">Carica una fattura (PDF o foto), imposta <strong>fornitore</strong> e <strong>data</strong>, poi la cerchi velocemente.</div>
 
+    <div class="row" style="margin-top:10px;">
+      <a class="pill" href="/fatture/importa-prodotti" style="text-decoration:none;color:#111">➕ Aggiungi prodotti da foto fattura</a>
+    </div>
+
     <form method="post" action="/fatture/upload" enctype="multipart/form-data" style="margin-top:12px;">
       <div class="row">
         <input name="supplier" placeholder="Fornitore" required />

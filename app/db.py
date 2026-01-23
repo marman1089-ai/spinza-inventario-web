@@ -162,6 +162,53 @@ def init_db():
         )
         """)
 
+        # NEW: bozze per import prodotti da foto fattura
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS invoice_import_drafts (
+            id SERIAL PRIMARY KEY,
+            store TEXT NOT NULL,
+            supplier TEXT NOT NULL,
+            doc_date DATE NOT NULL,
+            uploaded_by TEXT NOT NULL,
+            ts TIMESTAMP DEFAULT now(),
+            filename TEXT,
+            content_type TEXT,
+            data BYTEA
+        )
+        """)
+
+        # NEW: import confermati (collegati a invoices_docs)
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS invoice_imports (
+            id SERIAL PRIMARY KEY,
+            store TEXT NOT NULL,
+            invoice_doc_id INTEGER NOT NULL,
+            supplier TEXT NOT NULL,
+            doc_date DATE NOT NULL,
+            area TEXT NOT NULL,
+            created_by TEXT NOT NULL,
+            ts TIMESTAMP DEFAULT now()
+        )
+        """)
+
+        cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_imports_store_doc
+        ON invoice_imports(store, invoice_doc_id)
+        """)
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS invoice_import_lines (
+            id SERIAL PRIMARY KEY,
+            import_id INTEGER NOT NULL,
+            raw_name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            qty DOUBLE PRECISION NOT NULL,
+            unit TEXT,
+            product_id INTEGER,
+            product_name TEXT
+        )
+        """)
+
         # LOGS
         cur.execute("""
         CREATE TABLE IF NOT EXISTS logs (

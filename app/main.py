@@ -1,4 +1,5 @@
 import os
+import json
 import csv
 import io
 from datetime import date
@@ -1218,3 +1219,280 @@ def invoices_download(request: Request, doc_id: int):
     from fastapi.responses import Response
     headers = {"Content-Disposition": f"inline; filename=\"{row.get('filename') or 'fattura'}\""}
     return Response(content=row["data"], media_type=row.get("content_type") or "application/octet-stream", headers=headers)
+
+
+# =========================
+# IMPORT PRODOTTI DA FOTO FATTURA (GUIDATO)
+# =========================
+
+@app.get("/fatture/importa-prodotti", response_class=HTMLResponse)
+def invoice_import_upload_page(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    default_area = get_selected_area(request) or "prodotti"
+    store = _effective_store(request, user)
+    return render(
+        "invoice_import_upload.html",
+        user=user,
+        default_area=default_area,
+        brand=store,
+    )
+
+
+@app.post("/fatture/importa-prodotti/upload")
+async def invoice_import_upload(request: Request, supplier: str = Form(...), doc_date: str = Form(...), area: str = Form(...), file: UploadFile = File(...)):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    supplier = (supplier or "").strip()
+    area = (area or "prodotti").strip().lower()
+    if area not in ("bibite", "prodotti"):
+        area = "prodotti"
+
+    if not supplier:
+        return RedirectResponse("/fatture/importa-prodotti", status_code=HTTP_303_SEE_OTHER)
+    try:
+        _ = date.fromisoformat(doc_date)
+    except Exception:
+        return RedirectResponse("/fatture/importa-prodotti", status_code=HTTP_303_SEE_OTHER)
+
+    content = await file.read()
+    filename = file.filename or "fattura"
+    content_type = file.content_type or "application/octet-stream"
+
+    ph = _ph()
+    now = _now()
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"INSERT INTO invoice_import_drafts(store, supplier, doc_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{ph},{now},{ph},{ph},{ph}) RETURNING id",
+            (store, supplier, doc_date, user["username"], filename, content_type, content),
+        )
+        draft_id = cur.fetchone()[0]
+
+    # Salvo l'area in sessione (comodo)
+    set_selected_area(request, area)
+
+    return RedirectResponse(f"/fatture/importa-prodotti/review/{draft_id}?area={area}", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get("/fatture/importa-prodotti/draft/{draft_id}/image")
+def invoice_import_draft_image(request: Request, draft_id: int):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    store = _effective_store(request, user)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(
+            f"SELECT filename, content_type, data FROM invoice_import_drafts WHERE id={ph} AND store={ph}",
+            (int(draft_id), store),
+        ).fetchone()
+    if not row:
+        return PlainTextResponse("Not found", status_code=404)
+    from fastapi.responses import Response
+    headers = {"Content-Disposition": f"inline; filename=\"{row.get('filename') or 'fattura'}\""}
+    return Response(content=row["data"], media_type=row.get("content_type") or "application/octet-stream", headers=headers)
+
+
+@app.get("/fatture/importa-prodotti/review/{draft_id}", response_class=HTMLResponse)
+def invoice_import_review_page(request: Request, draft_id: int, area: str = ""):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    area = (area or get_selected_area(request) or "prodotti").strip().lower()
+    if area not in ("bibite", "prodotti"):
+        area = "prodotti"
+
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        draft = cur.execute(
+            f"SELECT supplier, doc_date FROM invoice_import_drafts WHERE id={ph} AND store={ph}",
+            (int(draft_id), store),
+        ).fetchone()
+        if not draft:
+            return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
+
+        products = cur.execute(
+            f"SELECT id, category, name FROM products WHERE store={ph} AND area={ph} ORDER BY category, name",
+            (store, area),
+        ).fetchall()
+
+    products_payload = [
+        {"id": p["id"], "category": p["category"], "name": p["name"]}
+        for p in products
+    ]
+
+    default_category = "BEVERAGE" if area == "bibite" else "PRODOTTI"
+
+    return render(
+        "invoice_import_review.html",
+        user=user,
+        draft_id=draft_id,
+        supplier=draft["supplier"],
+        doc_date=str(draft["doc_date"]),
+        area=area,
+        default_category=default_category,
+        products_json=json.dumps(products_payload),
+        brand=store,
+    )
+
+
+@app.post("/fatture/importa-prodotti/cancel/{draft_id}")
+async def invoice_import_cancel(request: Request, draft_id: int):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"DELETE FROM invoice_import_drafts WHERE id={ph} AND store={ph}",
+            (int(draft_id), store),
+        )
+    return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/fatture/importa-prodotti/confirm/{draft_id}")
+async def invoice_import_confirm(request: Request, draft_id: int):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    form = await request.form()
+
+    supplier = str(form.get("supplier") or "").strip()
+    doc_date = str(form.get("doc_date") or "").strip()
+    area = str(form.get("area") or "prodotti").strip().lower()
+    if area not in ("bibite", "prodotti"):
+        area = "prodotti"
+
+    raw_names = form.getlist("raw_name")
+    qtys = form.getlist("qty")
+    units = form.getlist("unit")
+    cats = form.getlist("category")
+    prod_ids = form.getlist("product_id")
+
+    # validazione minima
+    if not raw_names or not qtys or len(raw_names) != len(qtys) or len(raw_names) != len(cats) or len(raw_names) != len(prod_ids):
+        return RedirectResponse(f"/fatture/importa-prodotti/review/{draft_id}?area={area}", status_code=HTTP_303_SEE_OTHER)
+
+    try:
+        _ = date.fromisoformat(doc_date)
+    except Exception:
+        return RedirectResponse(f"/fatture/importa-prodotti/review/{draft_id}?area={area}", status_code=HTTP_303_SEE_OTHER)
+
+    ph = _ph()
+    now = _now()
+
+    with connect() as conn:
+        cur = conn.cursor()
+
+        # 1) recupero bozza
+        draft = cur.execute(
+            f"SELECT supplier, doc_date, filename, content_type, data FROM invoice_import_drafts WHERE id={ph} AND store={ph}",
+            (int(draft_id), store),
+        ).fetchone()
+        if not draft:
+            return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
+
+        # 2) salvo documento in archivio fatture
+        cur.execute(
+            f"INSERT INTO invoices_docs(store, supplier, doc_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{ph},{now},{ph},{ph},{ph}) RETURNING id",
+            (store, supplier or draft["supplier"], doc_date or str(draft["doc_date"]), user["username"], draft["filename"], draft["content_type"], draft["data"]),
+        )
+        invoice_doc_id = cur.fetchone()[0]
+
+        # 3) creo import
+        cur.execute(
+            f"INSERT INTO invoice_imports(store, invoice_doc_id, supplier, doc_date, area, created_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now}) RETURNING id",
+            (store, invoice_doc_id, supplier or draft["supplier"], doc_date or str(draft["doc_date"]), area, user["username"]),
+        )
+        import_id = cur.fetchone()[0]
+
+        # 4) applico righe: aggiorno/creo prodotti + scrivo log + salvo linee
+        for i in range(len(raw_names)):
+            rn = str(raw_names[i] or "").strip()
+            if not rn:
+                continue
+            try:
+                q = float(str(qtys[i] or "0").replace(",", "."))
+            except Exception:
+                q = 0.0
+            if q == 0:
+                continue
+            unit = str(units[i] or "").strip() if i < len(units) else ""
+            cat = str(cats[i] or "").strip() or ("BEVERAGE" if area == "bibite" else "PRODOTTI")
+            pid = str(prod_ids[i] or "").strip()
+
+            product_id = None
+            product_name = rn
+
+            if pid and pid != "__new__":
+                # aggiorno prodotto esistente
+                try:
+                    product_id = int(pid)
+                except Exception:
+                    product_id = None
+                if product_id:
+                    rowp = cur.execute(
+                        f"SELECT id, category, name, qty FROM products WHERE id={ph} AND store={ph}",
+                        (product_id, store),
+                    ).fetchone()
+                    if rowp:
+                        product_name = rowp["name"]
+                        cur.execute(
+                            f"UPDATE products SET qty = qty + {ph}, updated_at={_now()} WHERE id={ph} AND store={ph}",
+                            (q, product_id, store),
+                        )
+            else:
+                # crea (o aggiorna se già esiste)
+                # unique index: (store, category, name)
+                # 1) prova select
+                rowx = cur.execute(
+                    f"SELECT id FROM products WHERE store={ph} AND category={ph} AND name={ph}",
+                    (store, cat, rn),
+                ).fetchone()
+                if rowx:
+                    product_id = rowx["id"]
+                    cur.execute(
+                        f"UPDATE products SET qty = qty + {ph}, updated_at={_now()} WHERE id={ph} AND store={ph}",
+                        (q, product_id, store),
+                    )
+                else:
+                    cur.execute(
+                        f"INSERT INTO products(store, category, name, area, qty, min_qty, updated_at) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{_now()}) RETURNING id",
+                        (store, cat, rn, area, q, 0),
+                    )
+                    product_id = cur.fetchone()[0]
+
+            # salva line
+            cur.execute(
+                f"INSERT INTO invoice_import_lines(import_id, raw_name, category, qty, unit, product_id, product_name) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (import_id, rn, cat, q, unit, product_id, product_name),
+            )
+
+            # log
+            cur.execute(
+                f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({_now()},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (store, user["username"], "IMPORT_FATTURA", cat, product_name, q),
+            )
+
+        # 5) elimina bozza
+        cur.execute(
+            f"DELETE FROM invoice_import_drafts WHERE id={ph} AND store={ph}",
+            (int(draft_id), store),
+        )
+
+    return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
