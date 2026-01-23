@@ -70,54 +70,61 @@ def ensure_db_exists():
 
 
 def init_db():
-    """
-    Crea tabelle sia su Postgres che su SQLite.
-    Schema compatibile con il tuo main.py (pw_salt/pw_hash/legacy_sha256 ecc.)
-    """
+    """Create required tables for both Postgres (Render/Supabase) and SQLite (local fallback)."""
     ensure_db_exists()
+
+    pg = using_postgres()
+
+    id_col = "SERIAL PRIMARY KEY" if pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    qty_col = "DOUBLE PRECISION" if pg else "REAL"
+    ts_default = "TIMESTAMP DEFAULT now()" if pg else "TEXT DEFAULT (datetime('now'))"
+    date_col = "DATE" if pg else "TEXT"
+    blob_col = "BYTEA" if pg else "BLOB"
 
     with connect() as db:
         cur = db.cursor()
 
         # USERS
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
+            id {id_col},
             store TEXT NOT NULL,
             username TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'staff',
             pw_salt TEXT,
             pw_hash TEXT,
             legacy_sha256 TEXT,
-            created_at TIMESTAMP DEFAULT now()
+            created_at {ts_default}
         )
         """)
 
-        # unique staff per store
         cur.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS ux_users_store_username
         ON users(store, username)
         """)
 
-        # optional: unique admin username globale
-        # (se vuoi admin globale davvero)
-        cur.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS ux_users_admin_username
-        ON users(username)
-        WHERE role = 'admin'
-        """)
+        # optional: unique admin username globale (partial index non sempre disponibile)
+        try:
+            cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_users_admin_username
+            ON users(username)
+            WHERE role = 'admin'
+            """)
+        except Exception:
+            # SQLite vecchie o DB particolari potrebbero non supportare indici parziali
+            pass
 
         # PRODUCTS
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS products (
-            id SERIAL PRIMARY KEY,
+            id {id_col},
             store TEXT NOT NULL,
             category TEXT NOT NULL,
             name TEXT NOT NULL,
             area TEXT NOT NULL DEFAULT 'prodotti',
-            qty DOUBLE PRECISION NOT NULL DEFAULT 0,
-            min_qty DOUBLE PRECISION NOT NULL DEFAULT 0,
-            updated_at TIMESTAMP DEFAULT now()
+            qty {qty_col} NOT NULL DEFAULT 0,
+            min_qty {qty_col} NOT NULL DEFAULT 0,
+            updated_at {ts_default}
         )
         """)
 
@@ -126,68 +133,67 @@ def init_db():
         ON products(store, category, name)
         """)
 
-        # --- MIGRATION SAFE: ensure 'area' column exists on older DBs ---
-        # SQLite e Postgres supportano entrambi "ALTER TABLE ... ADD COLUMN".
+        # ensure 'area' column exists on older DBs
         try:
             cur.execute("ALTER TABLE products ADD COLUMN area TEXT NOT NULL DEFAULT 'prodotti'")
         except Exception:
-            # Colonna già esistente
             pass
 
-        # NEW: documenti (chiusure) con allegato persistente in DB
-        cur.execute("""
+        # CLOSURES (foto chiusure)
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS closures (
-            id SERIAL PRIMARY KEY,
+            id {id_col},
             store TEXT NOT NULL,
-            closure_date DATE NOT NULL,
+            closure_date {date_col} NOT NULL,
             uploaded_by TEXT NOT NULL,
-            ts TIMESTAMP DEFAULT now(),
+            ts {ts_default},
             filename TEXT,
             content_type TEXT,
-            data BYTEA
+            data {blob_col}
         )
         """)
 
-        cur.execute("""
+        # INVOICES docs (archivio fatture)
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS invoices_docs (
-            id SERIAL PRIMARY KEY,
+            id {id_col},
             store TEXT NOT NULL,
             supplier TEXT NOT NULL,
-            doc_date DATE NOT NULL,
+            doc_date {date_col} NOT NULL,
             uploaded_by TEXT NOT NULL,
-            ts TIMESTAMP DEFAULT now(),
+            ts {ts_default},
             filename TEXT,
             content_type TEXT,
-            data BYTEA
+            data {blob_col}
         )
         """)
 
-        # NEW: bozze per import prodotti da foto fattura
-        cur.execute("""
+        # Invoice import drafts (foto caricata prima del ricontrollo)
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS invoice_import_drafts (
-            id SERIAL PRIMARY KEY,
+            id {id_col},
             store TEXT NOT NULL,
             supplier TEXT NOT NULL,
-            doc_date DATE NOT NULL,
+            doc_date {date_col} NOT NULL,
             uploaded_by TEXT NOT NULL,
-            ts TIMESTAMP DEFAULT now(),
+            ts {ts_default},
             filename TEXT,
             content_type TEXT,
-            data BYTEA
+            data {blob_col}
         )
         """)
 
-        # NEW: import confermati (collegati a invoices_docs)
-        cur.execute("""
+        # Invoice imports (confermati)
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS invoice_imports (
-            id SERIAL PRIMARY KEY,
+            id {id_col},
             store TEXT NOT NULL,
             invoice_doc_id INTEGER NOT NULL,
             supplier TEXT NOT NULL,
-            doc_date DATE NOT NULL,
+            doc_date {date_col} NOT NULL,
             area TEXT NOT NULL,
             created_by TEXT NOT NULL,
-            ts TIMESTAMP DEFAULT now()
+            ts {ts_default}
         )
         """)
 
@@ -196,13 +202,13 @@ def init_db():
         ON invoice_imports(store, invoice_doc_id)
         """)
 
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS invoice_import_lines (
-            id SERIAL PRIMARY KEY,
+            id {id_col},
             import_id INTEGER NOT NULL,
             raw_name TEXT NOT NULL,
             category TEXT NOT NULL,
-            qty DOUBLE PRECISION NOT NULL,
+            qty {qty_col} NOT NULL,
             unit TEXT,
             product_id INTEGER,
             product_name TEXT
@@ -210,15 +216,15 @@ def init_db():
         """)
 
         # LOGS
-        cur.execute("""
+        cur.execute(f"""
         CREATE TABLE IF NOT EXISTS logs (
-            id SERIAL PRIMARY KEY,
-            ts TIMESTAMP DEFAULT now(),
+            id {id_col},
+            ts {ts_default},
             store TEXT NOT NULL,
             username TEXT NOT NULL,
             action TEXT NOT NULL,
             category TEXT NOT NULL,
             name TEXT NOT NULL,
-            delta DOUBLE PRECISION NOT NULL
+            delta {qty_col} NOT NULL
         )
         """)
