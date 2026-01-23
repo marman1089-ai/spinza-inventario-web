@@ -39,7 +39,7 @@
             <th>Fornitore</th>
             <th>Documento</th>
             <th>Caricato da</th>
-            <th>Quando</th>
+            <th>Quando</th><th>Azioni</th>
           </tr>
         </thead>
         <tbody>
@@ -50,10 +50,15 @@
               <td><a class="pill" href="/fatture/{{ r.id }}" target="_blank" style="text-decoration:none;color:#111">Apri</a> <span class="muted">{{ r.filename or '' }}</span></td>
               <td>{{ r.uploaded_by }}</td>
               <td class="muted">{{ r.ts }}</td>
+              <td>
+                <form method="post" action="/fatture/{{ r.id }}/delete" onsubmit="return confirm('Eliminare questa fattura?');" style="display:inline;">
+                  <button class="btn2" type="submit">Elimina</button>
+                </form>
+              </td>
             </tr>
           {% endfor %}
           {% if not rows %}
-            <tr><td colspan="5" class="muted">Nessuna fattura trovata.</td></tr>
+            <tr><td colspan="6" class="muted">Nessuna fattura trovata.</td></tr>
           {% endif %}
         </tbody>
       </table>
