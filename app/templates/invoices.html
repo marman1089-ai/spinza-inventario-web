@@ -36,6 +36,7 @@
         <thead>
           <tr>
             <th>Data</th>
+            {% if active_store == 'ALL' %}<th>Negozio</th>{% endif %}
             <th>Fornitore</th>
             <th>Documento</th>
             <th>Caricato da</th>
@@ -46,15 +47,9 @@
           {% for r in rows %}
             <tr>
               <td><strong>{{ r.doc_date }}</strong></td>
+              {% if active_store == 'ALL' %}<td>{{ stores.get(r.store, r.store) }}</td>{% endif %}
               <td>{{ r.supplier }}</td>
-              <td>
-                {% if admin %}
-                  <a class="pill" href="/fatture/{{ r.id }}" target="_blank" style="text-decoration:none;color:#111">Apri</a>
-                {% else %}
-                  <span class="pill" title="Solo admin può aprire">🔒 Solo admin</span>
-                {% endif %}
-                <span class="muted">{{ r.filename or "" }}</span>
-              </td>
+              <td><a class="pill" href="/fatture/{{ r.id }}" target="_blank" style="text-decoration:none;color:#111">Apri</a> <span class="muted">{{ r.filename or '' }}</span></td>
               <td>{{ r.uploaded_by }}</td>
               <td class="muted">{{ r.ts }}</td>
               <td>

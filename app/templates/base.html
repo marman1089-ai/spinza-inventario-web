@@ -63,6 +63,23 @@
       {% if user.role == 'admin' %}
         <a href="/admin" class="pill" style="text-decoration:none;color:#111">🛠️ Admin</a>
       {% endif %}
+      
+      {% if user.role == 'admin' %}
+        <form method="post" action="/set-active-store" style="display:inline;">
+          <input type="hidden" name="next_url" value="" />
+          <select name="store" class="pill" style="cursor:pointer" onchange="
+            this.form.next_url.value = window.location.pathname + window.location.search;
+            this.form.submit();
+          ">
+            {% set _sel = active_store or 'spinza' %}
+            <option value="spinza" {% if _sel=='spinza' %}selected{% endif %}>Negozio: Spinza</option>
+            <option value="reburger_camaldoli" {% if _sel=='reburger_camaldoli' %}selected{% endif %}>Negozio: Reburger Camaldoli</option>
+            <option value="reburger_palazzuolo" {% if _sel=='reburger_palazzuolo' %}selected{% endif %}>Negozio: Reburger Palazzuolo</option>
+            <option value="ALL" {% if _sel=='ALL' %}selected{% endif %}>Visualizzali tutti</option>
+          </select>
+        </form>
+      {% endif %}
+
       <a href="/logout" class="pill" style="text-decoration:none;color:#111">Esci</a>
     {% endif %}
   </div>

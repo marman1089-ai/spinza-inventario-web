@@ -16,12 +16,10 @@
             <th>Quando</th>
             <th>Inventario</th>
             <th>Utente</th>
-            <th>Modulo</th>
             <th>Azione</th>
             <th>Categoria</th>
             <th>Prodotto</th>
             <th>Valore</th>
-            <th>Note</th>
           </tr>
         </thead>
         <tbody>
@@ -30,16 +28,14 @@
               <td>{{ r.ts }}</td>
               <td><span class="pill">{{ stores.get(r.store, r.store) }}</span></td>
               <td><strong>{{ r.username }}</strong></td>
-              <td><span class="pill">{{ r.module }}</span></td>
               <td>{{ r.action }}</td>
               <td>{{ r.category }}</td>
               <td>{{ r.name }}</td>
               <td>{{ r.delta }}</td>
-              <td class="muted">{{ r.note }}</td>
             </tr>
           {% endfor %}
           {% if not rows %}
-            <tr><td colspan="9" class="muted">Nessun log.</td></tr>
+            <tr><td colspan="7" class="muted">Nessun log.</td></tr>
           {% endif %}
         </tbody>
       </table>
