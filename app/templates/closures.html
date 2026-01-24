@@ -17,7 +17,12 @@
     <form method="post" action="/chiusure/upload" enctype="multipart/form-data" style="margin-top:12px;">
       <div class="row">
         <input type="date" name="closure_date" required />
-        <input type="file" name="file" accept="image/*" capture="environment" required />
+        <div id="closure-files">
+  <div class="file-row">
+    <input type="file" name="files" accept="application/pdf,image/*" capture="environment" required />
+  </div>
+</div>
+<button type="button" class="btn btn-secondary" style="margin-left:8px" onclick="addFileInput('closure-files')">+1</button>
         <button class="btn" type="submit">Carica</button>
       </div>
     </form>

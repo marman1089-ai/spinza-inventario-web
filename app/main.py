@@ -1131,22 +1131,25 @@ def closures_page(request: Request, q: str = ""):
 
 @app.post("/chiusure/upload")
 async def closures_upload(request: Request, closure_date: str = Form(...), files: list[UploadFile] = File(...)):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-
     store = _effective_store(request, user)
-    pdfs = []
-base_name = "chiusura"
-for f in files:
-    raw = await f.read()
-    filename = f.filename or base_name
-    content_type = f.content_type or "application/octet-stream"
-    content, filename, content_type = ensure_pdf(raw, filename, content_type)
-    pdfs.append(content)
-content = merge_pdfs(pdfs)
-filename = (files[0].filename if files and files[0].filename else base_name) + ".pdf"
-content_type = "application/pdf"
+
+    pdfs: list[bytes] = []
+    base_name = "chiusura"
+    for f in files:
+        raw = await f.read()
+        filename_in = f.filename or base_name
+        content_type_in = f.content_type or "application/octet-stream"
+        pdf_bytes, _, _ = ensure_pdf(raw, filename_in, content_type_in)
+        pdfs.append(pdf_bytes)
+
+    # Unisco tutto in un unico PDF (multi-pagina / multi-file)
+    if not pdfs:
+        return RedirectResponse("/chiusure", status_code=HTTP_303_SEE_OTHER)
+
+    content = merge_pdfs(pdfs) if len(pdfs) > 1 else pdfs[0]
+    first_name = (files[0].filename if files and files[0].filename else base_name) or base_name
+    filename = first_name if first_name.lower().endswith(".pdf") else f"{first_name}.pdf"
+    content_type = "application/pdf"
 
     # parse data
     try:
@@ -1278,31 +1281,23 @@ def invoices_page(request: Request, supplier: str = "", q_date: str = ""):
 
 @app.post("/fatture/upload")
 async def invoices_upload(request: Request, supplier: str = Form(...), doc_date: str = Form(...), files: list[UploadFile] = File(...)):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    pdfs: list[bytes] = []
+    base_name = "fattura"
+    for f in files:
+        raw = await f.read()
+        filename_in = f.filename or base_name
+        content_type_in = f.content_type or "application/octet-stream"
+        pdf_bytes, _, _ = ensure_pdf(raw, filename_in, content_type_in)
+        pdfs.append(pdf_bytes)
 
-    store = _effective_store(request, user)
-    supplier = (supplier or "").strip()
-    if not supplier:
+    # Unisco tutto in un unico PDF (multi-pagina / multi-file)
+    if not pdfs:
         return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
 
-    try:
-        _ = date.fromisoformat(doc_date)
-    except Exception:
-        return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
-
-    pdfs = []
-base_name = "fattura"
-for f in files:
-    raw = await f.read()
-    filename = f.filename or base_name
-    content_type = f.content_type or "application/octet-stream"
-    content, filename, content_type = ensure_pdf(raw, filename, content_type)
-    pdfs.append(content)
-content = merge_pdfs(pdfs)
-filename = (files[0].filename if files and files[0].filename else base_name) + ".pdf"
-content_type = "application/pdf"
+    content = merge_pdfs(pdfs) if len(pdfs) > 1 else pdfs[0]
+    first_name = (files[0].filename if files and files[0].filename else base_name) or base_name
+    filename = first_name if first_name.lower().endswith(".pdf") else f"{first_name}.pdf"
+    content_type = "application/pdf"
 
     ph = _ph()
     now = _now()
