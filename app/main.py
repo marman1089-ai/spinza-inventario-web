@@ -5,7 +5,7 @@ import io
 from datetime import date
 
 from fastapi import FastAPI, Request, Form, UploadFile, File
-from .pdf_tools import ensure_pdf
+from .pdf_tools import ensure_pdf, merge_pdfs
 from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
@@ -1130,16 +1130,23 @@ def closures_page(request: Request, q: str = ""):
 
 
 @app.post("/chiusure/upload")
-async def closures_upload(request: Request, closure_date: str = Form(...), file: UploadFile = File(...)):
+async def closures_upload(request: Request, closure_date: str = Form(...), files: list[UploadFile] = File(...)):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
     store = _effective_store(request, user)
-    raw = await file.read()
-    filename = file.filename or "chiusura"
-    content_type = file.content_type or "application/octet-stream"
+    pdfs = []
+base_name = "chiusura"
+for f in files:
+    raw = await f.read()
+    filename = f.filename or base_name
+    content_type = f.content_type or "application/octet-stream"
     content, filename, content_type = ensure_pdf(raw, filename, content_type)
+    pdfs.append(content)
+content = merge_pdfs(pdfs)
+filename = (files[0].filename if files and files[0].filename else base_name) + ".pdf"
+content_type = "application/pdf"
 
     # parse data
     try:
@@ -1270,7 +1277,7 @@ def invoices_page(request: Request, supplier: str = "", q_date: str = ""):
 
 
 @app.post("/fatture/upload")
-async def invoices_upload(request: Request, supplier: str = Form(...), doc_date: str = Form(...), file: UploadFile = File(...)):
+async def invoices_upload(request: Request, supplier: str = Form(...), doc_date: str = Form(...), files: list[UploadFile] = File(...)):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -1285,10 +1292,17 @@ async def invoices_upload(request: Request, supplier: str = Form(...), doc_date:
     except Exception:
         return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
 
-    raw = await file.read()
-    filename = file.filename or "fattura"
-    content_type = file.content_type or "application/octet-stream"
+    pdfs = []
+base_name = "fattura"
+for f in files:
+    raw = await f.read()
+    filename = f.filename or base_name
+    content_type = f.content_type or "application/octet-stream"
     content, filename, content_type = ensure_pdf(raw, filename, content_type)
+    pdfs.append(content)
+content = merge_pdfs(pdfs)
+filename = (files[0].filename if files and files[0].filename else base_name) + ".pdf"
+content_type = "application/pdf"
 
     ph = _ph()
     now = _now()

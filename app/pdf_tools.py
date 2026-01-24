@@ -3,6 +3,7 @@ from typing import Tuple
 
 from PIL import Image
 import img2pdf
+from pypdf import PdfReader, PdfWriter
 
 # Impostazioni consigliate per fatture/chiusure:
 # - max_side: 1400px (leggibile ma molto più leggero delle foto originali)
@@ -68,3 +69,19 @@ def ensure_pdf(
 
     # fallback: non è immagine né PDF -> salva originale
     return file_bytes, filename, content_type
+
+
+def merge_pdfs(pdf_bytes_list):
+    """Merge a list of PDF byte strings into a single PDF."""
+    if not pdf_bytes_list:
+        return b""
+    if len(pdf_bytes_list) == 1:
+        return pdf_bytes_list[0]
+    writer = PdfWriter()
+    for b in pdf_bytes_list:
+        reader = PdfReader(io.BytesIO(b))
+        for page in reader.pages:
+            writer.add_page(page)
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()

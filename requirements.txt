@@ -11,3 +11,6 @@ psycopg[binary]==3.2.3
 # PDF compressi da foto
 Pillow==10.4.0
 img2pdf==0.5.1
+
+# Merge PDF multipagina
+pypdf==4.3.1
