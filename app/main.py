@@ -5,6 +5,7 @@ import io
 from datetime import date
 
 from fastapi import FastAPI, Request, Form, UploadFile, File
+from .pdf_tools import ensure_pdf
 from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
@@ -1094,9 +1095,10 @@ async def closures_upload(request: Request, closure_date: str = Form(...), file:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
     store = _effective_store(request, user)
-    content = await file.read()
+    raw = await file.read()
     filename = file.filename or "chiusura"
     content_type = file.content_type or "application/octet-stream"
+    content, filename, content_type = ensure_pdf(raw, filename, content_type)
 
     # parse data
     try:
@@ -1199,9 +1201,10 @@ async def invoices_upload(request: Request, supplier: str = Form(...), doc_date:
     except Exception:
         return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
 
-    content = await file.read()
+    raw = await file.read()
     filename = file.filename or "fattura"
     content_type = file.content_type or "application/octet-stream"
+    content, filename, content_type = ensure_pdf(raw, filename, content_type)
 
     ph = _ph()
     now = _now()
@@ -1254,9 +1257,10 @@ async def invoice_import_upload(request: Request, supplier: str = Form(...), doc
     except Exception:
         return RedirectResponse("/fatture/importa-prodotti", status_code=HTTP_303_SEE_OTHER)
 
-    content = await file.read()
+    raw = await file.read()
     filename = file.filename or "fattura"
     content_type = file.content_type or "application/octet-stream"
+    content, filename, content_type = ensure_pdf(raw, filename, content_type)
 
     ph = _ph()
     now = _now()
