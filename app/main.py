@@ -54,6 +54,19 @@ def _now() -> str:
     return "NOW()" if using_postgres() else "datetime('now')"
 
 
+
+
+# =========================
+# LOG HELPERS
+# =========================
+
+def log_event(conn, *, store: str, username: str, module: str, action: str, category: str = "", name: str = "", delta: float = 0.0, note: str = ""):
+    ph = _ph()
+    # note è opzionale e non viene mostrata se vuota
+    conn.cursor().execute(
+        f"INSERT INTO logs(ts, store, username, module, action, category, name, delta, note) VALUES({_now()},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+        (store, username, module, action, category or "", name or "", float(delta or 0.0), note or ""),
+    )
 # =========================
 # SESSION HELPERS
 # =========================
@@ -783,10 +796,7 @@ def item_delta(request: Request, item_id: int, delta: float = Form(...)):
             f"UPDATE products SET qty={ph}, updated_at={now} WHERE id={ph}",
             (new_qty, int(item_id)),
         )
-        cur.execute(
-            f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (active_store, user["username"], "DELTA", row["category"], row["name"], float(delta)),
-        )
+        log_event(conn, store=active_store, username=user["username"], module="inventario", action="DELTA", category=row["category"], name=row["name"], delta=float(delta))
 
     # dopo login deve scegliere la sezione (bibite / prodotti)
     request.session.pop("selected_area", None)
@@ -819,10 +829,7 @@ def item_set(request: Request, item_id: int, qty: float = Form(...)):
             f"UPDATE products SET qty={ph}, updated_at={now} WHERE id={ph}",
             (float(qty), int(item_id)),
         )
-        cur.execute(
-            f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (active_store, user["username"], "SET", row["category"], row["name"], float(qty)),
-        )
+        log_event(conn, store=active_store, username=user["username"], module="inventario", action="SET", category=row["category"], name=row["name"], delta=float(qty))
 
     return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
@@ -858,10 +865,7 @@ def item_add(
                 DO UPDATE SET area=excluded.area, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
             (active_store, category, name, area, float(qty), float(min_qty)),
         )
-        cur.execute(
-            f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (active_store, user["username"], "ADD", category, name, float(qty)),
-        )
+        log_event(conn, store=active_store, username=user["username"], module="inventario", action="ADD", category=category, name=name, delta=float(qty))
 
     return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
@@ -901,10 +905,7 @@ def item_edit(
             f"UPDATE products SET category={ph}, name={ph}, min_qty={ph}, updated_at={now} WHERE id={ph}",
             (category, name, float(min_qty), int(item_id)),
         )
-        cur.execute(
-            f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (active_store, user["username"], "EDIT", category, name, float(min_qty)),
-        )
+        log_event(conn, store=active_store, username=user["username"], module="inventario", action="EDIT", category=category, name=name, delta=float(min_qty), note="min_qty")
 
     return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
@@ -930,10 +931,7 @@ def item_delete(request: Request, item_id: int):
         ).fetchone()
         if row:
             cur.execute(f"DELETE FROM products WHERE id={ph}", (int(item_id),))
-            cur.execute(
-                f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-                (active_store, user["username"], "DELETE", row["category"], row["name"], 0.0),
-            )
+            log_event(conn, store=active_store, username=user["username"], module="inventario", action="DELETE", category=row["category"], name=row["name"], delta=0.0)
 
     return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
@@ -1019,10 +1017,7 @@ async def import_csv(request: Request, file: UploadFile = File(...)):
             )
             count += 1
 
-        cur.execute(
-            f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (active_store, user["username"], "IMPORT", "CSV", file.filename or "upload", float(count)),
-        )
+        log_event(conn, store=active_store, username=user["username"], module="inventario", action="IMPORT_CSV", category="CSV", name=(file.filename or "upload"), delta=float(count))
 
     return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
@@ -1085,7 +1080,7 @@ def closures_page(request: Request, q: str = ""):
         sql += " ORDER BY closure_date DESC, id DESC"
         rows = cur.execute(sql, tuple(params)).fetchall()
 
-    return render("closures.html", user=user, rows=rows, q=q, stores=STORES, brand=brand)
+    return render("closures.html", user=user, rows=rows, q=q, stores=STORES, brand=brand, admin=is_admin(request))
 
 
 @app.post("/chiusure/upload")
@@ -1114,6 +1109,7 @@ async def closures_upload(request: Request, closure_date: str = Form(...), file:
             f"INSERT INTO closures(store, closure_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{now},{ph},{ph},{ph})",
             (store, closure_date, user["username"], filename, content_type, content),
         )
+        log_event(conn, store=store, username=user["username"], module="chiusure", action="UPLOAD", category="CHIUSURE", name=filename, delta=0.0, note=str(closure_date))
 
     return RedirectResponse("/chiusure", status_code=HTTP_303_SEE_OTHER)
 
@@ -1123,6 +1119,8 @@ def closures_download(request: Request, doc_id: int):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not is_admin(request):
+        return PlainTextResponse("Solo admin può aprire i documenti.", status_code=403)
     store = _effective_store(request, user)
 
     ph = _ph()
@@ -1152,7 +1150,13 @@ def closures_delete(request: Request, doc_id: int):
     with connect() as conn:
         cur = conn.cursor()
         # elimina solo se appartiene allo store corrente
+        row = cur.execute(
+            f"SELECT filename, closure_date FROM closures WHERE id={ph} AND store={ph}",
+            (int(doc_id), store),
+        ).fetchone()
         cur.execute(f"DELETE FROM closures WHERE id={ph} AND store={ph}", (int(doc_id), store))
+        if row:
+            log_event(conn, store=store, username=user["username"], module="chiusure", action="DELETE", category="CHIUSURE", name=(row.get("filename") or f"chiusura #{doc_id}"), delta=0.0, note=str(row.get("closure_date") or ""))
     return RedirectResponse("/chiusure", status_code=HTTP_303_SEE_OTHER)
 
 
@@ -1182,7 +1186,7 @@ def invoices_page(request: Request, supplier: str = "", q_date: str = ""):
         sql += " ORDER BY doc_date DESC, id DESC"
         rows = cur.execute(sql, tuple(params)).fetchall()
 
-    return render("invoices.html", user=user, rows=rows, supplier=supplier, q_date=q_date, stores=STORES, brand=brand)
+    return render("invoices.html", user=user, rows=rows, supplier=supplier, q_date=q_date, stores=STORES, brand=brand, admin=is_admin(request))
 
 
 @app.post("/fatture/upload")
@@ -1214,6 +1218,7 @@ async def invoices_upload(request: Request, supplier: str = Form(...), doc_date:
             f"INSERT INTO invoices_docs(store, supplier, doc_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{ph},{now},{ph},{ph},{ph})",
             (store, supplier, doc_date, user["username"], filename, content_type, content),
         )
+        log_event(conn, store=store, username=user["username"], module="fatture", action="UPLOAD", category=supplier, name=filename, delta=0.0, note=str(doc_date))
 
     return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
 
@@ -1412,6 +1417,9 @@ async def invoice_import_confirm(request: Request, draft_id: int):
         )
         invoice_doc_id = cur.fetchone()[0]
 
+        # log documento fattura salvato
+        log_event(conn, store=store, username=user["username"], module="fatture", action="UPLOAD", category=(supplier or draft["supplier"]), name=(draft["filename"] or 'fattura'), delta=0.0, note=str(doc_date or str(draft["doc_date"])))
+
         # 3) creo import
         cur.execute(
             f"INSERT INTO invoice_imports(store, invoice_doc_id, supplier, doc_date, area, created_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now}) RETURNING id",
@@ -1482,10 +1490,7 @@ async def invoice_import_confirm(request: Request, draft_id: int):
             )
 
             # log
-            cur.execute(
-                f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({_now()},{ph},{ph},{ph},{ph},{ph},{ph})",
-                (store, user["username"], "IMPORT_FATTURA", cat, product_name, q),
-            )
+            log_event(conn, store=store, username=user["username"], module="inventario", action="IMPORT_FATTURA", category=cat, name=product_name, delta=q)
 
         # 5) elimina bozza
         cur.execute(
@@ -1501,6 +1506,8 @@ def invoices_download(request: Request, doc_id: int):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not is_admin(request):
+        return PlainTextResponse("Solo admin può aprire i documenti.", status_code=403)
     store = _effective_store(request, user)
 
     ph = _ph()
@@ -1530,6 +1537,12 @@ def invoices_delete(request: Request, doc_id: int):
     ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
+        row = cur.execute(
+            f"SELECT supplier, doc_date, filename FROM invoices_docs WHERE id={ph} AND store={ph}",
+            (int(doc_id), store),
+        ).fetchone()
         cur.execute(f"DELETE FROM invoices_docs WHERE id={ph} AND store={ph}", (int(doc_id), store))
+        if row:
+            log_event(conn, store=store, username=user["username"], module="fatture", action="DELETE", category=(row.get("supplier") or ""), name=(row.get("filename") or f"fattura #{doc_id}"), delta=0.0, note=str(row.get("doc_date") or ""))
     return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
 

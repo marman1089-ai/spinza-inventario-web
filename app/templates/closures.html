@@ -39,7 +39,14 @@
           {% for r in rows %}
             <tr>
               <td><strong>{{ r.closure_date }}</strong></td>
-              <td><a class="pill" href="/chiusure/{{ r.id }}" target="_blank" style="text-decoration:none;color:#111">Apri</a> <span class="muted">{{ r.filename or '' }}</span></td>
+              <td>
+                {% if admin %}
+                  <a class="pill" href="/chiusure/{{ r.id }}" target="_blank" style="text-decoration:none;color:#111">Apri</a>
+                {% else %}
+                  <span class="pill" title="Solo admin può aprire">🔒 Solo admin</span>
+                {% endif %}
+                <span class="muted">{{ r.filename or "" }}</span>
+              </td>
               <td>{{ r.uploaded_by }}</td>
               <td class="muted">{{ r.ts }}</td>
               <td>

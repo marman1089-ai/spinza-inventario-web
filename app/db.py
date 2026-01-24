@@ -226,9 +226,25 @@ def init_db():
             ts {ts_default},
             store TEXT NOT NULL,
             username TEXT NOT NULL,
+            module TEXT NOT NULL DEFAULT 'inventario',
             action TEXT NOT NULL,
             category TEXT NOT NULL,
             name TEXT NOT NULL,
-            delta {qty_col} NOT NULL
+            delta {qty_col} NOT NULL,
+            note TEXT NOT NULL DEFAULT ''
         )
         """)
+
+        # ensure new columns exist on older DBs
+        if using_postgres():
+            cur.execute("ALTER TABLE logs ADD COLUMN IF NOT EXISTS module TEXT NOT NULL DEFAULT 'inventario'")
+            cur.execute("ALTER TABLE logs ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT ''")
+        else:
+            try:
+                cur.execute("ALTER TABLE logs ADD COLUMN module TEXT NOT NULL DEFAULT 'inventario'")
+            except Exception:
+                pass
+            try:
+                cur.execute("ALTER TABLE logs ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+            except Exception:
+                pass
