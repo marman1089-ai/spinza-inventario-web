@@ -22,7 +22,7 @@
             <input type="file" name="files" accept="application/pdf,image/*" capture="environment" required />
           </div>
           <div style="display:flex;gap:8px;align-items:center">
-            <button class="btn2" type="button" onclick="addClosureFile()">+1</button>
+            <button class="btn2" type="button" onclick="addFileInput('closure-files')">+1</button>
             <span class="muted" style="font-size:12px">Se la chiusura ha più foto, premi +1 e aggiungi un’altra foto (verranno salvate nello stesso PDF).</span>
           </div>
         </div>
@@ -67,15 +67,3 @@
     </div>
   </div>
 {% endblock %}
-
-<script>
-function addClosureFile(){
-  const wrap = document.getElementById('closure-files');
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.name = 'files';
-  input.accept = 'application/pdf,image/*';
-  input.setAttribute('capture','environment');
-  wrap.appendChild(input);
-}
-</script>

@@ -28,7 +28,7 @@
             <input type="file" name="files" accept="application/pdf,image/*" capture="environment" required />
           </div>
           <div style="display:flex;gap:8px;align-items:center">
-            <button class="btn2" type="button" onclick="addInvoiceFile()">+1</button>
+            <button class="btn2" type="button" onclick="addFileInput('invoice-files')">+1</button>
             <span class="muted" style="font-size:12px">Se la fattura ha più fogli, premi +1 e aggiungi un’altra foto (verranno salvate nello stesso PDF).</span>
           </div>
         </div>
@@ -77,14 +77,3 @@
   </div>
 {% endblock %}
 
-<script>
-function addInvoiceFile(){
-  const wrap = document.getElementById('invoice-files');
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.name = 'files';
-  input.accept = 'application/pdf,image/*';
-  input.setAttribute('capture','environment');
-  wrap.appendChild(input);
-}
-</script>
