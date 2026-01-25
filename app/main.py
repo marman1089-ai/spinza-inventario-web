@@ -1131,6 +1131,10 @@ def closures_page(request: Request, q: str = ""):
 
 @app.post("/chiusure/upload")
 async def closures_upload(request: Request, closure_date: str = Form(...), files: list[UploadFile] = File(...)):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
     store = _effective_store(request, user)
 
     pdfs: list[bytes] = []
@@ -1281,6 +1285,12 @@ def invoices_page(request: Request, supplier: str = "", q_date: str = ""):
 
 @app.post("/fatture/upload")
 async def invoices_upload(request: Request, supplier: str = Form(...), doc_date: str = Form(...), files: list[UploadFile] = File(...)):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+
     pdfs: list[bytes] = []
     base_name = "fattura"
     for f in files:

@@ -23,20 +23,15 @@
       <div class="row">
         <input name="supplier" placeholder="Fornitore" required />
         <input type="date" name="doc_date" required />
-        <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:260px">
-  <div id="inv-files-wrap" style="display:flex;flex-direction:column;gap:6px">
-    <div id="invoice-files">
-  <div class="file-row">
-    <input type="file" name="files" accept="application/pdf,image/*" capture="environment" required />
-  </div>
-</div>
-<button type="button" class="btn btn-secondary" style="margin-left:8px" onclick="addFileInput('invoice-files')">+1</button>
-  </div>
-  <div style="display:flex;gap:8px;align-items:center">
-    <button class="btn" type="button" onclick="addInvoiceFile()">+1</button>
-    <span class="muted" style="font-size:12px">Se la fattura ha più fogli, premi +1 e aggiungi un’altra foto (verranno salvate nello stesso PDF).</span>
-  </div>
-</div>
+        <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-width:260px">
+          <div id="invoice-files" style="display:flex;flex-direction:column;gap:6px">
+            <input type="file" name="files" accept="application/pdf,image/*" capture="environment" required />
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn2" type="button" onclick="addInvoiceFile()">+1</button>
+            <span class="muted" style="font-size:12px">Se la fattura ha più fogli, premi +1 e aggiungi un’altra foto (verranno salvate nello stesso PDF).</span>
+          </div>
+        </div>
 
         <button class="btn" type="submit">Carica</button>
       </div>
@@ -84,7 +79,7 @@
 
 <script>
 function addInvoiceFile(){
-  const wrap = document.getElementById('inv-files-wrap');
+  const wrap = document.getElementById('invoice-files');
   const input = document.createElement('input');
   input.type = 'file';
   input.name = 'files';
