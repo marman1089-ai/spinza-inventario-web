@@ -1078,46 +1078,170 @@ async def import_csv(request: Request, file: UploadFile = File(...)):
     return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
 
+def _normalize_active_store_for_admin(request: Request) -> str:
+    """Ritorna lo store attivo per l'admin (può essere anche ALL)."""
+    active_store = (request.session.get("active_store") or "spinza").strip()
+    if active_store != "ALL" and active_store not in STORES:
+        active_store = "spinza"
+        request.session["active_store"] = active_store
+    return active_store
+
+
+def _logs_sql_date_filter(using_pg: bool, field: str = "ts"):
+    """Ritorna la condizione SQL e la funzione di conversione per filtrare per giorno (YYYY-MM-DD)."""
+    if using_pg:
+        return f"DATE({field}) = {_ph()}"
+    # sqlite: ts è una stringa 'YYYY-MM-DD HH:MM:SS'
+    return f"substr({field}, 1, 10) = {_ph()}"
+
+
+def _fetch_logs(
+    *,
+    store: str,
+    limit: int,
+    section: str,
+    q_user: str = "",
+    q_day: str = "",
+):
+    """Legge i log filtrando per sezione, utente e giorno.
+
+    section: 'inventory' | 'orders' | 'docs'
+    q_day: 'YYYY-MM-DD'
+    """
+    ph = _ph()
+    using_pg = using_postgres()
+
+    # condizioni sezione
+    order_cond = "(UPPER(action) LIKE 'ORDER_%' OR UPPER(category) IN ('ORDINI','ORDER'))"
+    doc_cond = "(UPPER(action) LIKE 'DOC_%' OR UPPER(category) IN ('CHIUSURE','FATTURE','SPESE'))"
+    if section == "orders":
+        section_cond = order_cond
+    elif section == "docs":
+        section_cond = doc_cond
+    else:
+        section_cond = f"(NOT {order_cond} AND NOT {doc_cond})"
+
+    where = [section_cond]
+    params = []
+
+    if store != "ALL":
+        where.append(f"store={ph}")
+        params.append(store)
+
+    q_user = (q_user or "").strip()
+    if q_user:
+        # ricerca parziale sullo username
+        if using_pg:
+            where.append(f"username ILIKE {ph}")
+            params.append(f"%{q_user}%")
+        else:
+            where.append(f"UPPER(username) LIKE {ph}")
+            params.append(f"%{q_user.upper()}%")
+
+    q_day = (q_day or "").strip()
+    if q_day:
+        where.append(_logs_sql_date_filter(using_pg, "ts"))
+        params.append(q_day)
+
+    where_sql = " AND ".join(where) if where else "1=1"
+
+    with connect() as conn:
+        cur = conn.cursor()
+        rows = cur.execute(
+            f"SELECT * FROM logs WHERE {where_sql} ORDER BY id DESC LIMIT {ph}",
+            tuple(params + [int(limit)]),
+        ).fetchall()
+    return rows
+
+
 # =========================
-# LOGS PAGE (admin only)
+# LOGS (admin only) - 3 pagine + ricerca
 # =========================
 @app.get("/logs", response_class=HTMLResponse)
-def logs_page(request: Request, limit: int = 200):
+def logs_home(request: Request):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
     if not is_admin(request):
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
-    active_store = (request.session.get("active_store") or "spinza").strip()
-    if active_store != "ALL" and active_store not in STORES:
-        active_store = "spinza"
-        request.session["active_store"] = active_store
-
-    ph = _ph()
-    with connect() as conn:
-        cur = conn.cursor()
-        if active_store == "ALL":
-            rows = cur.execute(
-                f"SELECT * FROM logs ORDER BY id DESC LIMIT {ph}",
-                (int(limit),),
-            ).fetchall()
-        else:
-            rows = cur.execute(
-                f"SELECT * FROM logs WHERE store={ph} ORDER BY id DESC LIMIT {ph}",
-                (active_store, int(limit)),
-            ).fetchall()
-
-    inv_rows, order_rows, doc_rows = _split_logs(rows)
-
+    active_store = _normalize_active_store_for_admin(request)
     brand = "ALL" if active_store == "ALL" else active_store
     return render(
-        "logs.html",
+        "logs_home.html",
         user=user,
-        inv_rows=inv_rows,
-        order_rows=order_rows,
-        doc_rows=doc_rows,
+        stores=STORES,
+        brand=brand,
+        active_store=active_store,
+    )
+
+
+@app.get("/logs/inventario", response_class=HTMLResponse)
+def logs_inventory_page(request: Request, limit: int = 500, q_user: str = "", q_day: str = ""):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not is_admin(request):
+        return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+
+    active_store = _normalize_active_store_for_admin(request)
+    rows = _fetch_logs(store=active_store, limit=limit, section="inventory", q_user=q_user, q_day=q_day)
+    brand = "ALL" if active_store == "ALL" else active_store
+    return render(
+        "logs_inventory.html",
+        user=user,
+        rows=rows,
         limit=limit,
+        q_user=q_user,
+        q_day=q_day,
+        stores=STORES,
+        brand=brand,
+        active_store=active_store,
+    )
+
+
+@app.get("/logs/ordini", response_class=HTMLResponse)
+def logs_orders_page(request: Request, limit: int = 500, q_user: str = "", q_day: str = ""):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not is_admin(request):
+        return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+
+    active_store = _normalize_active_store_for_admin(request)
+    rows = _fetch_logs(store=active_store, limit=limit, section="orders", q_user=q_user, q_day=q_day)
+    brand = "ALL" if active_store == "ALL" else active_store
+    return render(
+        "logs_orders.html",
+        user=user,
+        rows=rows,
+        limit=limit,
+        q_user=q_user,
+        q_day=q_day,
+        stores=STORES,
+        brand=brand,
+        active_store=active_store,
+    )
+
+
+@app.get("/logs/documenti", response_class=HTMLResponse)
+def logs_docs_page(request: Request, limit: int = 500, q_user: str = "", q_day: str = ""):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not is_admin(request):
+        return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+
+    active_store = _normalize_active_store_for_admin(request)
+    rows = _fetch_logs(store=active_store, limit=limit, section="docs", q_user=q_user, q_day=q_day)
+    brand = "ALL" if active_store == "ALL" else active_store
+    return render(
+        "logs_docs.html",
+        user=user,
+        rows=rows,
+        limit=limit,
+        q_user=q_user,
+        q_day=q_day,
         stores=STORES,
         brand=brand,
         active_store=active_store,
