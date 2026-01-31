@@ -1109,7 +1109,7 @@ def _logs_existing_columns(cur, using_pg: bool) -> set[str]:
         if using_pg:
             # information_schema è stabile su Postgres
             rows = cur.execute(
-                "SELECT column_name FROM information_schema.columns WHERE table_name='logs'"
+                "SELECT column_name FROM information_schema.columns WHERE table_name='logs' AND table_schema = current_schema()"
             ).fetchall()
             for r in rows:
                 # psycopg dict_row => {'column_name': 'ts'}
@@ -1223,10 +1223,17 @@ def _fetch_logs(
 
         where_sql = " AND ".join(where) if where else "1=1"
 
-        rows = cur.execute(
-            f"SELECT {select_sql} FROM logs WHERE {where_sql} ORDER BY id DESC LIMIT {safe_limit}",
-            tuple(params),
-        ).fetchall()
+        try:
+            rows = cur.execute(
+                f"SELECT {select_sql} FROM logs WHERE {where_sql} ORDER BY id DESC LIMIT {safe_limit}",
+                tuple(params),
+            ).fetchall()
+        except Exception as e:
+            # Non vogliamo mai 500 sui log: se la tabella non esiste, schema vecchio, o permessi,
+            # torniamo lista vuota e stampiamo l'errore nei log di Render.
+            print("[LOGS] Errore lettura logs:", repr(e))
+            rows = []
+
 
     return rows
 
