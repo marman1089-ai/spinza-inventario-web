@@ -181,10 +181,8 @@ def ensure_admin_user():
 def _startup():
     print("====================================")
     print("[STARTUP] Applicazione avviata")
-    from app.db import database_url_info
-    k, u = database_url_info()
-    print("[STARTUP] DB ENV KEY:", k)
-    print("[STARTUP] DB URL presente:", bool(u))
+    db_url = os.getenv("DATABASE_URL")
+    print("[STARTUP] DATABASE_URL presente:", bool(db_url))
     print("[STARTUP] DB TYPE:", "POSTGRES (Supabase)" if using_postgres() else "SQLITE (ATTENZIONE)")
 
     ensure_db_exists()
@@ -1114,8 +1112,8 @@ def _fetch_logs(
     using_pg = using_postgres()
 
     # condizioni sezione
-    order_cond = "(UPPER(action) LIKE 'ORDER_%' OR UPPER(category) IN ('ORDINI','ORDER'))"
-    doc_cond = "(UPPER(action) LIKE 'DOC_%' OR UPPER(category) IN ('CHIUSURE','FATTURE','SPESE'))"
+    order_cond = "(UPPER(action) LIKE 'ORDER_%%' OR UPPER(category) IN ('ORDINI','ORDER'))"
+    doc_cond = "(UPPER(action) LIKE 'DOC_%%' OR UPPER(category) IN ('CHIUSURE','FATTURE','SPESE'))"
     if section == "orders":
         section_cond = order_cond
     elif section == "docs":
