@@ -57,13 +57,17 @@
         <tbody>
           {% for r in rows %}
             <tr>
-              <td>{{ r.ts }}</td>
-              <td><span class="pill">{{ stores.get(r.store, r.store) }}</span></td>
-              <td><strong>{{ r.username }}</strong></td>
-              <td>{{ r.action }}</td>
-              <td>{{ r.category }}</td>
-              <td>{{ r.name }}</td>
-              <td>{{ r.delta }}</td>
+              {#
+                Nota: in produzione i record possono arrivare come dict (Postgres) o sqlite3.Row (SQLite).
+                Usiamo accesso "a chiave" per evitare Internal Server Error dovuti ad accessi con .campo.
+              #}
+              <td>{{ r["ts"] }}</td>
+              <td><span class="pill">{{ stores.get(r["store"], r["store"]) }}</span></td>
+              <td><strong>{{ r["username"] }}</strong></td>
+              <td>{{ r["action"] }}</td>
+              <td>{{ r["category"] }}</td>
+              <td>{{ r["name"] }}</td>
+              <td>{{ r["delta"] }}</td>
             </tr>
           {% endfor %}
           {% if not rows %}

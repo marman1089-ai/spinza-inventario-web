@@ -57,12 +57,13 @@
         <tbody>
           {% for r in rows %}
             <tr>
-              <td>{{ r.ts }}</td>
-              <td><span class="pill">{{ stores.get(r.store, r.store) }}</span></td>
-              <td><strong>{{ r.username }}</strong></td>
-              <td>{{ r.action }}</td>
-              <td><span class="pill">{{ r.category }}</span> — {{ r.name }}</td>
-              <td>{{ r.delta }}</td>
+              {# usa accesso a chiave per compatibilità Postgres/SQLite #}
+              <td>{{ r["ts"] }}</td>
+              <td><span class="pill">{{ stores.get(r["store"], r["store"]) }}</span></td>
+              <td><strong>{{ r["username"] }}</strong></td>
+              <td>{{ r["action"] }}</td>
+              <td><span class="pill">{{ r["category"] }}</span> — {{ r["name"] }}</td>
+              <td>{{ r["delta"] }}</td>
             </tr>
           {% endfor %}
           {% if not rows %}
