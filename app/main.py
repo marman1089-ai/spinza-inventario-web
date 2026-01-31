@@ -55,6 +55,38 @@ def _now() -> str:
 
 
 # =========================
+# LOG HELPERS
+# =========================
+def _log(cur, *, store: str, username: str, action: str, category: str, name: str, delta: float = 0.0):
+    """Inserisce una riga di log coerente tra SQLite/Postgres."""
+    ph = _ph()
+    now = _now()
+    cur.execute(
+        f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
+        (store, username, action, category, name, float(delta)),
+    )
+
+
+def _split_logs(rows):
+    """Divide i log in 3 sezioni: inventario, ordini, documenti/foto."""
+    inv, ords, docs = [], [], []
+    for r in rows:
+        action = (r.get("action") if isinstance(r, dict) else getattr(r, "action", "")) or ""
+        category = (r.get("category") if isinstance(r, dict) else getattr(r, "category", "")) or ""
+
+        a = str(action).upper()
+        c = str(category).upper()
+
+        if a.startswith("ORDER_") or c in ("ORDINI", "ORDER"):
+            ords.append(r)
+        elif c in ("CHIUSURE", "FATTURE", "SPESE") or a.startswith("DOC_"):
+            docs.append(r)
+        else:
+            inv.append(r)
+    return inv, ords, docs
+
+
+# =========================
 # SESSION HELPERS
 # =========================
 def require_login(request: Request):
@@ -1076,8 +1108,20 @@ def logs_page(request: Request, limit: int = 200):
                 (active_store, int(limit)),
             ).fetchall()
 
+    inv_rows, order_rows, doc_rows = _split_logs(rows)
+
     brand = "ALL" if active_store == "ALL" else active_store
-    return render("logs.html", user=user, rows=rows, limit=limit, stores=STORES, brand=brand, active_store=active_store)
+    return render(
+        "logs.html",
+        user=user,
+        inv_rows=inv_rows,
+        order_rows=order_rows,
+        doc_rows=doc_rows,
+        limit=limit,
+        stores=STORES,
+        brand=brand,
+        active_store=active_store,
+    )
 
 
 # =========================
@@ -1168,6 +1212,15 @@ async def closures_upload(request: Request, closure_date: str = Form(...), files
         cur.execute(
             f"INSERT INTO closures(store, closure_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{now},{ph},{ph},{ph})",
             (store, closure_date, user["username"], filename, content_type, content),
+        )
+        _log(
+            cur,
+            store=store,
+            username=user["username"],
+            action="DOC_UPLOAD",
+            category="CHIUSURE",
+            name=f"Chiusura {closure_date} ({filename})",
+            delta=0.0,
         )
 
     return RedirectResponse("/chiusure", status_code=HTTP_303_SEE_OTHER)
@@ -1322,6 +1375,15 @@ async def secondary_expenses_upload(request: Request, expense_date: str = Form(.
             f"INSERT INTO secondary_expenses(store, expense_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{now},{ph},{ph},{ph})",
             (store, expense_date, user["username"], filename, content_type, content),
         )
+        _log(
+            cur,
+            store=store,
+            username=user["username"],
+            action="DOC_UPLOAD",
+            category="SPESE",
+            name=f"Spesa {expense_date} ({filename})",
+            delta=0.0,
+        )
 
     return RedirectResponse("/spese-secondarie", status_code=HTTP_303_SEE_OTHER)
 
@@ -1440,6 +1502,16 @@ def orders_add_from_inventory(request: Request, item_id: int = Form(...)):
                 f"INSERT INTO order_queue(store, product_id, category, name, qty_to_order, added_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now})",
                 (store, int(item_id), row["category"], row["name"], suggested, user["username"]),
             )
+            # LOG: richiesta ordine (in arrivo)
+            _log(
+                cur,
+                store=store,
+                username=user["username"],
+                action="ORDER_IN_ARRIVO",
+                category=row["category"],
+                name=row["name"],
+                delta=float(suggested),
+            )
 
     # torna all'inventario mantenendo query string se c'è
     return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
@@ -1469,6 +1541,56 @@ def orders_queue_page(request: Request):
 
     active_store = request.session.get("active_store") if is_admin(request) else None
     return render("orders.html", user=user, rows=rows, stores=STORES, brand=brand, active_store=active_store)
+
+
+@app.post("/ordini/queue-delete")
+def orders_queue_delete(request: Request, queue_id: int = Form(...)):
+    """Elimina una riga 'ordine da fare' (se inserita per errore)."""
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    ph = _ph()
+    now = _now()
+
+    with connect() as conn:
+        cur = conn.cursor()
+
+        if store == "ALL" and is_admin(request):
+            info = cur.execute(
+                f"SELECT store, category, name, qty_to_order FROM order_queue WHERE id={ph}",
+                (int(queue_id),),
+            ).fetchone()
+            if info:
+                cur.execute(f"DELETE FROM order_queue WHERE id={ph}", (int(queue_id),))
+                _log(
+                    cur,
+                    store=info["store"],
+                    username=user["username"],
+                    action="ORDER_ELIMINA_DA_FARE",
+                    category=info["category"],
+                    name=info["name"],
+                    delta=float(info["qty_to_order"] or 0),
+                )
+        else:
+            info = cur.execute(
+                f"SELECT category, name, qty_to_order FROM order_queue WHERE id={ph} AND store={ph}",
+                (int(queue_id), store),
+            ).fetchone()
+            if info:
+                cur.execute(f"DELETE FROM order_queue WHERE id={ph} AND store={ph}", (int(queue_id), store))
+                _log(
+                    cur,
+                    store=store,
+                    username=user["username"],
+                    action="ORDER_ELIMINA_DA_FARE",
+                    category=info["category"],
+                    name=info["name"],
+                    delta=float(info["qty_to_order"] or 0),
+                )
+
+    return RedirectResponse("/ordini", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.post("/ordini/confirm")
@@ -1525,6 +1647,17 @@ def orders_confirm(request: Request, supplier: str = Form(...), queue_ids: list[
             else:
                 order_id = cur.lastrowid
 
+            # LOG: ordine confermato (ordinato)
+            _log(
+                cur,
+                store=st,
+                username=user["username"],
+                action="ORDER_ORDINATO",
+                category=supplier,
+                name=f"Ordine #{order_id} ({len(items)} righe)",
+                delta=float(len(items)),
+            )
+
             # inserisce linee + rimuove dalla coda
             for r in items:
                 cur.execute(
@@ -1573,6 +1706,63 @@ def orders_in_progress_page(request: Request):
 
     active_store = request.session.get("active_store") if is_admin(request) else None
     return render("ordered.html", user=user, orders=orders, stores=STORES, brand=brand, active_store=active_store)
+
+
+@app.post("/ordinati/arrivato")
+def orders_mark_arrived(request: Request, order_id: int = Form(...)):
+    """Pulsante 'Arrivato': elimina definitivamente l'ordine in corso."""
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    ph = _ph()
+
+    with connect() as conn:
+        cur = conn.cursor()
+
+        if store == "ALL" and is_admin(request):
+            info = cur.execute(
+                f"SELECT store, supplier FROM orders WHERE id={ph} AND status='in_corso'",
+                (int(order_id),),
+            ).fetchone()
+            if not info:
+                return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+            cur.execute(f"DELETE FROM order_lines WHERE order_id={ph}", (int(order_id),))
+            cur.execute(f"DELETE FROM orders WHERE id={ph}", (int(order_id),))
+
+            _log(
+                cur,
+                store=info["store"],
+                username=user["username"],
+                action="ORDER_ARRIVATO",
+                category=info["supplier"],
+                name=f"Ordine #{int(order_id)} arrivato",
+                delta=0.0,
+            )
+        else:
+            info = cur.execute(
+                f"SELECT supplier FROM orders WHERE id={ph} AND status='in_corso' AND store={ph}",
+                (int(order_id), store),
+            ).fetchone()
+            if not info:
+                return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+            cur.execute(f"DELETE FROM order_lines WHERE order_id={ph}", (int(order_id),))
+            cur.execute(f"DELETE FROM orders WHERE id={ph} AND store={ph}", (int(order_id), store))
+
+            _log(
+                cur,
+                store=store,
+                username=user["username"],
+                action="ORDER_ARRIVATO",
+                category=info["supplier"],
+                name=f"Ordine #{int(order_id)} arrivato",
+                delta=0.0,
+            )
+
+    return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
 
 
 
@@ -1645,6 +1835,15 @@ async def invoices_upload(request: Request, supplier: str = Form(...), doc_date:
         cur.execute(
             f"INSERT INTO invoices_docs(store, supplier, doc_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{ph},{now},{ph},{ph},{ph})",
             (store, supplier, doc_date, user["username"], filename, content_type, content),
+        )
+        _log(
+            cur,
+            store=store,
+            username=user["username"],
+            action="DOC_UPLOAD",
+            category="FATTURE",
+            name=f"Fattura {supplier} {doc_date} ({filename})",
+            delta=0.0,
         )
 
     return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)

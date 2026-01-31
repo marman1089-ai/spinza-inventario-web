@@ -1,20 +1,24 @@
 {% extends "base.html" %}
 {% set title = "Log - Spinza" %}
 {% block content %}
-  <div class="card">
+  <div class="card" style="margin-bottom:12px;">
     <div class="row" style="justify-content:space-between;align-items:center;">
       <div>
-        <h2 style="margin:0;">Log modifiche</h2>
-        <div class="muted">Ultime {{ limit }} azioni.</div>
+        <h2 style="margin:0;">Log</h2>
+        <div class="muted">Ultime {{ limit }} azioni (divise per sezione).</div>
       </div>
       <a class="pill" href="/inventario" style="text-decoration:none;color:#111">← Inventario</a>
     </div>
-    <div style="overflow:auto;margin-top:10px;">
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <h3 style="margin:0 0 10px 0;">📦 Modifiche inventario</h3>
+    <div style="overflow:auto;">
       <table>
         <thead>
           <tr>
             <th>Quando</th>
-            <th>Inventario</th>
+            <th>Negozio</th>
             <th>Utente</th>
             <th>Azione</th>
             <th>Categoria</th>
@@ -23,7 +27,7 @@
           </tr>
         </thead>
         <tbody>
-          {% for r in rows %}
+          {% for r in inv_rows %}
             <tr>
               <td>{{ r.ts }}</td>
               <td><span class="pill">{{ stores.get(r.store, r.store) }}</span></td>
@@ -34,8 +38,75 @@
               <td>{{ r.delta }}</td>
             </tr>
           {% endfor %}
-          {% if not rows %}
-            <tr><td colspan="7" class="muted">Nessun log.</td></tr>
+          {% if not inv_rows %}
+            <tr><td colspan="7" class="muted">Nessuna modifica inventario.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <h3 style="margin:0 0 10px 0;">🚚 Ordini (in arrivo / ordinati / arrivati)</h3>
+    <div class="muted" style="margin-bottom:8px;">Qui si vede sempre <strong>chi</strong> ha fatto l’azione e <strong>quando</strong>.</div>
+    <div style="overflow:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Quando</th>
+            <th>Negozio</th>
+            <th>Utente</th>
+            <th>Stato/Azione</th>
+            <th>Dettaglio</th>
+            <th>Q.tà</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in order_rows %}
+            <tr>
+              <td>{{ r.ts }}</td>
+              <td><span class="pill">{{ stores.get(r.store, r.store) }}</span></td>
+              <td><strong>{{ r.username }}</strong></td>
+              <td>{{ r.action }}</td>
+              <td><span class="pill">{{ r.category }}</span> — {{ r.name }}</td>
+              <td>{{ r.delta }}</td>
+            </tr>
+          {% endfor %}
+          {% if not order_rows %}
+            <tr><td colspan="6" class="muted">Nessun log ordini.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 10px 0;">🧾 Foto/Documenti (fatture, chiusure, spese)</h3>
+    <div style="overflow:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Quando</th>
+            <th>Negozio</th>
+            <th>Utente</th>
+            <th>Azione</th>
+            <th>Sezione</th>
+            <th>Dettaglio</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in doc_rows %}
+            <tr>
+              <td>{{ r.ts }}</td>
+              <td><span class="pill">{{ stores.get(r.store, r.store) }}</span></td>
+              <td><strong>{{ r.username }}</strong></td>
+              <td>{{ r.action }}</td>
+              <td><span class="pill">{{ r.category }}</span></td>
+              <td>{{ r.name }}</td>
+            </tr>
+          {% endfor %}
+          {% if not doc_rows %}
+            <tr><td colspan="6" class="muted">Nessun log foto/documenti.</td></tr>
           {% endif %}
         </tbody>
       </table>

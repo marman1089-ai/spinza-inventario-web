@@ -13,6 +13,12 @@
           <div class="pill">Fornitore: <strong>{{ o.supplier }}</strong></div>
           <div class="muted" style="margin-top:6px;">Creato da {{ o.created_by }} • {{ o.ts }}{% if active_store == 'ALL' %} • {{ stores.get(o.store, o.store) }}{% endif %}</div>
         </div>
+        <div>
+          <form method="post" action="/ordinati/arrivato" style="margin:0;">
+            <input type="hidden" name="order_id" value="{{ o.id }}" />
+            <button class="btn" type="submit">Arrivato ✔</button>
+          </form>
+        </div>
       </div>
 
       <div style="overflow:auto;margin-top:10px;">

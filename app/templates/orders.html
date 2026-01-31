@@ -24,6 +24,7 @@
               {% if active_store == 'ALL' %}<th>Negozio</th>{% endif %}
               <th>Aggiunto da</th>
               <th>Quando</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -38,10 +39,16 @@
                 {% if active_store == 'ALL' %}<td>{{ stores.get(r.store, r.store) }}</td>{% endif %}
                 <td>{{ r.added_by }}</td>
                 <td class="muted">{{ r.ts }}</td>
+                <td style="white-space:nowrap;">
+                  <form method="post" action="/ordini/queue-delete" style="margin:0;display:inline;">
+                    <input type="hidden" name="queue_id" value="{{ r.id }}" />
+                    <button class="btn" type="submit" style="padding:6px 10px;">Elimina</button>
+                  </form>
+                </td>
               </tr>
             {% endfor %}
             {% if not rows or rows|length == 0 %}
-              <tr><td colspan="7" class="muted">Nessun ordine da fare.</td></tr>
+              <tr><td colspan="{% if active_store == 'ALL' %}9{% else %}8{% endif %}" class="muted">Nessun ordine da fare.</td></tr>
             {% endif %}
           </tbody>
         </table>
