@@ -1145,11 +1145,16 @@ def _fetch_logs(
 
     where_sql = " AND ".join(where) if where else "1=1"
 
+    # In alcuni ambienti (soprattutto Postgres) il parametro bindato dentro LIMIT
+    # può generare errori (500). Usiamo quindi un LIMIT inserito come intero già
+    # validato per evitare Internal Server Error.
+    safe_limit = int(limit)
+
     with connect() as conn:
         cur = conn.cursor()
         rows = cur.execute(
-            f"SELECT * FROM logs WHERE {where_sql} ORDER BY id DESC LIMIT {ph}",
-            tuple(params + [int(limit)]),
+            f"SELECT * FROM logs WHERE {where_sql} ORDER BY id DESC LIMIT {safe_limit}",
+            tuple(params),
         ).fetchall()
     return rows
 
