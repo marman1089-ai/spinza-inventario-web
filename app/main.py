@@ -1247,6 +1247,335 @@ def closures_delete(request: Request, doc_id: int):
 
 
 
+
+
+# =========================
+# SPESE SECONDARIE (foto scontrini / spese urgenti)
+# =========================
+@app.get("/spese-secondarie", response_class=HTMLResponse)
+def secondary_expenses_page(request: Request, q: str = ""):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    brand = "ALL" if store == "ALL" else store
+
+    q = (q or "").strip()
+    ph = _ph()
+
+    with connect() as conn:
+        cur = conn.cursor()
+        if store == "ALL":
+            sql = "SELECT id, store, expense_date, uploaded_by, ts, filename, content_type FROM secondary_expenses WHERE 1=1"
+            params = []
+        else:
+            sql = f"SELECT id, store, expense_date, uploaded_by, ts, filename, content_type FROM secondary_expenses WHERE store={ph}"
+            params = [store]
+
+        if q:
+            sql += f" AND CAST(expense_date AS TEXT) LIKE {ph}"
+            params.append(f"%{q}%")
+
+        sql += " ORDER BY store, expense_date DESC, id DESC" if store == "ALL" else " ORDER BY expense_date DESC, id DESC"
+        rows = cur.execute(sql, tuple(params)).fetchall()
+
+    active_store = request.session.get("active_store") if is_admin(request) else None
+    return render("secondary_expenses.html", user=user, rows=rows, q=q, stores=STORES, brand=brand, active_store=active_store)
+
+
+@app.post("/spese-secondarie/upload")
+async def secondary_expenses_upload(request: Request, expense_date: str = Form(...), files: list[UploadFile] = File(...)):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+
+    pdfs: list[bytes] = []
+    base_name = "spesa"
+    for f in files:
+        raw = await f.read()
+        filename_in = f.filename or base_name
+        content_type_in = f.content_type or "application/octet-stream"
+        pdf_bytes, _, _ = ensure_pdf(raw, filename_in, content_type_in)
+        pdfs.append(pdf_bytes)
+
+    if not pdfs:
+        return RedirectResponse("/spese-secondarie", status_code=HTTP_303_SEE_OTHER)
+
+    content = merge_pdfs(pdfs) if len(pdfs) > 1 else pdfs[0]
+    first_name = (files[0].filename if files and files[0].filename else base_name) or base_name
+    filename = first_name if first_name.lower().endswith(".pdf") else f"{first_name}.pdf"
+    content_type = "application/pdf"
+
+    try:
+        _ = date.fromisoformat(expense_date)
+    except Exception:
+        return RedirectResponse("/spese-secondarie", status_code=HTTP_303_SEE_OTHER)
+
+    ph = _ph()
+    now = _now()
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"INSERT INTO secondary_expenses(store, expense_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{now},{ph},{ph},{ph})",
+            (store, expense_date, user["username"], filename, content_type, content),
+        )
+
+    return RedirectResponse("/spese-secondarie", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get("/spese-secondarie/{doc_id}")
+def secondary_expenses_download(request: Request, doc_id: int):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    if not is_admin(request):
+        return PlainTextResponse("Solo admin", status_code=403)
+
+    store = _effective_store(request, user)
+    ph = _ph()
+
+    with connect() as conn:
+        cur = conn.cursor()
+        if store == "ALL":
+            row = cur.execute(
+                f"SELECT filename, content_type, data FROM secondary_expenses WHERE id={ph}",
+                (int(doc_id),),
+            ).fetchone()
+        else:
+            row = cur.execute(
+                f"SELECT filename, content_type, data FROM secondary_expenses WHERE id={ph} AND store={ph}",
+                (int(doc_id), store),
+            ).fetchone()
+
+    if not row:
+        return PlainTextResponse("Not found", status_code=404)
+
+    from fastapi.responses import Response
+    headers = {"Content-Disposition": f"inline; filename=\"{row.get('filename') or 'spesa'}\""}
+    return Response(content=row["data"], media_type=row.get("content_type") or "application/octet-stream", headers=headers)
+
+
+@app.post("/spese-secondarie/{doc_id}/delete")
+def secondary_expenses_delete(request: Request, doc_id: int):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    ph = _ph()
+    now = _now()
+
+    with connect() as conn:
+        cur = conn.cursor()
+
+        if store == "ALL" and is_admin(request):
+            info = cur.execute(
+                f"SELECT store, expense_date, filename FROM secondary_expenses WHERE id={ph}",
+                (int(doc_id),),
+            ).fetchone()
+        else:
+            info = cur.execute(
+                f"SELECT store, expense_date, filename FROM secondary_expenses WHERE id={ph} AND store={ph}",
+                (int(doc_id), store),
+            ).fetchone()
+
+        if info:
+            if store == "ALL" and is_admin(request):
+                cur.execute(f"DELETE FROM secondary_expenses WHERE id={ph}", (int(doc_id),))
+                store_for_log = info["store"]
+            else:
+                cur.execute(f"DELETE FROM secondary_expenses WHERE id={ph} AND store={ph}", (int(doc_id), store))
+                store_for_log = store
+
+            cur.execute(
+                f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (store_for_log, user["username"], "DELETE", "SPESE", str(info.get("expense_date") or ""), 0.0),
+            )
+
+    return RedirectResponse("/spese-secondarie", status_code=HTTP_303_SEE_OTHER)
+
+
+# =========================
+# LOGISTICA: ORDINI
+# =========================
+@app.post("/ordini/add")
+def orders_add_from_inventory(request: Request, item_id: int = Form(...)):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    ph = _ph()
+    now = _now()
+
+    with connect() as conn:
+        cur = conn.cursor()
+        # prendo info prodotto
+        row = cur.execute(
+            f"SELECT id, category, name, qty, min_qty FROM products WHERE id={ph} AND store={ph}",
+            (int(item_id), store),
+        ).fetchone()
+        if not row:
+            return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+
+        # qty suggerita: almeno 1, altrimenti la differenza col minimo
+        try:
+            suggested = float(row.get("min_qty") or 0) - float(row.get("qty") or 0)
+        except Exception:
+            suggested = 1.0
+        if suggested <= 0:
+            suggested = 1.0
+
+        # evita doppioni: se già in coda, non reinserire
+        existing = cur.execute(
+            f"SELECT id FROM order_queue WHERE store={ph} AND product_id={ph}",
+            (store, int(item_id)),
+        ).fetchone()
+        if not existing:
+            cur.execute(
+                f"INSERT INTO order_queue(store, product_id, category, name, qty_to_order, added_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now})",
+                (store, int(item_id), row["category"], row["name"], suggested, user["username"]),
+            )
+
+    # torna all'inventario mantenendo query string se c'è
+    return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get("/ordini", response_class=HTMLResponse)
+def orders_queue_page(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    brand = "ALL" if store == "ALL" else store
+    ph = _ph()
+
+    with connect() as conn:
+        cur = conn.cursor()
+        if store == "ALL":
+            rows = cur.execute(
+                "SELECT id, store, category, name, qty_to_order, added_by, ts FROM order_queue ORDER BY store, category, name",
+            ).fetchall()
+        else:
+            rows = cur.execute(
+                f"SELECT id, store, category, name, qty_to_order, added_by, ts FROM order_queue WHERE store={ph} ORDER BY category, name",
+                (store,),
+            ).fetchall()
+
+    active_store = request.session.get("active_store") if is_admin(request) else None
+    return render("orders.html", user=user, rows=rows, stores=STORES, brand=brand, active_store=active_store)
+
+
+@app.post("/ordini/confirm")
+def orders_confirm(request: Request, supplier: str = Form(...), queue_ids: list[int] = Form(None)):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    supplier = (supplier or "").strip()
+    if not supplier:
+        return RedirectResponse("/ordini", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    ph = _ph()
+    now = _now()
+
+    # niente selezione => niente
+    if not queue_ids:
+        return RedirectResponse("/ordini", status_code=HTTP_303_SEE_OTHER)
+
+    with connect() as conn:
+        cur = conn.cursor()
+
+        # carico righe selezionate rispettando lo store corrente
+        if store == "ALL" and is_admin(request):
+            placeholders = ",".join([ph] * len(queue_ids))
+            sel = cur.execute(
+                f"SELECT id, store, product_id, category, name, qty_to_order FROM order_queue WHERE id IN ({placeholders})",
+                tuple(int(x) for x in queue_ids),
+            ).fetchall()
+            # in ALL, se selezioni righe di store diversi, creo un ordine per ogni store
+            by_store = {}
+            for r in sel:
+                by_store.setdefault(r["store"], []).append(r)
+        else:
+            placeholders = ",".join([ph] * len(queue_ids))
+            sel = cur.execute(
+                f"SELECT id, store, product_id, category, name, qty_to_order FROM order_queue WHERE store={ph} AND id IN ({placeholders})",
+                (store, *[int(x) for x in queue_ids]),
+            ).fetchall()
+            by_store = {store: sel}
+
+        for st, items in by_store.items():
+            if not items:
+                continue
+            # crea ordine
+            cur.execute(
+                f"INSERT INTO orders(store, supplier, status, created_by, ts) VALUES({ph},{ph},{ph},{ph},{now}) RETURNING id" if using_postgres() else
+                f"INSERT INTO orders(store, supplier, status, created_by, ts) VALUES({ph},{ph},{ph},{ph},{now})",
+                (st, supplier, "in_corso", user["username"]),
+            )
+            if using_postgres():
+                order_id = cur.fetchone()["id"]
+            else:
+                order_id = cur.lastrowid
+
+            # inserisce linee + rimuove dalla coda
+            for r in items:
+                cur.execute(
+                    f"INSERT INTO order_lines(order_id, product_id, category, name, qty) VALUES({ph},{ph},{ph},{ph},{ph})",
+                    (int(order_id), int(r["product_id"]), r["category"], r["name"], float(r["qty_to_order"])),
+                )
+                cur.execute(
+                    f"DELETE FROM order_queue WHERE id={ph}",
+                    (int(r["id"]),),
+                )
+
+    return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get("/ordinati", response_class=HTMLResponse)
+def orders_in_progress_page(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    brand = "ALL" if store == "ALL" else store
+    ph = _ph()
+
+    with connect() as conn:
+        cur = conn.cursor()
+        if store == "ALL":
+            os_ = cur.execute(
+                "SELECT id, store, supplier, status, created_by, ts FROM orders WHERE status='in_corso' ORDER BY ts DESC, id DESC",
+            ).fetchall()
+        else:
+            os_ = cur.execute(
+                f"SELECT id, store, supplier, status, created_by, ts FROM orders WHERE status='in_corso' AND store={ph} ORDER BY ts DESC, id DESC",
+                (store,),
+            ).fetchall()
+
+        orders = []
+        for o in os_:
+            lines = cur.execute(
+                f"SELECT category, name, qty FROM order_lines WHERE order_id={ph} ORDER BY category, name",
+                (int(o["id"]),),
+            ).fetchall()
+            od = dict(o)
+            od["lines"] = lines
+            orders.append(od)
+
+    active_store = request.session.get("active_store") if is_admin(request) else None
+    return render("ordered.html", user=user, orders=orders, stores=STORES, brand=brand, active_store=active_store)
+
+
+
 @app.get("/fatture", response_class=HTMLResponse)
 def invoices_page(request: Request, supplier: str = "", q_date: str = ""):
     user = require_login(request)

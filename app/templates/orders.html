@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% set title = "Logistica - Ordini" %}
+{% block content %}
+  <div class="card" style="margin-bottom:12px;">
+    <h2 style="margin:0 0 6px 0;">🚚 Logistica — Ordini da fare</h2>
+    <div class="muted">Da inventario premi <strong>Ordina</strong> su un prodotto: finisce qui. Seleziona più righe e conferma per creare un ordine (stesso fornitore).</div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <form method="post" action="/ordini/confirm">
+      <div class="row" style="align-items:center;">
+        <input name="supplier" placeholder="Fornitore (es. Metro, Prinz...)" style="flex:1;min-width:220px" required />
+        <button class="btn" type="submit">Conferma ordine</button>
+      </div>
+
+      <div style="overflow:auto;margin-top:12px;">
+        <table>
+          <thead>
+            <tr>
+              <th>✓</th>
+              <th>Categoria</th>
+              <th>Prodotto</th>
+              <th>Q.tà da ordinare</th>
+              {% if active_store == 'ALL' %}<th>Negozio</th>{% endif %}
+              <th>Aggiunto da</th>
+              <th>Quando</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+              <tr>
+                <td>
+                  <input type="checkbox" name="queue_ids" value="{{ r.id }}" />
+                </td>
+                <td><span class="pill">{{ r.category }}</span></td>
+                <td><strong>{{ r.name }}</strong></td>
+                <td>{{ "%.2f"|format(r.qty_to_order) }}</td>
+                {% if active_store == 'ALL' %}<td>{{ stores.get(r.store, r.store) }}</td>{% endif %}
+                <td>{{ r.added_by }}</td>
+                <td class="muted">{{ r.ts }}</td>
+              </tr>
+            {% endfor %}
+            {% if not rows or rows|length == 0 %}
+              <tr><td colspan="7" class="muted">Nessun ordine da fare.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Come aggiungere prodotti qui</h3>
+    <div class="muted">Vai in Inventario → sulla riga del prodotto premi <strong>Ordina</strong>.</div>
+  </div>
+{% endblock %}

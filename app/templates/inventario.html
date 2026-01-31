@@ -121,6 +121,11 @@
                     <button class="mini btn" type="submit">Set</button>
                   </form>
 
+                  <form method="post" action="/ordini/add" style="display:inline;">
+                    <input type="hidden" name="item_id" value="{{ it.id }}">
+                    <button class="mini btn2" type="submit" title="Aggiungi agli ordini da fare">🛒 Ordina</button>
+                  </form>
+
                   <details>
                     <summary class="mini btn2" style="list-style:none;cursor:pointer;">✏️ Modifica</summary>
                     <div style="margin-top:8px;">

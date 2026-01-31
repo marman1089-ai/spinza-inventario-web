@@ -157,7 +157,57 @@ def init_db():
         )
         """)
 
-        # INVOICES docs (archivio fatture)
+        
+        # SECONDARY EXPENSES (spese secondarie - foto scontrini/spese)
+        cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS secondary_expenses (
+            id {id_col},
+            store TEXT NOT NULL,
+            expense_date {date_col} NOT NULL,
+            uploaded_by TEXT NOT NULL,
+            ts {ts_default},
+            filename TEXT,
+            content_type TEXT,
+            data {blob_col}
+        )
+        """)
+
+        # LOGISTICS: order queue + orders
+        cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS order_queue (
+            id {id_col},
+            store TEXT NOT NULL,
+            product_id INTEGER NOT NULL,
+            category TEXT NOT NULL,
+            name TEXT NOT NULL,
+            qty_to_order {qty_col} NOT NULL DEFAULT 1,
+            added_by TEXT NOT NULL,
+            ts {ts_default}
+        )
+        """)
+
+        cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS orders (
+            id {id_col},
+            store TEXT NOT NULL,
+            supplier TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'in_corso',
+            created_by TEXT NOT NULL,
+            ts {ts_default}
+        )
+        """)
+
+        cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS order_lines (
+            id {id_col},
+            order_id INTEGER NOT NULL,
+            product_id INTEGER,
+            category TEXT NOT NULL,
+            name TEXT NOT NULL,
+            qty {qty_col} NOT NULL
+        )
+        """)
+# INVOICES docs (archivio fatture)
         cur.execute(f"""
         CREATE TABLE IF NOT EXISTS invoices_docs (
             id {id_col},
