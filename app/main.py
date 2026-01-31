@@ -1090,9 +1090,45 @@ def _normalize_active_store_for_admin(request: Request) -> str:
 def _logs_sql_date_filter(using_pg: bool, field: str = "ts"):
     """Ritorna la condizione SQL e la funzione di conversione per filtrare per giorno (YYYY-MM-DD)."""
     if using_pg:
-        return f"DATE({field}) = {_ph()}"
+        # Più robusto di DATE(ts) quando ts può essere TEXT o TIMESTAMP.
+        # Cast esplicito a DATE su entrambi i lati.
+        ph = _ph()
+        return f"CAST({field} AS DATE) = CAST({ph} AS DATE)"
     # sqlite: ts è una stringa 'YYYY-MM-DD HH:MM:SS'
     return f"substr({field}, 1, 10) = {_ph()}"
+
+
+def _logs_existing_columns(cur, using_pg: bool) -> set[str]:
+    """Ritorna l'insieme delle colonne presenti nella tabella logs.
+
+    Serve per evitare 500 su DB vecchi (Supabase/Postgres) dove la tabella logs
+    esiste ma con schema diverso/incompleto.
+    """
+    cols: set[str] = set()
+    try:
+        if using_pg:
+            # information_schema è stabile su Postgres
+            rows = cur.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='logs'"
+            ).fetchall()
+            for r in rows:
+                # psycopg dict_row => {'column_name': 'ts'}
+                cols.add(r["column_name"] if isinstance(r, dict) else r[0])
+        else:
+            rows = cur.execute("PRAGMA table_info(logs)").fetchall()
+            for r in rows:
+                # sqlite3.Row o tuple => col name in posizione 1 o key 'name'
+                if isinstance(r, dict):
+                    cols.add(r.get("name", ""))
+                else:
+                    try:
+                        cols.add(r["name"])  # type: ignore[index]
+                    except Exception:
+                        cols.add(r[1])
+    except Exception:
+        # Se fallisce la lettura metadata, meglio non rompere la pagina
+        return set()
+    return {c for c in cols if c}
 
 
 def _fetch_logs(
@@ -1111,51 +1147,87 @@ def _fetch_logs(
     ph = _ph()
     using_pg = using_postgres()
 
-    # condizioni sezione
-    order_cond = "(UPPER(action) LIKE 'ORDER_%' OR UPPER(category) IN ('ORDINI','ORDER'))"
-    doc_cond = "(UPPER(action) LIKE 'DOC_%' OR UPPER(category) IN ('CHIUSURE','FATTURE','SPESE'))"
-    if section == "orders":
-        section_cond = order_cond
-    elif section == "docs":
-        section_cond = doc_cond
-    else:
-        section_cond = f"(NOT {order_cond} AND NOT {doc_cond})"
-
-    where = [section_cond]
-    params = []
-
-    if store != "ALL":
-        where.append(f"store={ph}")
-        params.append(store)
-
-    q_user = (q_user or "").strip()
-    if q_user:
-        # ricerca parziale sullo username
-        if using_pg:
-            where.append(f"username ILIKE {ph}")
-            params.append(f"%{q_user}%")
-        else:
-            where.append(f"UPPER(username) LIKE {ph}")
-            params.append(f"%{q_user.upper()}%")
-
-    q_day = (q_day or "").strip()
-    if q_day:
-        where.append(_logs_sql_date_filter(using_pg, "ts"))
-        params.append(q_day)
-
-    where_sql = " AND ".join(where) if where else "1=1"
-
-    # In alcuni ambienti (soprattutto Postgres) il parametro bindato dentro LIMIT
-    # può generare errori (500). Usiamo quindi un LIMIT inserito come intero già
-    # validato per evitare Internal Server Error.
-    safe_limit = int(limit)
+    # LIMIT sempre sicuro (evita errori e query troppo pesanti)
+    try:
+        safe_limit = max(1, min(int(limit), 5000))
+    except Exception:
+        safe_limit = 500
 
     with connect() as conn:
         cur = conn.cursor()
+
+        # --- Compatibilità con DB "vecchi" ---
+        # Se la tabella logs esiste ma ha uno schema incompleto (molto comune su Supabase)
+        # qualunque riferimento a colonne mancanti crea Internal Server Error.
+        cols = _logs_existing_columns(cur, using_pg)
+
+        # SELECT: costruiamo sempre un set di colonne standard per i template.
+        # Se una colonna non esiste, la sostituiamo con un literal/NULL con alias.
+        def _sel_text(col: str) -> str:
+            return col if col in cols else f"'' AS {col}"
+
+        def _sel_num(col: str) -> str:
+            return col if col in cols else f"0 AS {col}"
+
+        def _sel_ts(col: str) -> str:
+            return col if col in cols else f"NULL AS {col}"
+
+        select_sql = ", ".join([
+            "id" if "id" in cols else "0 AS id",
+            _sel_ts("ts"),
+            _sel_text("store"),
+            _sel_text("username"),
+            _sel_text("action"),
+            _sel_text("category"),
+            _sel_text("name"),
+            _sel_num("delta"),
+        ])
+
+        # WHERE: aggiungiamo condizioni solo se le colonne esistono.
+        where = []
+        params = []
+
+        # condizioni sezione (richiedono action/category)
+        has_action = "action" in cols
+        has_category = "category" in cols
+        if has_action and has_category:
+            order_cond = "(UPPER(action) LIKE 'ORDER_%' OR UPPER(category) IN ('ORDINI','ORDER'))"
+            doc_cond = "(UPPER(action) LIKE 'DOC_%' OR UPPER(category) IN ('CHIUSURE','FATTURE','SPESE'))"
+            if section == "orders":
+                where.append(order_cond)
+            elif section == "docs":
+                where.append(doc_cond)
+            else:
+                where.append(f"(NOT {order_cond} AND NOT {doc_cond})")
+
+        # store filter
+        if store != "ALL" and "store" in cols:
+            where.append(f"store={ph}")
+            params.append(store)
+
+        # user filter
+        q_user = (q_user or "").strip()
+        if q_user and "username" in cols:
+            if using_pg:
+                where.append(f"username ILIKE {ph}")
+                params.append(f"%{q_user}%")
+            else:
+                where.append(f"UPPER(username) LIKE {ph}")
+                params.append(f"%{q_user.upper()}%")
+
+        # day filter
+        q_day = (q_day or "").strip()
+        if q_day and "ts" in cols:
+            where.append(_logs_sql_date_filter(using_pg, "ts"))
+            params.append(q_day)
+
+        where_sql = " AND ".join(where) if where else "1=1"
+
         rows = cur.execute(
-            f"SELECT * FROM logs WHERE {where_sql} ORDER BY id DESC LIMIT {safe_limit}",
+            f"SELECT {select_sql} FROM logs WHERE {where_sql} ORDER BY id DESC LIMIT {safe_limit}",
             tuple(params),
         ).fetchall()
+
     return rows
 
 
