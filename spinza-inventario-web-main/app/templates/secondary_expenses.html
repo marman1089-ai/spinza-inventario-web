@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% set title = "Spese Secondarie" %}
+{% block content %}
+  <div class="card" style="margin-bottom:12px;">
+    <form method="get" action="/spese-secondarie">
+      <div class="row">
+        <input name="q" value="{{ q or '' }}" placeholder="Cerca data (es. 23/01/2026 o 2026-01-23)" style="flex:1;min-width:240px" />
+        <button class="btn2" type="submit">Cerca</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <h2 style="margin-top:0">💸 Spese secondarie</h2>
+    <div class="muted">Carica la foto dello scontrino/spesa, imposta la data e la ritrovi subito con la ricerca.</div>
+
+    <form method="post" action="/spese-secondarie/upload" enctype="multipart/form-data" style="margin-top:12px;">
+      <div class="row">
+        <input type="date" name="expense_date" required />
+        <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-width:260px">
+          <div id="expense-files" style="display:flex;flex-direction:column;gap:6px">
+            <input type="file" name="files" accept="application/pdf,image/*" capture="environment" required />
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn2" type="button" onclick="addFileInput('expense-files')">+1</button>
+            <span class="muted" style="font-size:12px">Se la spesa ha più foto, premi +1 e aggiungi un’altra foto (verranno salvate nello stesso PDF).</span>
+          </div>
+        </div>
+        <button class="btn" type="submit">Carica</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Archivio</h3>
+    <div style="overflow:auto;margin-top:8px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Data</th>
+            {% if active_store == 'ALL' %}<th>Negozio</th>{% endif %}
+            <th>File</th>
+            <th>Caricato da</th>
+            <th>Quando</th><th>Azioni</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+            <tr>
+              <td><strong>{{ r.expense_date }}</strong></td>
+              {% if active_store == 'ALL' %}<td>{{ stores.get(r.store, r.store) }}</td>{% endif %}
+              <td><a class="pill" href="/spese-secondarie/{{ r.id }}" target="_blank" style="text-decoration:none;color:#111">Apri</a> <span class="muted">{{ r.filename or '' }}</span></td>
+              <td>{{ r.uploaded_by }}</td>
+              <td class="muted">{{ r.ts }}</td>
+              <td>
+                <form method="post" action="/spese-secondarie/{{ r.id }}/delete" onsubmit="return confirm('Eliminare questa chiusura?');" style="display:inline;">
+                  <button class="btn2" type="submit">Elimina</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+          {% if not rows %}
+            <tr><td colspan="5" class="muted">Nessuna chiusura trovata.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

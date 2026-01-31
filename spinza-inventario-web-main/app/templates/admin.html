@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% set title = "Admin - Spinza Inventario" %}
+{% block content %}
+  <div class="card" style="margin-bottom:12px;">
+    <div class="row" style="align-items:center;justify-content:space-between;">
+      <div>
+        <h2 style="margin:0;">Pannello Admin</h2>
+        <p class="muted" style="margin:6px 0 0 0;">Gestione dipendenti e funzioni rapide.</p>
+      </div>
+      <div class="row" style="justify-content:flex-end;">
+        <a class="pill" href="/inventario" style="text-decoration:none;color:#111;">📦 Inventario</a>
+        <a class="pill" href="/logs" style="text-decoration:none;color:#111;">🧾 Log</a>
+      </div>
+    </div>
+  </div>
+
+  {% if msg %}
+    <div class="card" style="margin-bottom:12px;background:#ecfdf5;border:1px solid #bbf7d0;">
+      {{ msg }}
+    </div>
+  {% endif %}
+  {% if error %}
+    <div class="card" style="margin-bottom:12px;background:#fff1f2;border:1px solid #fecdd3;">
+      {{ error }}
+    </div>
+  {% endif %}
+
+  <div class="card" style="margin-bottom:12px;">
+    <h3 style="margin:0 0 10px 0;">Crea dipendente</h3>
+
+    <form method="get" action="/admin" style="margin-bottom:10px;">
+      <div class="row" style="align-items:center;">
+        <span class="pill">Inventario</span>
+        <select name="store" onchange="this.form.submit()">
+          {% for code, label in stores.items() %}
+            <option value="{{ code }}" {% if admin_store==code %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <span class="muted">(gli account creati qui vanno in questo inventario)</span>
+      </div>
+    </form>
+
+    <form method="post" action="/admin/users/add">
+      <div class="row">
+        <input name="username" placeholder="Username" required />
+        <input name="password" placeholder="Password" type="password" required />
+        <input name="confirm_password" placeholder="Conferma password" type="password" required />
+        <button class="btn" type="submit">Crea</button>
+      </div>
+    </form>
+    <p class="muted" style="margin:10px 0 0 0;font-size:13px;">Gli account creati qui sono “staff” (dipendenti).</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 10px 0;">Lista dipendenti</h3>
+    <div style="overflow:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Inventario</th>
+            <th>Username</th>
+            <th>Ruolo</th>
+            <th style="text-align:right;">Azioni</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+            <tr>
+              <td><span class="pill">{{ stores.get(u.store, u.store) }}</span></td>
+              <td><strong>{{ u.username }}</strong></td>
+              <td>{{ u.role }}</td>
+              <td style="text-align:right;">
+                {% if u.role != 'admin' %}
+                  <details style="display:inline-block;text-align:left;">
+                    <summary class="pill" style="cursor:pointer;">✏️ Cambia username</summary>
+                    <div style="margin-top:10px;">
+                      <form method="post" action="/admin/users/{{ u.id }}/username">
+                        <div class="row" style="justify-content:flex-end;">
+                          <input name="new_username" placeholder="Nuovo username" required />
+                          <button class="btn2" type="submit">Salva</button>
+                        </div>
+                      </form>
+                    </div>
+                  </details>
+
+                  <details style="display:inline-block;text-align:left;">
+                    <summary class="pill" style="cursor:pointer;">🔑 Cambia password</summary>
+                    <div style="margin-top:10px;">
+                      <form method="post" action="/admin/users/{{ u.id }}/password">
+                        <div class="row" style="justify-content:flex-end;">
+                          <input name="new_password" placeholder="Nuova password" type="password" required />
+                          <input name="confirm_password" placeholder="Conferma" type="password" required />
+                          <button class="btn" type="submit">Salva</button>
+                        </div>
+                      </form>
+                    </div>
+                  </details>
+
+                  <form method="post" action="/admin/users/{{ u.id }}/delete" style="display:inline-block;" onsubmit="return confirm('Eliminare utente {{ u.username }}?');">
+                    <button class="mini" type="submit" title="Elimina utente">🗑</button>
+                  </form>
+                {% else %}
+                  <span class="pill">Admin</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

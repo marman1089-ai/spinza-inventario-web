@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% set title = "Scegli inventario" %}
+{% block content %}
+  <div class="card" style="max-width:560px;margin:20px auto;text-align:center;">
+    <h2 style="margin:0 0 6px 0;">Scegli inventario</h2>
+    <p class="muted" style="margin-top:0;">Prima scegli il negozio, poi fai Login/Registrazione.</p>
+
+    <div class="row" style="justify-content:center;margin-top:14px;">
+      <a class="btn" href="/select-store?store=spinza" style="text-decoration:none;display:inline-block;">🟩 Spinza</a>
+      <a class="btn" href="/select-store?store=reburger_camaldoli" style="text-decoration:none;display:inline-block;">🍔 Reburger Camaldoli</a>
+      <a class="btn" href="/select-store?store=reburger_palazzuolo" style="text-decoration:none;display:inline-block;">🍔 Reburger Palazzuolo</a>
+    </div>
+
+    <div style="margin-top:16px;">
+      <a class="pill" href="/admin-login" style="text-decoration:none;color:#111;">🛠 Entra come Admin</a>
+    </div>
+  </div>
+{% endblock %}

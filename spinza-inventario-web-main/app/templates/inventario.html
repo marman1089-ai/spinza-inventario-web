@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% set title = "Inventario" %}
+{% block content %}
+  <div class="card" style="margin-bottom:12px;">
+    <form method="get" action="/inventario">
+      <div class="row">
+        <a class="pill" href="/select-area" style="text-decoration:none;color:#111">
+          🧭 {{ areas.get(area, area) }}
+        </a>
+        {% if admin %}
+          <select name="store">
+            <option value="ALL" {% if active_store=='ALL' %}selected{% endif %}>Tutti gli inventari</option>
+            {% for code, label in stores.items() %}
+              <option value="{{ code }}" {% if active_store==code %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        {% endif %}
+        <input name="q" value="{{ q or '' }}" placeholder="Cerca prodotto o categoria…" style="flex:1;min-width:200px" />
+        <select name="cat">
+          <option value="ALL" {% if cat=='ALL' %}selected{% endif %}>Tutte le categorie</option>
+          {% for c in cats %}
+            <option value="{{ c }}" {% if cat==c %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+        <label class="pill" style="display:flex;gap:8px;align-items:center;">
+          <input type="checkbox" name="only_low" value="1" {% if only_low %}checked{% endif %} />
+          Solo sotto minimo
+        </label>
+        <button class="btn2" type="submit">Filtra</button>
+        {% if admin %}
+          <a class="pill" href="/logs" style="text-decoration:none;color:#111">📜 Log</a>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;align-items:flex-start;">
+      <div>
+        <h2 style="margin:0 0 6px 0;">Inventario</h2>
+        <div class="muted">
+          {% if admin %}
+            Vista: <strong>{% if active_store=='ALL' %}Tutti gli inventari{% else %}{{ stores.get(active_store, active_store) }}{% endif %}</strong>
+          {% else %}
+            Negozio: <strong>{{ user.store_label }}</strong>
+          {% endif %}
+          • Tocca +1 / -1 per scarichi veloci. “Sotto minimo” va in rosso.
+          {% if admin and not can_edit %}
+            • Per modificare, seleziona un inventario singolo.
+          {% endif %}
+        </div>
+      </div>
+      <details>
+        <summary class="pill" style="cursor:pointer;">➕ Aggiungi prodotto</summary>
+        <div style="margin-top:10px;">
+          {% if can_edit %}
+          <form method="post" action="/items/add">
+            <div class="row">
+              <input name="category" placeholder="Categoria" required />
+              <input name="name" placeholder="Nome prodotto" required />
+              <input name="qty" placeholder="Q.tà" type="number" step="0.01" />
+              <input name="min_qty" placeholder="Minimo" type="number" step="0.01" />
+              <button class="btn" type="submit">Salva</button>
+            </div>
+          </form>
+          {% else %}
+            <div class="muted">Seleziona un inventario singolo per aggiungere prodotti.</div>
+          {% endif %}
+        </div>
+      </details>
+
+      {% if can_edit %}
+      <details>
+        <summary class="pill" style="cursor:pointer;">⬇️⬆️ Import / Export CSV</summary>
+        <div style="margin-top:10px;">
+          <div class="row" style="align-items:center;">
+            <a class="pill" href="/export.csv" style="text-decoration:none;color:#111;">⬇️ Scarica CSV</a>
+            <form method="post" action="/import.csv" enctype="multipart/form-data" class="row" style="gap:8px;align-items:center;">
+              <input type="file" name="file" accept=".csv,text/csv" required />
+              <button class="btn2" type="submit">⬆️ Importa</button>
+            </form>
+          </div>
+          <div class="muted" style="margin-top:8px;">Formato CSV: <strong>category,name,qty,min_qty</strong> (intestazione inclusa). L'import fa <em>aggiornamento/aggiunta</em> automatico.</div>
+        </div>
+      </details>
+      {% endif %}
+    </div>
+
+    <div style="overflow:auto;margin-top:10px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Categoria</th>
+            <th>Prodotto</th>
+            <th>Q.tà</th>
+            <th class="hide-mobile">Min</th>
+            <th style="text-align:right;">Azioni <span class="pill" style="margin-left:6px;">-1 / +1 / Set</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for it in items %}
+            {% set low = (it.qty <= it.min_qty) %}
+            <tr {% if low %}style="background:#fff6f6"{% endif %}>
+              <td><span class="pill">{{ it.category }}</span></td>
+              <td><strong>{{ it.name }}</strong></td>
+              <td class="qty {% if low %}low{% endif %}">{{ "%.2f"|format(it.qty) }}</td>
+              <td class="hide-mobile">{{ "%.2f"|format(it.min_qty) }}</td>
+              <td>
+                <div class="actions">
+                  {% if can_edit %}
+                  <form method="post" action="/items/{{ it.id }}/delta">
+                    <input type="hidden" name="delta" value="-1">
+                    <button class="mini btn2" type="submit" title="Diminuisci quantità di 1">-1</button>
+                  </form>
+                  <form method="post" action="/items/{{ it.id }}/delta">
+                    <input type="hidden" name="delta" value="1">
+                    <button class="mini btn2" type="submit" title="Aumenta quantità di 1">+1</button>
+                  </form>
+                  <form method="post" action="/items/{{ it.id }}/set" class="row" style="gap:6px;">
+                    <input class="mini" name="qty" type="number" step="0.01" value="{{ it.qty }}" style="width:110px;">
+                    <button class="mini btn" type="submit">Set</button>
+                  </form>
+
+                  <form method="post" action="/ordini/add" style="display:inline;">
+                    <input type="hidden" name="item_id" value="{{ it.id }}">
+                    <button class="mini btn2" type="submit" title="Aggiungi agli ordini da fare">🛒 Ordina</button>
+                  </form>
+
+                  <details>
+                    <summary class="mini btn2" style="list-style:none;cursor:pointer;">✏️ Modifica</summary>
+                    <div style="margin-top:8px;">
+                      <form method="post" action="/items/{{ it.id }}/edit" class="row" style="gap:6px;">
+                        <input class="mini" name="category" value="{{ it.category }}" style="width:140px;" required />
+                        <input class="mini" name="name" value="{{ it.name }}" style="width:200px;" required />
+                        <input class="mini" name="min_qty" type="number" step="0.01" value="{{ it.min_qty }}" style="width:110px;" />
+                        <button class="mini btn" type="submit">Salva</button>
+                      </form>
+                      <div class="muted" style="margin-top:6px;">Modifica categoria/nome/minimo (la quantità si cambia con Set / +/-).</div>
+                    </div>
+                  </details>
+                  {% if admin %}
+                    <form method="post" action="/items/{{ it.id }}/delete" onsubmit="return confirm('Eliminare {{ it.name }}?')">
+                      <button class="mini" type="submit">🗑</button>
+                    </form>
+                  {% endif %}
+                  {% else %}
+                    <span class="muted" style="font-size:12px;">(Vista sola lettura)</span>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+          {% if not items %}
+            <tr><td colspan="5" class="muted">Nessun prodotto trovato.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

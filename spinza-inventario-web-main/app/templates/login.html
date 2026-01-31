@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% set title = "Login" %}
+{% block content %}
+  <div class="card" style="max-width:420px;margin:20px auto;">
+    <h2 style="margin:0 0 6px 0;">Login</h2>
+    <p class="muted" style="margin:0;">Inventario: <strong>{{ store_label }}</strong></p>
+    <p class="muted" style="margin-top:8px;">Entra per modificare l’inventario dal telefono.</p>
+    {% if error %}
+      <div class="danger" style="padding:10px 12px;border-radius:12px;margin:10px 0;">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/login">
+      <div style="display:grid;gap:10px;">
+        <input name="username" placeholder="Username" autocomplete="username" required />
+        <input name="password" placeholder="Password" type="password" autocomplete="current-password" required />
+        <button class="btn" type="submit">Entra</button>
+        <a class="pill" href="/register" style="text-decoration:none;color:#111;text-align:center;">📝 Registrati</a>
+        <a class="pill" href="/select-store" style="text-decoration:none;color:#111;text-align:center;">↩ Cambia inventario</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

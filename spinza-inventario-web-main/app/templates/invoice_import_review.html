@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% set title = "Ricontrollo import fattura" %}
+{% block content %}
+  <div class="card" style="margin-bottom:12px;">
+    <h2 style="margin-top:0">✅ Ricontrollo import fattura</h2>
+    <div class="muted">
+      Qui puoi correggere le righe prima di aggiornare l'inventario. Alla conferma: <strong>aggiunge quantità</strong> ai prodotti (o crea nuovi prodotti) e salva la fattura nell'archivio.
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <div class="row" style="align-items:center">
+      <span class="pill">Fornitore: <strong>{{ supplier }}</strong></span>
+      <span class="pill">Data: <strong>{{ doc_date }}</strong></span>
+      <span class="pill">Sezione: <strong>{{ area }}</strong></span>
+      <span class="pill">Righe: <strong id="rowCount">0</strong></span>
+      <div class="right"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <div class="muted" style="margin-bottom:8px;">Foto fattura</div>
+    <iframe src="/fatture/importa-prodotti/draft/{{ draft_id }}/image" style="width:100%;height:78vh;border-radius:12px;border:1px solid #eee"></iframe>
+  </div>
+
+  <div class="card">
+    <form method="post" action="/fatture/importa-prodotti/confirm/{{ draft_id }}">
+      <input type="hidden" name="supplier" value="{{ supplier }}" />
+      <input type="hidden" name="doc_date" value="{{ doc_date }}" />
+      <input type="hidden" name="area" value="{{ area }}" />
+
+      <div class="row" style="align-items:end;margin-bottom:10px;">
+        <div style="display:flex;flex-direction:column;gap:6px;min-width:220px;flex:1">
+          <label class="muted">Categoria predefinita</label>
+          <input id="defaultCategory" name="default_category" value="{{ default_category }}" placeholder="Es. BEVERAGE" />
+        </div>
+        <button class="btn2" type="button" onclick="addRow()">+ Aggiungi riga</button>
+        <button class="btn2" type="button" onclick="fillCategories()">Applica categoria a tutte</button>
+      </div>
+
+      <div style="overflow:auto;">
+        <table id="linesTable">
+          <thead>
+            <tr>
+              <th>Prodotto (come in fattura)</th>
+              <th>Quantità</th>
+              <th>Unità</th>
+              <th>Categoria</th>
+              <th>Associa a prodotto</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="linesBody"></tbody>
+        </table>
+      </div>
+
+      <div class="actions" style="margin-top:12px;">
+        <button class="danger" type="submit" formaction="/fatture/importa-prodotti/cancel/{{ draft_id }}">Annulla</button>
+        <button class="btn" type="submit">Conferma e aggiorna inventario</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    const products = {{ products_json | safe }};
+
+    function productSelectHtml(){
+      let html = '<select name="product_id" required>';
+      html += '<option value="__new__">➕ Crea nuovo prodotto</option>';
+      for (const p of products){
+        html += `<option value="${p.id}">${p.category} • ${p.name}</option>`;
+      }
+      html += '</select>';
+      return html;
+    }
+
+    function addRow(prefillName=''){
+      const tbody = document.getElementById('linesBody');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input name="raw_name" placeholder="Es. Coca Cola 33cl" value="${prefillName.replace(/"/g,'&quot;')}" required /></td>
+        <td><input name="qty" type="number" step="0.001" placeholder="0" required style="width:120px" /></td>
+        <td><input name="unit" placeholder="pz" style="width:90px" /></td>
+        <td><input name="category" placeholder="Categoria" value="${document.getElementById('defaultCategory').value || ''}" style="width:160px" required /></td>
+        <td>${productSelectHtml()}<div class="muted" style="margin-top:6px">Se scegli "Crea nuovo", userà il nome della prima colonna.</div></td>
+        <td><button class="btn2 mini" type="button" onclick="removeRow(this)">Rimuovi</button></td>
+      `;
+      tbody.appendChild(tr);
+      updateRowCount();
+    }
+
+    function removeRow(btn){
+      const tr = btn.closest('tr');
+      tr.remove();
+      updateRowCount();
+    }
+
+    function fillCategories(){
+      const val = document.getElementById('defaultCategory').value || '';
+      document.querySelectorAll('input[name="category"]').forEach(i => i.value = val);
+    }
+
+    function updateRowCount(){
+      document.getElementById('rowCount').innerText = document.querySelectorAll('#linesBody tr').length;
+    }
+
+    // start with 3 empty rows
+    addRow();
+    addRow();
+    addRow();
+  </script>
+{% endblock %}

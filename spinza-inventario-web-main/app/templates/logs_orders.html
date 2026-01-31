@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% set title = "Log ordini - Spinza" %}
+{% block content %}
+  <div class="card" style="margin-bottom:12px;">
+    <div class="row" style="justify-content:space-between;align-items:center;">
+      <div>
+        <h2 style="margin:0;">🚚 Ordini (in arrivo / ordinati / arrivati)</h2>
+        <div class="muted">Ultimi {{ limit }} log ordini (filtrabili per utente e giorno).</div>
+      </div>
+      <div class="row" style="gap:10px;flex-wrap:wrap;justify-content:flex-end;">
+        <a class="pill" href="/logs" style="text-decoration:none;color:#111">← Log</a>
+        <a class="pill" href="/inventario" style="text-decoration:none;color:#111">← Inventario</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <div class="row" style="gap:10px;flex-wrap:wrap;">
+      <a class="btn" href="/logs/inventario" style="text-decoration:none;">📦 Inventario</a>
+      <a class="btn" href="/logs/ordini" style="text-decoration:none;">🚚 Ordini</a>
+      <a class="btn" href="/logs/documenti" style="text-decoration:none;">🧾 Foto/Documenti</a>
+    </div>
+    <form method="get" action="/logs/ordini" class="row" style="gap:10px;flex-wrap:wrap;margin-top:12px;align-items:end;">
+      <div style="min-width:220px;flex:1;">
+        <label class="muted">Cerca per persona (utente)</label>
+        <input type="text" name="q_user" value="{{ q_user }}" placeholder="es. marco" />
+      </div>
+      <div style="min-width:200px;">
+        <label class="muted">Cerca per giorno</label>
+        <input type="date" name="q_day" value="{{ q_day }}" />
+      </div>
+      <div>
+        <label class="muted">&nbsp;</label>
+        <button class="btn" type="submit">🔎 Cerca</button>
+      </div>
+      <div>
+        <label class="muted">&nbsp;</label>
+        <a class="pill" href="/logs/ordini" style="text-decoration:none;color:#111">Reset</a>
+      </div>
+    </form>
+    <div class="muted" style="margin-top:10px;">Qui si vede sempre <strong>chi</strong> ha fatto l’azione e <strong>quando</strong>.</div>
+  </div>
+
+  <div class="card">
+    <div style="overflow:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Quando</th>
+            <th>Negozio</th>
+            <th>Utente</th>
+            <th>Stato/Azione</th>
+            <th>Dettaglio</th>
+            <th>Q.tà</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+            <tr>
+              {# usa accesso a chiave per compatibilità Postgres/SQLite #}
+              <td>{{ r["ts"] }}</td>
+              <td><span class="pill">{{ stores.get(r["store"], r["store"]) }}</span></td>
+              <td><strong>{{ r["username"] }}</strong></td>
+              <td>{{ r["action"] }}</td>
+              <td><span class="pill">{{ r["category"] }}</span> — {{ r["name"] }}</td>
+              <td>{{ r["delta"] }}</td>
+            </tr>
+          {% endfor %}
+          {% if not rows %}
+            <tr><td colspan="6" class="muted">Nessun risultato.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

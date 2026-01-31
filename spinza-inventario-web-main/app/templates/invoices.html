@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% set title = "Fatture" %}
+{% block content %}
+  <div class="card" style="margin-bottom:12px;">
+    <form method="get" action="/fatture">
+      <div class="row">
+        <input name="supplier" value="{{ supplier or '' }}" placeholder="Cerca fornitore…" style="flex:1;min-width:220px" />
+        <input name="q_date" value="{{ q_date or '' }}" placeholder="Cerca data (es. 2026-01-23)" style="flex:1;min-width:220px" />
+        <button class="btn2" type="submit">Cerca</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <h2 style="margin-top:0">🧾 Archivio fatture</h2>
+    <div class="muted">Carica una fattura (PDF o foto), imposta <strong>fornitore</strong> e <strong>data</strong>, poi la cerchi velocemente.</div>
+
+    <div class="row" style="margin-top:10px;">
+      <a class="pill" href="/fatture/importa-prodotti" style="text-decoration:none;color:#111">➕ Aggiungi prodotti da foto fattura</a>
+    </div>
+
+    <form method="post" action="/fatture/upload" enctype="multipart/form-data" style="margin-top:12px;">
+      <div class="row">
+        <input name="supplier" placeholder="Fornitore" required />
+        <input type="date" name="doc_date" required />
+        <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-width:260px">
+          <div id="invoice-files" style="display:flex;flex-direction:column;gap:6px">
+            <input type="file" name="files" accept="application/pdf,image/*" capture="environment" required />
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn2" type="button" onclick="addFileInput('invoice-files')">+1</button>
+            <span class="muted" style="font-size:12px">Se la fattura ha più fogli, premi +1 e aggiungi un’altra foto (verranno salvate nello stesso PDF).</span>
+          </div>
+        </div>
+
+        <button class="btn" type="submit">Carica</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Elenco</h3>
+    <div style="overflow:auto;margin-top:8px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Data</th>
+            {% if active_store == 'ALL' %}<th>Negozio</th>{% endif %}
+            <th>Fornitore</th>
+            <th>Documento</th>
+            <th>Caricato da</th>
+            <th>Quando</th><th>Azioni</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+            <tr>
+              <td><strong>{{ r.doc_date }}</strong></td>
+              {% if active_store == 'ALL' %}<td>{{ stores.get(r.store, r.store) }}</td>{% endif %}
+              <td>{{ r.supplier }}</td>
+              <td><a class="pill" href="/fatture/{{ r.id }}" target="_blank" style="text-decoration:none;color:#111">Apri</a> <span class="muted">{{ r.filename or '' }}</span></td>
+              <td>{{ r.uploaded_by }}</td>
+              <td class="muted">{{ r.ts }}</td>
+              <td>
+                <form method="post" action="/fatture/{{ r.id }}/delete" onsubmit="return confirm('Eliminare questa fattura?');" style="display:inline;">
+                  <button class="btn2" type="submit">Elimina</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+          {% if not rows %}
+            <tr><td colspan="6" class="muted">Nessuna fattura trovata.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}
+
