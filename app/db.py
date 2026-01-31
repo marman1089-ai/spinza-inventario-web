@@ -15,10 +15,45 @@ SQLITE_PATH = BASE_DIR / "spinza.db"
 
 
 def _database_url() -> str | None:
-    url = os.environ.get("DATABASE_URL")
-    if not url:
-        return None
-    return url.strip()
+    """Return the first configured database url.
+
+    In produzione (Render + Supabase) i nomi delle variabili possono cambiare.
+    Se qui leggiamo solo DATABASE_URL e non è impostata, l'app cade su SQLite e
+    sembra "non salvare" e "spariscono" i dati.
+
+    Supportiamo quindi più nomi comuni.
+    """
+
+    keys = [
+        "DATABASE_URL",
+        "SUPABASE_DATABASE_URL",
+        "SUPABASE_DB_URL",
+        "POSTGRES_URL",
+        "POSTGRESQL_URL",
+        "PGDATABASE_URL",
+    ]
+    for k in keys:
+        v = os.environ.get(k)
+        if v and str(v).strip():
+            return str(v).strip()
+    return None
+
+
+def database_url_info() -> tuple[str | None, str | None]:
+    """Return (env_key, url) used for DB connection."""
+    keys = [
+        "DATABASE_URL",
+        "SUPABASE_DATABASE_URL",
+        "SUPABASE_DB_URL",
+        "POSTGRES_URL",
+        "POSTGRESQL_URL",
+        "PGDATABASE_URL",
+    ]
+    for k in keys:
+        v = os.environ.get(k)
+        if v and str(v).strip():
+            return k, str(v).strip()
+    return None, None
 
 
 def using_postgres() -> bool:
