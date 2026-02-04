@@ -122,8 +122,12 @@ def init_db():
             category TEXT NOT NULL,
             name TEXT NOT NULL,
             area TEXT NOT NULL DEFAULT 'prodotti',
+            unit TEXT NOT NULL DEFAULT '',
             qty {qty_col} NOT NULL DEFAULT 0,
             min_qty {qty_col} NOT NULL DEFAULT 0,
+            missing_order_date TEXT,
+            missing_delivery_date TEXT,
+            missing_qty {qty_col} NOT NULL DEFAULT 0,
             updated_at {ts_default}
         )
         """)
@@ -137,12 +141,57 @@ def init_db():
         if using_postgres():
             # Postgres: evita errore (e transazione abortita) se la colonna esiste già
             cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS area TEXT NOT NULL DEFAULT 'prodotti'")
+            cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT ''")
+            cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS missing_order_date TEXT")
+            cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS missing_delivery_date TEXT")
+            cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS missing_qty DOUBLE PRECISION NOT NULL DEFAULT 0")
         else:
             # SQLite: IF NOT EXISTS non è garantito su versioni vecchie, quindi try/except
             try:
                 cur.execute("ALTER TABLE products ADD COLUMN area TEXT NOT NULL DEFAULT 'prodotti'")
             except Exception:
                 pass
+            try:
+                cur.execute("ALTER TABLE products ADD COLUMN unit TEXT NOT NULL DEFAULT ''")
+            except Exception:
+                pass
+            try:
+                cur.execute("ALTER TABLE products ADD COLUMN missing_order_date TEXT")
+            except Exception:
+                pass
+            try:
+                cur.execute("ALTER TABLE products ADD COLUMN missing_delivery_date TEXT")
+            except Exception:
+                pass
+            try:
+                cur.execute("ALTER TABLE products ADD COLUMN missing_qty REAL NOT NULL DEFAULT 0")
+            except Exception:
+                pass
+
+        # TRANSFERS (scambi tra negozi)
+        cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS transfers (
+            id {id_col},
+            from_store TEXT NOT NULL,
+            to_store TEXT NOT NULL,
+            created_by TEXT NOT NULL,
+            ts {ts_default}
+        )
+        """)
+
+        cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS transfer_lines (
+            id {id_col},
+            transfer_id INTEGER NOT NULL,
+            from_store TEXT NOT NULL,
+            to_store TEXT NOT NULL,
+            category TEXT NOT NULL,
+            name TEXT NOT NULL,
+            area TEXT NOT NULL,
+            qty {qty_col} NOT NULL,
+            unit TEXT NOT NULL DEFAULT ''
+        )
+        """)
         # CLOSURES (foto chiusure)
         cur.execute(f"""
         CREATE TABLE IF NOT EXISTS closures (

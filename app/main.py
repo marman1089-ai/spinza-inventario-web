@@ -2,7 +2,7 @@ import os
 import json
 import csv
 import io
-from datetime import date
+from datetime import date, datetime
 
 from fastapi import FastAPI, Request, Form, UploadFile, File
 from .pdf_tools import ensure_pdf, merge_pdfs
@@ -62,6 +62,9 @@ def _ph() -> str:
 
 def _now() -> str:
     return "NOW()" if using_postgres() else "datetime('now')"
+
+def _today_str() -> str:
+    return date.today().isoformat()
 
 
 # =========================
@@ -877,6 +880,7 @@ def item_add(
     request: Request,
     category: str = Form(...),
     name: str = Form(...),
+    unit: str = Form(""),
     qty: float = Form(0),
     min_qty: float = Form(0),
     next_url: str = Form("/inventario"),
@@ -901,14 +905,16 @@ def item_add(
     if area not in AREAS:
         area = "prodotti"
 
+    unit = (unit or "").strip()
+
     with connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            f"""INSERT INTO products(store, category, name, area, qty, min_qty, updated_at)
-                VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now})
+            f"""INSERT INTO products(store, category, name, area, unit, qty, min_qty, updated_at)
+                VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
                 ON CONFLICT(store, category, name)
-                DO UPDATE SET area=excluded.area, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
-            (active_store, category, name, area, float(qty), float(min_qty)),
+                DO UPDATE SET area=excluded.area, unit=excluded.unit, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
+            (active_store, category, name, area, unit, float(qty), float(min_qty)),
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
@@ -923,6 +929,7 @@ def item_edit(
     item_id: int,
     category: str = Form(...),
     name: str = Form(...),
+    unit: str = Form(""),
     min_qty: float = Form(0),
     next_url: str = Form("/inventario"),
 ):
@@ -937,6 +944,7 @@ def item_edit(
 
     category = category.strip()
     name = name.strip()
+    unit = (unit or "").strip()
 
     ph = _ph()
     now = _now()
@@ -951,8 +959,8 @@ def item_edit(
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
         cur.execute(
-            f"UPDATE products SET category={ph}, name={ph}, min_qty={ph}, updated_at={now} WHERE id={ph}",
-            (category, name, float(min_qty), int(item_id)),
+            f"UPDATE products SET category={ph}, name={ph}, unit={ph}, min_qty={ph}, updated_at={now} WHERE id={ph}",
+            (category, name, unit, float(min_qty), int(item_id)),
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
@@ -1648,6 +1656,69 @@ def orders_add_from_inventory(request: Request, item_id: int = Form(...), next_u
     return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
 
+@app.post("/ordini/add_with_qty")
+def orders_add_from_inventory_with_qty(
+    request: Request,
+    item_id: int = Form(...),
+    qty_to_order: float = Form(...),
+    next_url: str = Form("/inventario"),
+):
+    """Aggiunge (o aggiorna) la riga in coda ordini con una quantità scelta dall'utente."""
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    if qty_to_order is None:
+        return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
+
+    try:
+        qty_to_order = float(qty_to_order)
+    except Exception:
+        qty_to_order = 1.0
+    if qty_to_order <= 0:
+        qty_to_order = 1.0
+
+    ph = _ph()
+    now = _now()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(
+            f"SELECT id, category, name, qty, min_qty FROM products WHERE id={ph} AND store={ph}",
+            (int(item_id), store),
+        ).fetchone()
+        if not row:
+            return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
+
+        existing = cur.execute(
+            f"SELECT id FROM order_queue WHERE store={ph} AND product_id={ph}",
+            (store, int(item_id)),
+        ).fetchone()
+
+        if existing:
+            cur.execute(
+                f"UPDATE order_queue SET qty_to_order={ph}, added_by={ph}, ts={now} WHERE id={ph}",
+                (float(qty_to_order), user["username"], int(existing["id"])),
+            )
+        else:
+            cur.execute(
+                f"INSERT INTO order_queue(store, product_id, category, name, qty_to_order, added_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now})",
+                (store, int(item_id), row["category"], row["name"], float(qty_to_order), user["username"]),
+            )
+
+        _log(
+            cur,
+            store=store,
+            username=user["username"],
+            action="ORDER_IN_ARRIVO",
+            category=row["category"],
+            name=row["name"],
+            delta=float(qty_to_order),
+        )
+
+    return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
+
+
 @app.get("/ordini", response_class=HTMLResponse)
 def orders_queue_page(request: Request):
     user = require_login(request)
@@ -1661,17 +1732,93 @@ def orders_queue_page(request: Request):
     with connect() as conn:
         cur = conn.cursor()
         if store == "ALL":
+            # join per mostrare "rimasti" in inventario
             rows = cur.execute(
-                "SELECT id, store, category, name, qty_to_order, added_by, ts FROM order_queue ORDER BY store, category, name",
+                """
+                SELECT q.id, q.store, q.category, q.name, q.qty_to_order, q.added_by, q.ts,
+                       p.qty AS qty_left, p.unit AS unit
+                FROM order_queue q
+                LEFT JOIN products p ON p.id = q.product_id
+                ORDER BY q.store, q.category, q.name
+                """,
             ).fetchall()
         else:
             rows = cur.execute(
-                f"SELECT id, store, category, name, qty_to_order, added_by, ts FROM order_queue WHERE store={ph} ORDER BY category, name",
+                f"""
+                SELECT q.id, q.store, q.category, q.name, q.qty_to_order, q.added_by, q.ts,
+                       p.qty AS qty_left, p.unit AS unit
+                FROM order_queue q
+                LEFT JOIN products p ON p.id = q.product_id
+                WHERE q.store={ph}
+                ORDER BY q.category, q.name
+                """,
                 (store,),
             ).fetchall()
 
     active_store = request.session.get("active_store") if is_admin(request) else None
     return render("orders.html", user=user, rows=rows, stores=STORES, brand=brand, active_store=active_store)
+
+
+@app.post("/ordini/queue-update")
+def orders_queue_update(request: Request, queue_id: int = Form(...), qty_to_order: float = Form(...)):
+    """Aggiorna quantità da ordinare (decisa dall'utente)."""
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    ph = _ph()
+    now = _now()
+
+    try:
+        qty_to_order = float(qty_to_order)
+    except Exception:
+        qty_to_order = 1.0
+    if qty_to_order <= 0:
+        qty_to_order = 1.0
+
+    with connect() as conn:
+        cur = conn.cursor()
+        if store == "ALL" and is_admin(request):
+            info = cur.execute(
+                f"SELECT store, category, name FROM order_queue WHERE id={ph}",
+                (int(queue_id),),
+            ).fetchone()
+            if info:
+                cur.execute(
+                    f"UPDATE order_queue SET qty_to_order={ph}, ts={now}, added_by={ph} WHERE id={ph}",
+                    (float(qty_to_order), user["username"], int(queue_id)),
+                )
+                _log(
+                    cur,
+                    store=info["store"],
+                    username=user["username"],
+                    action="ORDER_QTY_UPDATE",
+                    category=info["category"],
+                    name=info["name"],
+                    delta=float(qty_to_order),
+                )
+        else:
+            info = cur.execute(
+                f"SELECT category, name FROM order_queue WHERE id={ph} AND store={ph}",
+                (int(queue_id), store),
+            ).fetchone()
+            if info:
+                cur.execute(
+                    f"UPDATE order_queue SET qty_to_order={ph}, ts={now}, added_by={ph} WHERE id={ph} AND store={ph}",
+                    (float(qty_to_order), user["username"], int(queue_id), store),
+                )
+                _log(
+                    cur,
+                    store=store,
+                    username=user["username"],
+                    action="ORDER_QTY_UPDATE",
+                    category=info["category"],
+                    name=info["name"],
+                    delta=float(qty_to_order),
+                )
+
+    return RedirectResponse("/ordini", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.post("/ordini/queue-delete")
@@ -1828,7 +1975,7 @@ def orders_in_progress_page(request: Request):
         orders = []
         for o in os_:
             lines = cur.execute(
-                f"SELECT category, name, qty FROM order_lines WHERE order_id={ph} ORDER BY category, name",
+                f"SELECT id, product_id, category, name, qty FROM order_lines WHERE order_id={ph} ORDER BY category, name",
                 (int(o["id"]),),
             ).fetchall()
             od = dict(o)
@@ -1840,8 +1987,8 @@ def orders_in_progress_page(request: Request):
 
 
 @app.post("/ordinati/arrivato")
-def orders_mark_arrived(request: Request, order_id: int = Form(...)):
-    """Pulsante 'Arrivato': elimina definitivamente l'ordine in corso."""
+async def orders_mark_arrived(request: Request, order_id: int = Form(...)):
+    """Conferma arrivo: aggiorna inventario (+ quantità ricevute), gestisce mancanti e chiude l'ordine."""
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -1849,52 +1996,294 @@ def orders_mark_arrived(request: Request, order_id: int = Form(...)):
     store = _effective_store(request, user)
     ph = _ph()
 
+    delivered_date = _today_str()
+
     with connect() as conn:
         cur = conn.cursor()
 
+        # carico ordine + store reale
         if store == "ALL" and is_admin(request):
             info = cur.execute(
-                f"SELECT store, supplier FROM orders WHERE id={ph} AND status='in_corso'",
+                f"SELECT store, supplier, ts FROM orders WHERE id={ph} AND status='in_corso'",
                 (int(order_id),),
             ).fetchone()
-            if not info:
-                return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
-
-            cur.execute(f"DELETE FROM order_lines WHERE order_id={ph}", (int(order_id),))
-            cur.execute(f"DELETE FROM orders WHERE id={ph}", (int(order_id),))
-
-            _log(
-                cur,
-                store=info["store"],
-                username=user["username"],
-                action="ORDER_ARRIVATO",
-                category=info["supplier"],
-                name=f"Ordine #{int(order_id)} arrivato",
-                delta=0.0,
-            )
         else:
             info = cur.execute(
-                f"SELECT supplier FROM orders WHERE id={ph} AND status='in_corso' AND store={ph}",
+                f"SELECT store, supplier, ts FROM orders WHERE id={ph} AND status='in_corso' AND store={ph}",
                 (int(order_id), store),
             ).fetchone()
-            if not info:
-                return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
 
-            cur.execute(f"DELETE FROM order_lines WHERE order_id={ph}", (int(order_id),))
-            cur.execute(f"DELETE FROM orders WHERE id={ph} AND store={ph}", (int(order_id), store))
+        if not info:
+            return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
 
-            _log(
-                cur,
-                store=store,
-                username=user["username"],
-                action="ORDER_ARRIVATO",
-                category=info["supplier"],
-                name=f"Ordine #{int(order_id)} arrivato",
-                delta=0.0,
-            )
+        real_store = info["store"]
+        supplier = info["supplier"]
+        order_ts = str(info.get("ts") or "")
+        order_date = order_ts[:10] if len(order_ts) >= 10 else delivered_date
+
+        lines = cur.execute(
+            f"SELECT id, product_id, category, name, qty FROM order_lines WHERE order_id={ph}",
+            (int(order_id),),
+        ).fetchall()
+
+        form = await request.form()
+        missing_ids = set()
+        try:
+            missing_ids = {int(x) for x in form.getlist("missing_ids")}
+        except Exception:
+            missing_ids = set()
+
+        now = _now()
+
+        for ln in lines:
+            lid = int(ln["id"])
+            pid = ln.get("product_id")
+            base_qty = float(ln.get("qty") or 0)
+            cat = ln.get("category")
+            nm = ln.get("name")
+
+            # quantità ricevuta (default = quantità ordinata)
+            recv_key = f"received_{lid}"
+            recv_raw = form.get(recv_key)
+            try:
+                received_qty = float(recv_raw) if recv_raw is not None else base_qty
+            except Exception:
+                received_qty = base_qty
+            if received_qty < 0:
+                received_qty = 0.0
+
+            is_missing = lid in missing_ids
+            if is_missing or received_qty == 0:
+                # NON va in inventario: metto "mancante" + reinserisco in coda ordini
+                if pid:
+                    cur.execute(
+                        f"UPDATE products SET missing_order_date={ph}, missing_delivery_date={ph}, missing_qty={ph}, updated_at={now} WHERE id={ph} AND store={ph}",
+                        (order_date, delivered_date, float(base_qty), int(pid), real_store),
+                    )
+
+                # reinserisci/aggiorna in coda per riordino
+                if pid:
+                    ex = cur.execute(
+                        f"SELECT id FROM order_queue WHERE store={ph} AND product_id={ph}",
+                        (real_store, int(pid)),
+                    ).fetchone()
+                    if ex:
+                        cur.execute(
+                            f"UPDATE order_queue SET qty_to_order={ph}, added_by={ph}, ts={now} WHERE id={ph}",
+                            (float(base_qty), user["username"], int(ex["id"])),
+                        )
+                    else:
+                        cur.execute(
+                            f"INSERT INTO order_queue(store, product_id, category, name, qty_to_order, added_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now})",
+                            (real_store, int(pid), cat, nm, float(base_qty), user["username"]),
+                        )
+
+                _log(
+                    cur,
+                    store=real_store,
+                    username=user["username"],
+                    action="ORDER_MANCANTE",
+                    category=cat,
+                    name=f"{nm} (ordine {order_date})",
+                    delta=float(base_qty),
+                )
+            else:
+                # Va in inventario
+                if pid:
+                    cur.execute(
+                        f"UPDATE products SET qty=qty+{ph}, missing_order_date=NULL, missing_delivery_date=NULL, missing_qty={ph}, updated_at={now} WHERE id={ph} AND store={ph}",
+                        (float(received_qty), 0.0, int(pid), real_store),
+                    )
+                _log(
+                    cur,
+                    store=real_store,
+                    username=user["username"],
+                    action="ORDER_CARICATO_INVENTARIO",
+                    category=cat,
+                    name=nm,
+                    delta=float(received_qty),
+                )
+
+        # chiudo ordine
+        cur.execute(f"DELETE FROM order_lines WHERE order_id={ph}", (int(order_id),))
+        cur.execute(f"DELETE FROM orders WHERE id={ph}", (int(order_id),))
+
+        _log(
+            cur,
+            store=real_store,
+            username=user["username"],
+            action="ORDER_ARRIVATO",
+            category=supplier,
+            name=f"Ordine #{int(order_id)} arrivato ({delivered_date})",
+            delta=0.0,
+        )
 
     return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
 
+
+# =========================
+# SCAMBI TRA NEGOZI
+# =========================
+@app.get("/scambi", response_class=HTMLResponse)
+def transfers_page(request: Request, from_store: str = "", to_store: str = ""):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    area = get_selected_area(request) or "prodotti"
+    if area not in AREAS:
+        area = "prodotti"
+
+    # default: sorgente = negozio utente (o active_store per admin), destinazione = altro negozio
+    admin = is_admin(request)
+    default_from = (request.session.get("active_store") if admin else user.get("store")) or "spinza"
+    if default_from == "ALL":
+        default_from = "spinza"
+
+    from_store = (from_store or default_from).strip() or default_from
+    if from_store not in STORES:
+        from_store = default_from
+
+    if not to_store:
+        # scegli il primo negozio diverso
+        to_store = next((k for k in STORES.keys() if k != from_store), from_store)
+    to_store = to_store.strip()
+    if to_store not in STORES:
+        to_store = next((k for k in STORES.keys() if k != from_store), from_store)
+
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        products = cur.execute(
+            f"SELECT id, category, name, qty, unit FROM products WHERE store={ph} AND area={ph} ORDER BY category, name",
+            (from_store, area),
+        ).fetchall()
+
+    return render(
+        "transfers.html",
+        user=user,
+        stores=STORES,
+        from_store=from_store,
+        to_store=to_store,
+        products=products,
+        area=area,
+        areas=AREAS,
+        brand=(from_store if from_store else "spinza"),
+        active_store=request.session.get("active_store") if admin else None,
+    )
+
+
+@app.post("/scambi/submit")
+async def transfers_submit(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    from_store = (form.get("from_store") or "").strip()
+    to_store = (form.get("to_store") or "").strip()
+
+    if from_store not in STORES or to_store not in STORES or from_store == to_store:
+        return RedirectResponse("/scambi", status_code=HTTP_303_SEE_OTHER)
+
+    area = get_selected_area(request) or "prodotti"
+    if area not in AREAS:
+        area = "prodotti"
+
+    ph = _ph()
+    now = _now()
+
+    with connect() as conn:
+        cur = conn.cursor()
+
+        # crea testata trasferimento
+        cur.execute(
+            f"INSERT INTO transfers(from_store, to_store, created_by, ts) VALUES({ph},{ph},{ph},{now}) RETURNING id" if using_postgres() else
+            f"INSERT INTO transfers(from_store, to_store, created_by, ts) VALUES({ph},{ph},{ph},{now})",
+            (from_store, to_store, user["username"]),
+        )
+        if using_postgres():
+            transfer_id = int(cur.fetchone()["id"])
+        else:
+            transfer_id = int(cur.lastrowid)
+
+        # scorri tutte le qty_* presenti
+        for key in form.keys():
+            if not key.startswith("qty_"):
+                continue
+            try:
+                pid = int(key.split("_", 1)[1])
+            except Exception:
+                continue
+            raw = form.get(key)
+            try:
+                q = float(raw)
+            except Exception:
+                q = 0.0
+            if q <= 0:
+                continue
+
+            src = cur.execute(
+                f"SELECT id, category, name, qty, min_qty, unit, area FROM products WHERE id={ph} AND store={ph}",
+                (pid, from_store),
+            ).fetchone()
+            if not src:
+                continue
+
+            # clamp: non andare sotto zero
+            available = float(src.get("qty") or 0)
+            qty_move = min(q, available)
+            if qty_move <= 0:
+                continue
+
+            # decrementa sorgente
+            cur.execute(
+                f"UPDATE products SET qty=qty-{ph}, updated_at={now} WHERE id={ph} AND store={ph}",
+                (float(qty_move), int(src["id"]), from_store),
+            )
+
+            # crea/aggiorna destinazione
+            dest = cur.execute(
+                f"SELECT id FROM products WHERE store={ph} AND category={ph} AND name={ph}",
+                (to_store, src["category"], src["name"]),
+            ).fetchone()
+            if dest:
+                cur.execute(
+                    f"UPDATE products SET qty=qty+{ph}, unit={ph}, updated_at={now} WHERE id={ph}",
+                    (float(qty_move), src.get("unit") or "", int(dest["id"])),
+                )
+            else:
+                cur.execute(
+                    f"INSERT INTO products(store, category, name, area, unit, qty, min_qty, updated_at) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})",
+                    (to_store, src["category"], src["name"], src.get("area") or area, src.get("unit") or "", float(qty_move), float(src.get("min_qty") or 0),),
+                )
+
+            # righe trasferimento
+            cur.execute(
+                f"INSERT INTO transfer_lines(transfer_id, from_store, to_store, category, name, area, qty, unit) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (transfer_id, from_store, to_store, src["category"], src["name"], src.get("area") or area, float(qty_move), src.get("unit") or ""),
+            )
+
+            _log(
+                cur,
+                store=from_store,
+                username=user["username"],
+                action="TRANSFER_OUT",
+                category=src["category"],
+                name=f"{src['name']} → {STORES.get(to_store, to_store)}",
+                delta=-float(qty_move),
+            )
+            _log(
+                cur,
+                store=to_store,
+                username=user["username"],
+                action="TRANSFER_IN",
+                category=src["category"],
+                name=f"{src['name']} ← {STORES.get(from_store, from_store)}",
+                delta=float(qty_move),
+            )
+
+    return RedirectResponse(f"/scambi?from_store={from_store}&to_store={to_store}", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/fatture", response_class=HTMLResponse)

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% set title = "Scambi tra negozi" %}
+{% block content %}
+  <div class="card" style="margin-bottom:12px;">
+    <h2 style="margin:0 0 6px 0;">🔁 Scambi tra negozi</h2>
+    <div class="muted">Sposta quantità da un negozio ad un altro: seleziona sorgente/destinazione, poi inserisci le quantità da trasferire. Le quantità vengono scalate dalla sorgente e aggiunte alla destinazione.</div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <form method="get" action="/scambi">
+      <div class="row" style="align-items:center;gap:8px;">
+        <a class="pill" href="/select-area" style="text-decoration:none;color:#111">🧭 {{ areas.get(area, area) }}</a>
+        <label class="pill">Da:
+          <select name="from_store" onchange="this.form.submit()">
+            {% for code,label in stores.items() %}
+              <option value="{{ code }}" {% if from_store==code %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="pill">A:
+          <select name="to_store" onchange="this.form.submit()">
+            {% for code,label in stores.items() %}
+              <option value="{{ code }}" {% if to_store==code %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <form method="post" action="/scambi/submit">
+      <input type="hidden" name="from_store" value="{{ from_store }}" />
+      <input type="hidden" name="to_store" value="{{ to_store }}" />
+
+      <div style="overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Categoria</th>
+              <th>Prodotto</th>
+              <th>Disponibile</th>
+              <th>Da spostare</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in products %}
+              <tr>
+                <td><span class="pill">{{ p.category }}</span></td>
+                <td><strong>{{ p.name }}</strong> {% if p.unit %}<span class="muted">({{ p.unit }})</span>{% endif %}</td>
+                <td>{{ "%.2f"|format(p.qty) }}</td>
+                <td>
+                  <input class="mini" name="qty_{{ p.id }}" type="number" step="0.01" inputmode="decimal" placeholder="0" style="width:140px;" />
+                </td>
+              </tr>
+            {% endfor %}
+            {% if not products or products|length == 0 %}
+              <tr><td colspan="4" class="muted">Nessun prodotto in questa sezione per il negozio selezionato.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="row" style="justify-content:flex-end;margin-top:12px;">
+        <button class="btn" type="submit" onclick="return confirm('Confermare lo scambio?')">Esegui scambio</button>
+      </div>
+    </form>
+  </div>
+{% endblock %}

@@ -8,18 +8,20 @@
 
   {% for o in orders %}
     <div class="card" style="margin-bottom:12px;">
-      <div class="row" style="justify-content:space-between;align-items:center;">
-        <div>
-          <div class="pill">Fornitore: <strong>{{ o.supplier }}</strong></div>
-          <div class="muted" style="margin-top:6px;">Creato da {{ o.created_by }} • {{ o.ts }}{% if active_store == 'ALL' %} • {{ stores.get(o.store, o.store) }}{% endif %}</div>
+      <form method="post" action="/ordinati/arrivato" style="margin:0;">
+        <input type="hidden" name="order_id" value="{{ o.id }}" />
+
+        <div class="row" style="justify-content:space-between;align-items:center;">
+          <div>
+            <div class="pill">Fornitore: <strong>{{ o.supplier }}</strong></div>
+            <div class="muted" style="margin-top:6px;">Creato da {{ o.created_by }} • {{ o.ts }}{% if active_store == 'ALL' %} • {{ stores.get(o.store, o.store) }}{% endif %}</div>
+          </div>
+          <div>
+            <button class="btn" type="submit">Conferma arrivo ✔</button>
+          </div>
         </div>
-        <div>
-          <form method="post" action="/ordinati/arrivato" style="margin:0;">
-            <input type="hidden" name="order_id" value="{{ o.id }}" />
-            <button class="btn" type="submit">Arrivato ✔</button>
-          </form>
-        </div>
-      </div>
+
+      <div class="muted" style="margin-top:10px;">✅ Metti la quantità ricevuta. Se un prodotto non è arrivato, spunta <strong>Mancante</strong>: non va in inventario e viene rimesso negli ordini da fare.</div>
 
       <div style="overflow:auto;margin-top:10px;">
         <table>
@@ -27,7 +29,9 @@
             <tr>
               <th>Categoria</th>
               <th>Prodotto</th>
-              <th>Q.tà</th>
+              <th>Ordinato</th>
+              <th>Ricevuto</th>
+              <th>Mancante</th>
             </tr>
           </thead>
           <tbody>
@@ -36,11 +40,18 @@
                 <td><span class="pill">{{ l.category }}</span></td>
                 <td><strong>{{ l.name }}</strong></td>
                 <td>{{ "%.2f"|format(l.qty) }}</td>
+                <td>
+                  <input class="mini" name="received_{{ l.id }}" type="number" step="0.01" inputmode="decimal" value="{{ l.qty }}" style="width:120px;" />
+                </td>
+                <td style="text-align:center;">
+                  <input type="checkbox" name="missing_ids" value="{{ l.id }}" />
+                </td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
+      </form>
     </div>
   {% endfor %}
 
