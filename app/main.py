@@ -26,6 +26,16 @@ def render(name: str, **ctx):
     tpl = templates.get_template(name)
     return HTMLResponse(tpl.render(**ctx))
 
+
+def _safe_next_url(next_url: str | None, default: str = "/inventario") -> str:
+    """Permette redirect SOLO interni (evita open-redirect)."""
+    if not next_url:
+        return default
+    u = (next_url or "").strip()
+    if not u.startswith("/"):
+        return default
+    return u
+
 app = FastAPI(title="Spinza Inventario")
 
 # === Multi-inventory (stores) ===
@@ -273,22 +283,9 @@ def login_post(request: Request, username: str = Form(...), password: str = Form
     return RedirectResponse("/select-area", status_code=HTTP_303_SEE_OTHER)
 
 
-@app.get("/select-area", response_class=HTMLResponse)
-def select_area_get(request: Request, area: str = ""):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-
-    area = (area or "").strip().lower()
-    if area in ("bibite", "prodotti"):
-        set_selected_area(request, area)
-        return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
-
-    # brand: store scelto
-    brand = (request.session.get("active_store") if is_admin(request) else user.get("store")) or "spinza"
-    if brand not in STORES and brand != "ALL":
-        brand = "spinza"
-    return render("select_area.html", user=user, brand=brand)
+## NOTE:
+## Route /select-area definita più sotto (con AREAS e UI completa).
+## Questa vecchia versione è stata rimossa per evitare doppia registrazione.
 
 
 @app.get("/register", response_class=HTMLResponse)
@@ -797,7 +794,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
 
 
 @app.post("/items/{item_id}/delta")
-def item_delta(request: Request, item_id: int, delta: float = Form(...)):
+def item_delta(request: Request, item_id: int, delta: float = Form(...), next_url: str = Form("/inventario")):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -839,12 +836,10 @@ def item_delta(request: Request, item_id: int, delta: float = Form(...)):
             (active_store, user["username"], "DELTA", row["category"], row["name"], float(delta)),
         )
 
-    # dopo login deve scegliere la sezione (bibite / prodotti)
-    request.session.pop("selected_area", None)
-    return RedirectResponse("/select-area", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
 @app.post("/items/{item_id}/set")
-def item_set(request: Request, item_id: int, qty: float = Form(...)):
+def item_set(request: Request, item_id: int, qty: float = Form(...), next_url: str = Form("/inventario")):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -875,7 +870,7 @@ def item_set(request: Request, item_id: int, qty: float = Form(...)):
             (active_store, user["username"], "SET", row["category"], row["name"], float(qty)),
         )
 
-    return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
 @app.post("/items/add")
 def item_add(
@@ -884,6 +879,7 @@ def item_add(
     name: str = Form(...),
     qty: float = Form(0),
     min_qty: float = Form(0),
+    next_url: str = Form("/inventario"),
 ):
     user = require_login(request)
     if not user:
@@ -900,6 +896,11 @@ def item_add(
     ph = _ph()
     now = _now()
 
+    # area corrente (bibite / prodotti) => salva correttamente e evita 500
+    area = get_selected_area(request) or "prodotti"
+    if area not in AREAS:
+        area = "prodotti"
+
     with connect() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -914,7 +915,7 @@ def item_add(
             (active_store, user["username"], "ADD", category, name, float(qty)),
         )
 
-    return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
 @app.post("/items/{item_id}/edit")
 def item_edit(
@@ -923,6 +924,7 @@ def item_edit(
     category: str = Form(...),
     name: str = Form(...),
     min_qty: float = Form(0),
+    next_url: str = Form("/inventario"),
 ):
     user = require_login(request)
     if not user:
@@ -957,10 +959,10 @@ def item_edit(
             (active_store, user["username"], "EDIT", category, name, float(min_qty)),
         )
 
-    return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
 @app.post("/items/{item_id}/delete")
-def item_delete(request: Request, item_id: int):
+def item_delete(request: Request, item_id: int, next_url: str = Form("/inventario")):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -986,7 +988,7 @@ def item_delete(request: Request, item_id: int):
                 (active_store, user["username"], "DELETE", row["category"], row["name"], 0.0),
             )
 
-    return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
 
 # =========================
@@ -1594,7 +1596,7 @@ def secondary_expenses_delete(request: Request, doc_id: int):
 # LOGISTICA: ORDINI
 # =========================
 @app.post("/ordini/add")
-def orders_add_from_inventory(request: Request, item_id: int = Form(...)):
+def orders_add_from_inventory(request: Request, item_id: int = Form(...), next_url: str = Form("/inventario")):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -1642,8 +1644,8 @@ def orders_add_from_inventory(request: Request, item_id: int = Form(...)):
                 delta=float(suggested),
             )
 
-    # torna all'inventario mantenendo query string se c'è
-    return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+    # torna dove eri (inventario con filtri)
+    return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/ordini", response_class=HTMLResponse)

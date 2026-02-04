@@ -110,6 +110,37 @@
     container.appendChild(row);
   }
 </script>
+
+<script>
+  // Mantieni posizione pagina dopo POST/redirect + conserva filtri (q/cat/only_low)
+  (function(){
+    // restore scroll after a form submit
+    document.addEventListener('DOMContentLoaded', function(){
+      try{
+        const y = sessionStorage.getItem('scrollY');
+        if(y !== null){
+          sessionStorage.removeItem('scrollY');
+          window.scrollTo(0, parseInt(y, 10) || 0);
+        }
+      }catch(e){}
+    });
+
+    document.addEventListener('submit', function(ev){
+      try{
+        sessionStorage.setItem('scrollY', String(window.scrollY || 0));
+      }catch(e){}
+
+      // Se il form ha un campo next_url, lo valorizzo con la pagina corrente (solo path + query)
+      const form = ev.target;
+      if(form && form.querySelector){
+        const inp = form.querySelector('input[name="next_url"]');
+        if(inp){
+          inp.value = window.location.pathname + window.location.search;
+        }
+      }
+    }, true);
+  })();
+</script>
 </body>
 
 </html>
