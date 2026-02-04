@@ -24,7 +24,12 @@
             {% endfor %}
           </select>
         </label>
-      </div>
+      
+        <div style="flex:1;min-width:180px;display:flex;align-items:center;gap:6px;">
+          <span class="pill" style="background:#fff;border-color:#ddd;">🔎</span>
+          <input id="transferSearch" type="text" placeholder="Cerca prodotto o categoria…" style="flex:1;min-width:140px;" oninput="filterTransfers()" />
+        </div>
+</div>
     </form>
   </div>
 
@@ -45,7 +50,7 @@
           </thead>
           <tbody>
             {% for p in products %}
-              <tr>
+              <tr data-search="{{ (p.category ~ ' ' ~ p.name)|lower }}">
                 <td><span class="pill">{{ p.category }}</span></td>
                 <td><strong>{{ p.name }}</strong> {% if p.unit %}<span class="muted">({{ p.unit }})</span>{% endif %}</td>
                 <td>
@@ -66,7 +71,24 @@
 
       <div class="row" style="justify-content:flex-end;margin-top:12px;">
         <button class="btn" type="submit" onclick="return confirm('Confermare lo scambio?')">Esegui scambio</button>
-      </div>
+      
+        <div style="flex:1;min-width:180px;display:flex;align-items:center;gap:6px;">
+          <span class="pill" style="background:#fff;border-color:#ddd;">🔎</span>
+          <input id="transferSearch" type="text" placeholder="Cerca prodotto o categoria…" style="flex:1;min-width:140px;" oninput="filterTransfers()" />
+        </div>
+</div>
     </form>
   </div>
+
+  <script>
+    function filterTransfers(){
+      const q = (document.getElementById('transferSearch')?.value || '').toLowerCase().trim();
+      const rows = document.querySelectorAll('tbody tr[data-search]');
+      rows.forEach(r=>{
+        const hay = r.getAttribute('data-search') || '';
+        r.style.display = (!q || hay.includes(q)) ? '' : 'none';
+      });
+    }
+  </script>
+
 {% endblock %}

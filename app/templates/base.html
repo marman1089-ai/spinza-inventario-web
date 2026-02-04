@@ -38,6 +38,35 @@
     .mini{padding:8px 10px;font-size:14px;border-radius:10px}
     .hide-mobile{display:none}
     @media(min-width:780px){ .hide-mobile{display:table-cell} }
+  
+    /* --- Mobile compact + scalable UI (works with browser zoom) --- */
+    html{font-size:clamp(12px, 3.2vw, 16px);}
+    body{font-size:1rem;}
+    .wrap{max-width:1100px;} /* a touch wider on desktop */
+    th,td{padding:.55rem .45rem;}
+    .pill{padding:.28rem .55rem;}
+    .mini{padding:.34rem .55rem;font-size:.9rem;}
+    input,select,button{font-size:1rem;}
+    table{font-size:1rem;}
+    .actions{gap:.4rem;align-items:center}
+    /* keep action controls on ONE line when possible */
+    .actions form.row{flex-wrap:nowrap}
+    .actions form.row input.mini{width:7.5rem}
+    @media(max-width:780px){
+      .wrap{padding:10px}
+      header{padding:10px 10px}
+      th{font-size:.78rem}
+      td{font-size:.95rem}
+      th,td{padding:.38rem .30rem}
+      .pill{font-size:.82rem}
+      .mini{padding:.30rem .45rem;font-size:.85rem}
+      .actions{gap:.28rem}
+      .actions form.row{gap:.25rem!important}
+      .actions form.row input.mini{width:5.4rem!important}
+      /* make product cell denser */
+      .muted{line-height:1.15}
+    }
+
   </style>
 </head>
 <body>
