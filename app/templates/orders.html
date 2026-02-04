@@ -36,7 +36,10 @@
                 </td>
                 <td><span class="pill">{{ r.category }}</span></td>
                 <td><strong>{{ r.name }}</strong></td>
-                <td>{{ "%.2f"|format(r.qty_left or 0) }}{% if r.unit %} <span class="muted">({{ r.unit }})</span>{% endif %}</td>
+                <td>
+                  {{ "%.2f"|format(r.qty_left or 0) }}{% if r.unit %} <span class="muted">({{ r.unit }})</span>{% endif %}
+                  <div class="muted total-auto" data-qty="{{ r.qty_left or 0 }}" data-unit="{{ r.unit or '' }}"></div>
+                </td>
                 <td style="white-space:nowrap;">
                   <form method="post" action="/ordini/queue-update" class="row" style="gap:6px;align-items:center;">
                     <input type="hidden" name="queue_id" value="{{ r.id }}" />

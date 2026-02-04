@@ -142,6 +142,62 @@
     }, true);
   })();
 </script>
+
+<script>
+  // Totale automatico per prodotto: Totale = quantità × unità (es. "2 kg")
+  // Uso:
+  //   <div class="muted total-auto" data-qty="3" data-unit="2 kg"></div>
+  // Supporta: kg, g, L, ml (e qualunque unità testuale), decimali con punto o virgola.
+  (function(){
+    function _trim(v){ return (v ?? '').toString().trim(); }
+
+    function parseUnit(unitStr){
+      const s = _trim(unitStr);
+      if(!s) return null;
+      // prende un numero iniziale (es. 2, 2.5, 2,5) + il resto come unità testuale
+      const m = s.match(/^\s*([0-9]+(?:[\.,][0-9]+)?)\s*(.*)$/);
+      if(!m) return null;
+      const num = parseFloat(m[1].replace(',', '.'));
+      if(!isFinite(num)) return null;
+      const label = _trim(m[2]) || '';
+      return { value: num, label };
+    }
+
+    function formatNumber(n){
+      if(!isFinite(n)) return '';
+      // massimo 3 decimali, senza zeri finali
+      const s = (Math.round(n * 1000) / 1000).toString();
+      return s;
+    }
+
+    function computeTotalText(qty, unitStr){
+      const u = parseUnit(unitStr);
+      const q = parseFloat((qty ?? '').toString().replace(',', '.'));
+      if(!u || !isFinite(q)) return '';
+      const total = q * u.value;
+      const n = formatNumber(total);
+      if(!n) return '';
+      return 'Totale: ' + n + (u.label ? (' ' + u.label) : '');
+    }
+
+    function updateEl(el){
+      if(!el) return;
+      const qty = el.dataset.qty;
+      const unit = el.dataset.unit;
+      const t = computeTotalText(qty, unit);
+      el.textContent = t;
+      el.style.display = t ? '' : 'none';
+    }
+
+    // expose helpers
+    window.computeTotalText = computeTotalText;
+    window._updateTotalEl = updateEl;
+
+    document.addEventListener('DOMContentLoaded', function(){
+      document.querySelectorAll('.total-auto').forEach(updateEl);
+    });
+  })();
+</script>
 </body>
 
 </html>
