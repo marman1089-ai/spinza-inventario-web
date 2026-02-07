@@ -1,4 +1,5 @@
 import os
+import datetime
 import json
 import csv
 import io
@@ -90,7 +91,19 @@ def _split_logs(rows):
 # SESSION HELPERS
 # =========================
 def require_login(request: Request):
-    return request.session.get("user")
+    user = request.session.get("user")
+    if not user:
+        return None
+    # aggiorna last_seen per 'online' e ultimo accesso (best-effort)
+    try:
+        ph = _ph()
+        now = _now()
+        with connect() as conn:
+            cur = conn.cursor()
+            cur.execute(f"UPDATE users SET last_seen={now} WHERE id={ph}", (int(user.get("id")),))
+    except Exception:
+        pass
+    return user
 
 def get_selected_store(request: Request):
     return request.session.get("selected_store")
@@ -128,7 +141,7 @@ def _render_admin(request: Request, *, user, users, msg=None, error=None):
 def _admin_users_render_error(request: Request, user, error_msg: str):
     with connect() as conn:
         cur = conn.cursor()
-        users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
+        users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
     return _render_admin(request, user=user, users=users, error=error_msg)
 
 
@@ -393,7 +406,7 @@ def admin_page(request: Request, store: str = ""):
     with connect() as conn:
         cur = conn.cursor()
         users = cur.execute(
-            "SELECT id, store, username, role FROM users ORDER BY role DESC, store, username"
+            "SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username"
         ).fetchall()
 
     return _render_admin(request, user=user, users=users)
@@ -433,14 +446,14 @@ def admin_add_user(
             (username, store),
         ).fetchone()
         if exists:
-            users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
+            users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
             return _render_admin(request, user=user, users=users, error="Username già esistente.")
 
         cur.execute(
             f"INSERT INTO users(store, username, role, pw_salt, pw_hash, legacy_sha256) VALUES({ph},{ph},'staff',{ph},{ph},NULL)",
             (store, username, salt, h),
         )
-        users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
+        users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
 
     return _render_admin(request, user=user, users=users, msg=f"Utente '{username}' creato per {STORES.get(store, store)}.")
 
@@ -484,7 +497,7 @@ def admin_change_username(
             (new_username, int(user_id)),
         )
 
-        users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
+        users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
 
     return _render_admin(
         request,
@@ -525,7 +538,7 @@ def admin_change_password(
             f"UPDATE users SET pw_salt={ph}, pw_hash={ph}, legacy_sha256=NULL WHERE id={ph}",
             (salt, h, int(user_id)),
         )
-        users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
+        users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
 
     return _render_admin(
         request,
@@ -553,7 +566,7 @@ def admin_delete_user(request: Request, user_id: int):
         if target and target["role"] != "admin":
             cur.execute(f"DELETE FROM users WHERE id={ph}", (int(user_id),))
             msg = f"Utente '{target['username']}' eliminato."
-        users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
+        users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
 
     return _render_admin(request, user=user, users=users, msg=msg)
 

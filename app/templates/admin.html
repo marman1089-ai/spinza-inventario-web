@@ -59,7 +59,7 @@
           <tr>
             <th>Inventario</th>
             <th>Username</th>
-            <th>Ruolo</th>
+            <th>Ruolo</th><th>Ultimo accesso</th><th>Stato</th>
             <th style="text-align:right;">Azioni</th>
           </tr>
         </thead>
@@ -69,6 +69,14 @@
               <td><span class="pill">{{ stores.get(u.store, u.store) }}</span></td>
               <td><strong>{{ u.username }}</strong></td>
               <td>{{ u.role }}</td>
+              <td class="muted">{{ u.last_seen_str if u.last_seen_str else "-" }}</td>
+              <td>
+                {% if u.online %}
+                  <span class="pill" style="background:#dcfce7;">🟢 Online</span>
+                {% else %}
+                  <span class="pill" style="background:#f1f5f9;">⚪ Offline</span>
+                {% endif %}
+              </td>
               <td style="text-align:right;">
                 {% if u.role != 'admin' %}
                   <details style="display:inline-block;text-align:left;">

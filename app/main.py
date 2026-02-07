@@ -1,4 +1,5 @@
 import os
+import datetime
 import json
 import csv
 import io
@@ -103,7 +104,19 @@ def _split_logs(rows):
 # SESSION HELPERS
 # =========================
 def require_login(request: Request):
-    return request.session.get("user")
+    user = request.session.get("user")
+    if not user:
+        return None
+    # aggiorna last_seen per 'online' e ultimo accesso (best-effort)
+    try:
+        ph = _ph()
+        now = _now()
+        with connect() as conn:
+            cur = conn.cursor()
+            cur.execute(f"UPDATE users SET last_seen={now} WHERE id={ph}", (int(user.get("id")),))
+    except Exception:
+        pass
+    return user
 
 def get_selected_store(request: Request):
     return request.session.get("selected_store")
@@ -141,7 +154,7 @@ def _render_admin(request: Request, *, user, users, msg=None, error=None):
 def _admin_users_render_error(request: Request, user, error_msg: str):
     with connect() as conn:
         cur = conn.cursor()
-        users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
+        users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
     return _render_admin(request, user=user, users=users, error=error_msg)
 
 
@@ -393,7 +406,7 @@ def admin_page(request: Request, store: str = ""):
     with connect() as conn:
         cur = conn.cursor()
         users = cur.execute(
-            "SELECT id, store, username, role FROM users ORDER BY role DESC, store, username"
+            "SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username"
         ).fetchall()
 
     return _render_admin(request, user=user, users=users)
@@ -433,14 +446,14 @@ def admin_add_user(
             (username, store),
         ).fetchone()
         if exists:
-            users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
+            users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
             return _render_admin(request, user=user, users=users, error="Username già esistente.")
 
         cur.execute(
             f"INSERT INTO users(store, username, role, pw_salt, pw_hash, legacy_sha256) VALUES({ph},{ph},'staff',{ph},{ph},NULL)",
             (store, username, salt, h),
         )
-        users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
+        users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
 
     return _render_admin(request, user=user, users=users, msg=f"Utente '{username}' creato per {STORES.get(store, store)}.")
 
@@ -484,7 +497,7 @@ def admin_change_username(
             (new_username, int(user_id)),
         )
 
-        users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
+        users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
 
     return _render_admin(
         request,
@@ -525,7 +538,7 @@ def admin_change_password(
             f"UPDATE users SET pw_salt={ph}, pw_hash={ph}, legacy_sha256=NULL WHERE id={ph}",
             (salt, h, int(user_id)),
         )
-        users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
+        users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
 
     return _render_admin(
         request,
@@ -553,7 +566,7 @@ def admin_delete_user(request: Request, user_id: int):
         if target and target["role"] != "admin":
             cur.execute(f"DELETE FROM users WHERE id={ph}", (int(user_id),))
             msg = f"Utente '{target['username']}' eliminato."
-        users = cur.execute("SELECT id, store, username, role FROM users ORDER BY role DESC, store, username").fetchall()
+        users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
 
     return _render_admin(request, user=user, users=users, msg=msg)
 
@@ -2135,6 +2148,7 @@ async def orders_mark_arrived(request: Request, order_id: int = Form(...)):
             if is_missing or received_qty == 0:
                 if is_transfer:
                     # Scambio: NON reinserisco in "ordini da fare" e non segno mancanti sul prodotto.
+
                     _log(
                         cur,
                         store=real_store,
@@ -2206,6 +2220,50 @@ async def orders_mark_arrived(request: Request, order_id: int = Form(...)):
                             f"INSERT INTO products(store, category, name, area, unit, qty, min_qty, updated_at) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})",
                             (real_store, cat, nm, line_area, line_unit, float(received_qty), 0.0),
                         )
+                # --- SCAMBIO: aggiorno il mittente SOLO alla conferma del ricevente ---
+                if is_transfer and src_store and dst_store and src_store in STORES and dst_store in STORES:
+                    src_prod = cur.execute(
+                        f"SELECT id, qty FROM products WHERE store={ph} AND category={ph} AND name={ph} AND area={ph}",
+                        (src_store, cat, nm, line_area),
+                    ).fetchone()
+                    if src_prod:
+                        avail_src = float(src_prod.get("qty") or 0)
+                        new_qty = max(0.0, avail_src - float(received_qty))
+                        cur.execute(
+                            f"UPDATE products SET qty={ph}, updated_at={now} WHERE id={ph} AND store={ph}",
+                            (new_qty, int(src_prod["id"]), src_store),
+                        )
+                        _log(
+                            cur,
+                            store=src_store,
+                            username=user["username"],
+                            action="TRANSFER_OUT_CONFERMATO",
+                            category=cat,
+                            name=f"{nm} → {STORES.get(dst_store, dst_store)} (confermato)",
+                            delta=-float(received_qty),
+                        )
+                        if avail_src < float(received_qty):
+                            _log(
+                                cur,
+                                store=src_store,
+                                username=user["username"],
+                                action="TRANSFER_WARNING",
+                                category=cat,
+                                name=f"{nm}: richiesto/scaricato {received_qty} ma disponibili {avail_src}",
+                                delta=0.0,
+                            )
+                    else:
+                        _log(
+                            cur,
+                            store=src_store,
+                            username=user["username"],
+                            action="TRANSFER_WARNING",
+                            category=cat,
+                            name=f"{nm}: prodotto non trovato nel negozio sorgente (scambio confermato)",
+                            delta=0.0,
+                        )
+
+
 
                 _log(
                     cur,
@@ -2375,13 +2433,6 @@ async def transfers_submit(request: Request):
             qty_move = min(float(q), available)
             if qty_move <= 0:
                 continue
-
-            # decrementa subito il negozio sorgente
-            cur.execute(
-                f"UPDATE products SET qty=qty-{ph}, updated_at={now} WHERE id={ph} AND store={ph}",
-                (float(qty_move), int(src["id"]), from_store),
-            )
-
             # righe trasferimento (storico)
             cur.execute(
                 f"INSERT INTO transfer_lines(transfer_id, from_store, to_store, category, name, area, qty, unit) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
@@ -2398,10 +2449,10 @@ async def transfers_submit(request: Request):
                 cur,
                 store=from_store,
                 username=user["username"],
-                action="TRANSFER_OUT",
+                action="TRANSFER_RICHIESTO",
                 category=src["category"],
                 name=f"{src['name']} → {STORES.get(to_store, to_store)}",
-                delta=-float(qty_move),
+                delta=0.0,
             )
             _log(
                 cur,
@@ -2410,7 +2461,7 @@ async def transfers_submit(request: Request):
                 action="TRANSFER_IN_ATTESA",
                 category=src["category"],
                 name=f"{src['name']} ← {STORES.get(from_store, from_store)}",
-                delta=float(qty_move),
+                delta=0.0,
             )
     return RedirectResponse(f"/scambi?from_store={from_store}&to_store={to_store}", status_code=HTTP_303_SEE_OTHER)
 

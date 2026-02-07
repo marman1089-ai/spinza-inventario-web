@@ -94,7 +94,8 @@ def init_db():
             pw_salt TEXT,
             pw_hash TEXT,
             legacy_sha256 TEXT,
-            created_at {ts_default}
+            created_at {ts_default},
+            last_seen {ts_default}
         )
         """)
 
@@ -112,6 +113,13 @@ def init_db():
             """)
         except Exception:
             # SQLite vecchie o DB particolari potrebbero non supportare indici parziali
+            pass
+
+
+        # ensure 'last_seen' column exists on older DBs
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN last_seen TIMESTAMP" if pg else "ALTER TABLE users ADD COLUMN last_seen TEXT")
+        except Exception:
             pass
 
         # PRODUCTS
