@@ -331,3 +331,40 @@ def init_db():
             delta {qty_col} NOT NULL
         )
         """)
+
+# NOVITÀ E AGGIORNAMENTI (bacheca)
+cur.execute(f"""
+CREATE TABLE IF NOT EXISTS updates (
+    id {id_col},
+    day {date_col} NOT NULL,
+    message TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    ts {ts_default}
+)
+""")
+
+# --- Lightweight migrations (safe on both SQLite & Postgres) ---
+# Orders: mark transfers as "scambi" (treated like orders in progress)
+if pg:
+    alters = [
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS kind TEXT DEFAULT 'ordine'",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS from_store TEXT",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS to_store TEXT",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS transfer_id INTEGER",
+        "ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS area TEXT",
+        "ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS unit TEXT",
+    ]
+else:
+    alters = [
+        "ALTER TABLE orders ADD COLUMN kind TEXT DEFAULT 'ordine'",
+        "ALTER TABLE orders ADD COLUMN from_store TEXT",
+        "ALTER TABLE orders ADD COLUMN to_store TEXT",
+        "ALTER TABLE orders ADD COLUMN transfer_id INTEGER",
+        "ALTER TABLE order_lines ADD COLUMN area TEXT",
+        "ALTER TABLE order_lines ADD COLUMN unit TEXT",
+    ]
+for stmt in alters:
+    try:
+        cur.execute(stmt)
+    except Exception:
+        pass

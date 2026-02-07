@@ -3,7 +3,7 @@
 {% block content %}
   <div class="card" style="margin-bottom:12px;">
     <h2 style="margin:0 0 6px 0;">📦 Logistica — Ordini in corso</h2>
-    <div class="muted">Qui vedi gli ordini confermati (raggruppati per fornitore).</div>
+    <div class="muted">Qui vedi gli ordini in corso (inclusi gli scambi tra negozi).</div>
   </div>
 
   {% for o in orders %}
@@ -13,7 +13,12 @@
 
         <div class="row" style="justify-content:space-between;align-items:center;">
           <div>
-            <div class="pill">Fornitore: <strong>{{ o.supplier }}</strong></div>
+            <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;">
+              <div class="pill">Fornitore: <strong>{{ o.supplier }}</strong></div>
+              {% if (o.kind or "ordine") == "transfer" %}
+                <div class="pill">🔁 <strong>SCAMBIO</strong>{% if o.from_store %} • da {{ stores.get(o.from_store, o.from_store) }}{% endif %}</div>
+              {% endif %}
+            </div>
             <div class="muted" style="margin-top:6px;">Creato da {{ o.created_by }} • {{ o.ts }}{% if active_store == 'ALL' %} • {{ stores.get(o.store, o.store) }}{% endif %}</div>
           </div>
           <div>
@@ -21,7 +26,7 @@
           </div>
         </div>
 
-      <div class="muted" style="margin-top:10px;">✅ Metti la quantità ricevuta. Se un prodotto non è arrivato, spunta <strong>Mancante</strong>: non va in inventario e viene rimesso negli ordini da fare.</div>
+      <div class="muted" style="margin-top:10px;">✅ Metti la quantità ricevuta. Se un prodotto non è arrivato, spunta <strong>Mancante</strong>: non va in inventario.{% if (o.kind or 'ordine') != 'transfer' %} Verrà rimesso negli ordini da fare.{% else %} (Negli scambi NON viene rimesso negli ordini da fare.){% endif %}</div>
 
       <div style="overflow:auto;margin-top:10px;">
         <table>

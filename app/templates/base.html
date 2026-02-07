@@ -23,6 +23,8 @@
     input,select,button{font-size:16px;padding:10px 12px;border-radius:12px;border:1px solid #ddd;background:#fff}
     button{cursor:pointer}
     .btn{border:0;background:#111;color:#fff}
+    button:hover{filter:brightness(0.95)}
+    a.pill:hover{background:#eaeaea}
     .btn2{border:1px solid #111;background:#fff}
     .danger{background:#ffefef;border:1px solid #ffb3b3}
     .muted{color:#666;font-size:13px}
@@ -72,7 +74,7 @@
 <body>
 <header>
   {% if _brand == 'spinza' %}
-    <img src="/static/logo_scritta_spinza.png" alt="Spinza"/>
+    <strong style="font-size:20px;letter-spacing:.02em">🍕 Spinza</strong>
   {% elif _brand.startswith('reburger') %}
     <img src="/static/logo_reburger.png" alt="Reburger"/>
   {% else %}
@@ -88,6 +90,7 @@
       <a href="/select-area" class="pill" style="text-decoration:none;color:#111">🧭 Sezione</a>
       <a href="/chiusure" class="pill" style="text-decoration:none;color:#111">📸 Chiusure</a>
       <a href="/fatture" class="pill" style="text-decoration:none;color:#111">🧾 Fatture</a>
+      <a href="/updates" class="pill" style="text-decoration:none;color:#111">🆕 Novità</a>
       <a href="/spese-secondarie" class="pill" style="text-decoration:none;color:#111">💸 Spese secondarie</a>
       <details style="display:inline-block;margin:0;padding:0;">
         <summary class="pill" style="list-style:none;cursor:pointer;user-select:none;">🚚 Logistica</summary>

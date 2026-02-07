@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% set title = "Novità e aggiornamenti" %}
+{% block content %}
+  <div class="card" style="margin-bottom:12px;">
+    <div class="row" style="justify-content:space-between;align-items:center;">
+      <div>
+        <h2 style="margin:0 0 6px 0;">🆕 Novità e aggiornamenti</h2>
+        <div class="muted">Bacheca interna: solo la <strong>data</strong> (senza orario). Le note dello stesso giorno vengono raggruppate insieme.</div>
+      </div>
+    </div>
+  </div>
+
+  {% if user.role == 'admin' %}
+    <div class="card" style="margin-bottom:12px;">
+      <form method="post" action="/updates/post">
+        <div class="row" style="align-items:flex-start;">
+          <textarea name="message" rows="3" placeholder="Scrivi un aggiornamento..." style="flex:1;min-width:240px;padding:10px 12px;border-radius:12px;border:1px solid #ddd;font-size:16px;"></textarea>
+          <button class="btn" type="submit">Pubblica</button>
+        </div>
+        <div class="muted" style="margin-top:8px;">Solo admin può pubblicare.</div>
+      </form>
+    </div>
+  {% endif %}
+
+  {% for g in grouped %}
+    <div class="card" style="margin-bottom:12px;">
+      <div class="pill" style="margin-bottom:10px;">📅 <strong>{{ g.day }}</strong></div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        {% for it in g.items %}
+          <div style="background:#f7f7f7;border:1px solid #eee;border-radius:14px;padding:10px 12px;">
+            <div style="white-space:pre-wrap;">{{ it.message }}</div>
+            <div class="muted" style="margin-top:6px;">— {{ it.created_by }}</div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endfor %}
+
+  {% if not grouped or grouped|length == 0 %}
+    <div class="card"><div class="muted">Nessun aggiornamento ancora.</div></div>
+  {% endif %}
+{% endblock %}
