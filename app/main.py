@@ -140,10 +140,54 @@ def _admin_store(request: Request) -> str:
 
 def _render_admin(request: Request, *, user, users, msg=None, error=None):
     admin_store = _admin_store(request)
+
+    # Arricchisce la lista utenti per la vista admin:
+    # - online: True se last_seen è recente
+    # - last_seen_str: ultimo accesso formattato (data + ORARIO)
+    ONLINE_MINUTES = 5
+
+    def _parse_last_seen(v):
+        if v is None:
+            return None
+        # psycopg può tornare un datetime, sqlite spesso una stringa
+        if isinstance(v, datetime):
+            return v
+        try:
+            s = str(v).replace("T", " ").strip()
+            # prova formati comuni
+            for fmt in ("%Y-%m-%d %H:%M:%S.%f%z", "%Y-%m-%d %H:%M:%S%z", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+                try:
+                    return datetime.strptime(s, fmt)
+                except Exception:
+                    pass
+        except Exception:
+            return None
+        return None
+
+    def _fmt_last_seen(dt: datetime | None) -> str | None:
+        if not dt:
+            return None
+        # Mostriamo data + orario (richiesto per gli offline)
+        return dt.strftime("%d/%m/%Y %H:%M")
+
+    now = datetime.utcnow()
+    decorated = []
+    for u in (users or []):
+        # dict_row -> dict; sqlite.Row -> mapping
+        d = dict(u)
+        dt = _parse_last_seen(d.get("last_seen"))
+        d["last_seen_str"] = _fmt_last_seen(dt)
+        if dt:
+            age = now - (dt.replace(tzinfo=None) if getattr(dt, "tzinfo", None) else dt)
+            d["online"] = age.total_seconds() <= ONLINE_MINUTES * 60
+        else:
+            d["online"] = False
+        decorated.append(d)
+
     return render(
         "admin.html",
         user=user,
-        users=users,
+        users=decorated,
         msg=msg,
         error=error,
         stores=STORES,
