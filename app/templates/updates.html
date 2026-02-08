@@ -24,12 +24,12 @@
 
   {% for g in grouped %}
     <div class="card" style="margin-bottom:12px;">
-      <div class="pill" style="margin-bottom:10px;">📅 <strong>{{ g.day }}</strong></div>
+      <div class="pill" style="margin-bottom:10px;">📅 <strong>{{ g['day'] }}</strong></div>
       <div style="display:flex;flex-direction:column;gap:10px;">
-        {% for it in g.items %}
+        {% for it in g['items'] %}
           <div style="background:#f7f7f7;border:1px solid #eee;border-radius:14px;padding:10px 12px;">
-            <div style="white-space:pre-wrap;">{{ it.message }}</div>
-            <div class="muted" style="margin-top:6px;">— {{ it.created_by }}</div>
+            <div style="white-space:pre-wrap;">{{ it['message'] }}</div>
+            <div class="muted" style="margin-top:6px;">— {{ it['created_by'] }}</div>
           </div>
         {% endfor %}
       </div>
