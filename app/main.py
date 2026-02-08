@@ -791,6 +791,10 @@ def updates_page(request: Request):
             "SELECT id, day, message, created_by, ts FROM updates ORDER BY day DESC, ts ASC, id ASC"
         ).fetchall()
 
+    # Normalizza righe tra Postgres (dict_row) e SQLite (sqlite3.Row)
+    # In SQLite le righe non hanno `.get()`, quindi convertiamo tutto a dict.
+    rows = [dict(r) for r in rows]
+
     grouped = []
     by_day = {}
     for r in rows:
