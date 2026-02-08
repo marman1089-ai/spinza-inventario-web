@@ -846,6 +846,47 @@ async def updates_post(request: Request):
 
     return RedirectResponse("/updates", status_code=HTTP_303_SEE_OTHER)
 
+
+@app.post("/updates/delete/{update_id}")
+async def updates_delete(request: Request, update_id: int):
+    """Elimina un messaggio dalla bacheca Novità (solo admin)."""
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not is_admin(request):
+        return RedirectResponse("/updates", status_code=HTTP_303_SEE_OTHER)
+
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+
+        # Recupera il messaggio prima di eliminarlo (per log)
+        row = cur.execute(
+            f"SELECT message FROM updates WHERE id={ph}",
+            (int(update_id),),
+        ).fetchone()
+        msg_preview = (dict(row).get("message") if row is not None else "")
+        if msg_preview is None:
+            msg_preview = ""
+
+        cur.execute(
+            f"DELETE FROM updates WHERE id={ph}",
+            (int(update_id),),
+        )
+
+        st = request.session.get("active_store") if request.session.get("active_store") else (user.get("store") or "spinza")
+        _log(
+            cur,
+            store=st,
+            username=user["username"],
+            action="UPDATE_DELETE",
+            category="NOVITA",
+            name=str(msg_preview)[:120],
+            delta=0.0,
+        )
+
+    return RedirectResponse("/updates", status_code=HTTP_303_SEE_OTHER)
+
 # =========================
 # INVENTORY
 # =========================
