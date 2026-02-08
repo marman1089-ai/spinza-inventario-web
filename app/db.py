@@ -81,11 +81,41 @@ def init_db():
     date_col = "DATE" if pg else "TEXT"
     blob_col = "BYTEA" if pg else "BLOB"
 
+    def _safe_exec(cur, sql: str):
+        """Execute SQL safely during init.
+
+        In Postgres a single SQL error aborts the current transaction; if we
+        catch the exception without a rollback, every subsequent statement will
+        fail with `InFailedSqlTransaction`. This helper ensures we always
+        rollback on Postgres before continuing/raising.
+        """
+        try:
+            cur.execute(sql)
+        except Exception as e:
+            if pg:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+            # Log the *real* failing statement to Render logs (very useful)
+            print("[DB INIT] ERRORE SQL:", repr(e))
+            print("[DB INIT] SQL FALLITA:\n", sql)
+            raise
+
     with connect() as db:
+        # IMPORTANT: in Postgres, DDL inside one long transaction is fragile.
+        # With autocommit each statement is its own transaction, and a failure
+        # won't poison the whole init phase.
+        if pg:
+            try:
+                db.autocommit = True
+            except Exception:
+                pass
+
         cur = db.cursor()
 
         # USERS
-        cur.execute(f"""
+        _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS users (
             id {id_col},
             store TEXT NOT NULL,
@@ -99,14 +129,14 @@ def init_db():
         )
         """)
 
-        cur.execute("""
+        _safe_exec(cur, """
         CREATE UNIQUE INDEX IF NOT EXISTS ux_users_store_username
         ON users(store, username)
         """)
 
         # optional: unique admin username globale (partial index non sempre disponibile)
         try:
-            cur.execute("""
+            _safe_exec(cur, """
             CREATE UNIQUE INDEX IF NOT EXISTS ux_users_admin_username
             ON users(username)
             WHERE role = 'admin'
@@ -118,12 +148,12 @@ def init_db():
 
         # ensure 'last_seen' column exists on older DBs
         try:
-            cur.execute("ALTER TABLE users ADD COLUMN last_seen TIMESTAMP" if pg else "ALTER TABLE users ADD COLUMN last_seen TEXT")
+            _safe_exec(cur, "ALTER TABLE users ADD COLUMN last_seen TIMESTAMP" if pg else "ALTER TABLE users ADD COLUMN last_seen TEXT")
         except Exception:
             pass
 
         # PRODUCTS
-        cur.execute(f"""
+        _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS products (
             id {id_col},
             store TEXT NOT NULL,
@@ -140,7 +170,7 @@ def init_db():
         )
         """)
 
-        cur.execute("""
+        _safe_exec(cur, """
         CREATE UNIQUE INDEX IF NOT EXISTS ux_products_store_cat_name
         ON products(store, category, name)
         """)
@@ -148,11 +178,11 @@ def init_db():
         # ensure 'area' column exists on older DBs
         if using_postgres():
             # Postgres: evita errore (e transazione abortita) se la colonna esiste già
-            cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS area TEXT NOT NULL DEFAULT 'prodotti'")
-            cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT ''")
-            cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS missing_order_date TEXT")
-            cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS missing_delivery_date TEXT")
-            cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS missing_qty DOUBLE PRECISION NOT NULL DEFAULT 0")
+            _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS area TEXT NOT NULL DEFAULT 'prodotti'")
+            _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT ''")
+            _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS missing_order_date TEXT")
+            _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS missing_delivery_date TEXT")
+            _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS missing_qty DOUBLE PRECISION NOT NULL DEFAULT 0")
         else:
             # SQLite: IF NOT EXISTS non è garantito su versioni vecchie, quindi try/except
             try:
@@ -177,7 +207,7 @@ def init_db():
                 pass
 
         # TRANSFERS (scambi tra negozi)
-        cur.execute(f"""
+        _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS transfers (
             id {id_col},
             from_store TEXT NOT NULL,
@@ -187,7 +217,7 @@ def init_db():
         )
         """)
 
-        cur.execute(f"""
+        _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS transfer_lines (
             id {id_col},
             transfer_id INTEGER NOT NULL,
@@ -201,7 +231,7 @@ def init_db():
         )
         """)
         # CLOSURES (foto chiusure)
-        cur.execute(f"""
+        _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS closures (
             id {id_col},
             store TEXT NOT NULL,
@@ -216,7 +246,7 @@ def init_db():
 
         
         # SECONDARY EXPENSES (spese secondarie - foto scontrini/spese)
-        cur.execute(f"""
+        _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS secondary_expenses (
             id {id_col},
             store TEXT NOT NULL,
@@ -230,7 +260,7 @@ def init_db():
         """)
 
         # LOGISTICS: order queue + orders
-        cur.execute(f"""
+        _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS order_queue (
             id {id_col},
             store TEXT NOT NULL,
@@ -243,7 +273,7 @@ def init_db():
         )
         """)
 
-        cur.execute(f"""
+        _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS orders (
             id {id_col},
             store TEXT NOT NULL,
@@ -254,7 +284,7 @@ def init_db():
         )
         """)
 
-        cur.execute(f"""
+        _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS order_lines (
             id {id_col},
             order_id INTEGER NOT NULL,
@@ -265,7 +295,7 @@ def init_db():
         )
         """)
 # INVOICES docs (archivio fatture)
-        cur.execute(f"""
+        _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS invoices_docs (
             id {id_col},
             store TEXT NOT NULL,
@@ -280,7 +310,7 @@ def init_db():
         """)
 
         # Invoice import drafts (foto caricata prima del ricontrollo)
-        cur.execute(f"""
+        _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS invoice_import_drafts (
             id {id_col},
             store TEXT NOT NULL,
@@ -295,7 +325,7 @@ def init_db():
         """)
 
         # Invoice imports (confermati)
-        cur.execute(f"""
+        _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS invoice_imports (
             id {id_col},
             store TEXT NOT NULL,
@@ -308,12 +338,12 @@ def init_db():
         )
         """)
 
-        cur.execute("""
+        _safe_exec(cur, """
         CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_imports_store_doc
         ON invoice_imports(store, invoice_doc_id)
         """)
 
-        cur.execute(f"""
+        _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS invoice_import_lines (
             id {id_col},
             import_id INTEGER NOT NULL,
@@ -327,7 +357,7 @@ def init_db():
         """)
 
         # LOGS
-        cur.execute(f"""
+        _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS logs (
             id {id_col},
             ts {ts_default},
@@ -341,7 +371,7 @@ def init_db():
         """)
 
         # NOVITÀ E AGGIORNAMENTI (bacheca)
-        cur.execute(f"""
+        _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS updates (
             id {id_col},
             day {date_col} NOT NULL,
@@ -373,6 +403,6 @@ def init_db():
             ]
         for stmt in alters:
             try:
-                cur.execute(stmt)
+                _safe_exec(cur, stmt)
             except Exception:
                 pass
