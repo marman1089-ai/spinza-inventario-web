@@ -2143,9 +2143,16 @@ def orders_in_progress_page(request: Request):
                 "SELECT id, store, supplier, status, created_by, ts, kind, from_store, to_store, transfer_id FROM orders WHERE status='in_corso' ORDER BY ts DESC, id DESC",
             ).fetchall()
         else:
+            # Mostra anche gli scambi in uscita (creati da questo negozio) così il mittente li vede e può modificarli.
             os_ = cur.execute(
-                f"SELECT id, store, supplier, status, created_by, ts, kind, from_store, to_store, transfer_id FROM orders WHERE status='in_corso' AND store={ph} ORDER BY ts DESC, id DESC",
-                (store,),
+                f"""
+                SELECT id, store, supplier, status, created_by, ts, kind, from_store, to_store, transfer_id
+                FROM orders
+                WHERE status='in_corso'
+                  AND (store={ph} OR (kind='transfer' AND from_store={ph}))
+                ORDER BY ts DESC, id DESC
+                """,
+                (store, store),
             ).fetchall()
 
         orders = []
@@ -2155,6 +2162,14 @@ def orders_in_progress_page(request: Request):
                 (int(o["id"]),),
             ).fetchall()
             od = dict(o)
+            # direzione (solo per visualizzazione)
+            try:
+                if (od.get("kind") or "ordine") == "transfer" and store != "ALL":
+                    od["direction"] = "uscita" if od.get("from_store") == store else "entrata"
+                else:
+                    od["direction"] = "entrata"
+            except Exception:
+                od["direction"] = "entrata"
             od["lines"] = lines
             orders.append(od)
 
@@ -2234,6 +2249,15 @@ async def orders_mark_arrived(request: Request, order_id: int = Form(...)):
                 received_qty = 0.0
 
             is_missing = lid in missing_ids
+            # salvo esito riga (storico)
+            try:
+                cur.execute(
+                    f"UPDATE order_lines SET received_qty={ph}, is_missing={ph} WHERE id={ph}",
+                    (float(received_qty), 1 if is_missing else 0, int(lid)),
+                )
+            except Exception:
+                # non bloccare la consegna se la migrazione non è ancora stata applicata
+                pass
             if is_missing or received_qty == 0:
                 if is_transfer:
                     # Scambio: NON reinserisco in "ordini da fare" e non segno mancanti sul prodotto.
@@ -2365,9 +2389,11 @@ async def orders_mark_arrived(request: Request, order_id: int = Form(...)):
                 )
 
 
-        # chiudo ordine
-        cur.execute(f"DELETE FROM order_lines WHERE order_id={ph}", (int(order_id),))
-        cur.execute(f"DELETE FROM orders WHERE id={ph}", (int(order_id),))
+        # chiudo ordine (NON cancellare: serve lo storico)
+        cur.execute(
+            f"UPDATE orders SET status='chiuso', closed_at={now} WHERE id={ph}",
+            (int(order_id),),
+        )
 
         _log(
             cur,
@@ -2380,6 +2406,75 @@ async def orders_mark_arrived(request: Request, order_id: int = Form(...)):
         )
 
     return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get("/storico-ordini", response_class=HTMLResponse)
+def orders_history_page(request: Request, kind: str = ""):
+    """Storico (archivio) di ordini e scambi."""
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    brand = "ALL" if store == "ALL" else store
+    kind = (kind or "").strip().lower()
+    if kind not in ("", "ordine", "transfer"):
+        kind = ""
+
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+
+        params = []
+        where = "status != 'in_corso'"
+
+        if store == "ALL":
+            pass
+        else:
+            # includi anche scambi in uscita
+            where += f" AND (store={ph} OR (kind='transfer' AND from_store={ph}))"
+            params.extend([store, store])
+
+        if kind:
+            where += f" AND kind={ph}"
+            params.append(kind)
+
+        rows = cur.execute(
+            f"""
+            SELECT id, store, supplier, status, created_by, ts, kind, from_store, to_store, transfer_id, closed_at
+            FROM orders
+            WHERE {where}
+            ORDER BY COALESCE(closed_at, ts) DESC, id DESC
+            """,
+            tuple(params),
+        ).fetchall()
+
+        orders = []
+        for o in rows:
+            lines = cur.execute(
+                f"SELECT id, category, name, qty, area, unit, received_qty, is_missing FROM order_lines WHERE order_id={ph} ORDER BY category, name",
+                (int(o["id"]),),
+            ).fetchall()
+            od = dict(o)
+            # direzione per la vista corrente
+            if store != "ALL" and (od.get("kind") or "ordine") == "transfer":
+                od["direction"] = "uscita" if od.get("from_store") == store else "entrata"
+            else:
+                od["direction"] = "entrata"
+            od["lines"] = lines
+            orders.append(od)
+
+    active_store = request.session.get("active_store") if is_admin(request) else None
+    return render(
+        "order_history.html",
+        user=user,
+        orders=orders,
+        kind=kind,
+        stores=STORES,
+        areas=AREAS,
+        brand=brand,
+        active_store=active_store,
+    )
 
 
 # =========================
@@ -2432,6 +2527,175 @@ def transfers_page(request: Request, from_store: str = "", to_store: str = ""):
         brand=(from_store if from_store else "spinza"),
         active_store=request.session.get("active_store") if admin else None,
     )
+
+
+@app.get("/scambi/modifica/{order_id}", response_class=HTMLResponse)
+def transfers_edit_page(request: Request, order_id: int):
+    """Permette al mittente di modificare uno scambio in uscita (finché non viene confermato dal destinatario)."""
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    ph = _ph()
+
+    with connect() as conn:
+        cur = conn.cursor()
+        o = cur.execute(
+            f"SELECT id, store, kind, status, from_store, to_store, transfer_id FROM orders WHERE id={ph}",
+            (int(order_id),),
+        ).fetchone()
+        if not o:
+            return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+        kind = (o.get("kind") or "ordine")
+        if kind != "transfer" or o.get("status") != "in_corso":
+            return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+        from_store = o.get("from_store")
+        to_store = o.get("to_store")
+        transfer_id = o.get("transfer_id")
+
+        # Permessi: mittente o admin
+        if not is_admin(request) and store != from_store:
+            return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+        # Carico tutti i prodotti del negozio sorgente (tutte le aree) per poter aggiungere righe liberamente
+        products = cur.execute(
+            f"SELECT id, category, name, area, qty, unit FROM products WHERE store={ph} ORDER BY area, category, name",
+            (from_store,),
+        ).fetchall()
+
+        selected = {}
+        if transfer_id:
+            tls = cur.execute(
+                f"SELECT category, name, area, qty FROM transfer_lines WHERE transfer_id={ph}",
+                (int(transfer_id),),
+            ).fetchall()
+            for tl in tls:
+                k = f"{tl['category']}||{tl['name']}||{(tl.get('area') or 'prodotti')}"
+                selected[k] = float(tl.get("qty") or 0)
+
+    return render(
+        "transfers_edit.html",
+        user=user,
+        order_id=int(order_id),
+        from_store=from_store,
+        to_store=to_store,
+        products=products,
+        selected=selected,
+        stores=STORES,
+        areas=AREAS,
+        brand=from_store,
+        active_store=request.session.get("active_store") if is_admin(request) else None,
+    )
+
+
+@app.post("/scambi/modifica/submit")
+async def transfers_edit_submit(request: Request, order_id: int = Form(...)):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    ph = _ph()
+    now = _now()
+
+    form = await request.form()
+
+    with connect() as conn:
+        cur = conn.cursor()
+        o = cur.execute(
+            f"SELECT id, store, kind, status, from_store, to_store, transfer_id FROM orders WHERE id={ph}",
+            (int(order_id),),
+        ).fetchone()
+        if not o:
+            return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+        if (o.get("kind") or "ordine") != "transfer" or o.get("status") != "in_corso":
+            return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+        from_store = o.get("from_store")
+        to_store = o.get("to_store")
+        transfer_id = o.get("transfer_id")
+
+        if not is_admin(request) and store != from_store:
+            return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+        # raccolgo righe selezionate
+        move_requests = []
+        for key in form.keys():
+            if not key.startswith("qty_"):
+                continue
+            try:
+                pid = int(key.split("_", 1)[1])
+            except Exception:
+                continue
+            raw = form.get(key)
+            try:
+                q = float(raw)
+            except Exception:
+                q = 0.0
+            if q and q > 0:
+                move_requests.append((pid, q))
+
+        # reset righe (storico trasferimento + righe ordine)
+        if transfer_id:
+            cur.execute(f"DELETE FROM transfer_lines WHERE transfer_id={ph}", (int(transfer_id),))
+        cur.execute(f"DELETE FROM order_lines WHERE order_id={ph}", (int(order_id),))
+
+        for pid, q in move_requests:
+            src = cur.execute(
+                f"SELECT id, category, name, qty, unit, area FROM products WHERE id={ph} AND store={ph}",
+                (int(pid), from_store),
+            ).fetchone()
+            if not src:
+                continue
+
+            available = float(src.get("qty") or 0)
+            qty_move = min(float(q), available)
+            if qty_move <= 0:
+                continue
+
+            # righe trasferimento (storico)
+            if transfer_id:
+                cur.execute(
+                    f"INSERT INTO transfer_lines(transfer_id, from_store, to_store, category, name, area, qty, unit) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                    (int(transfer_id), from_store, to_store, src["category"], src["name"], (src.get("area") or "prodotti"), float(qty_move), (src.get("unit") or "")),
+                )
+
+            # righe ordine (per negozio ricevente)
+            cur.execute(
+                f"INSERT INTO order_lines(order_id, product_id, category, name, qty, area, unit) VALUES({ph},NULL,{ph},{ph},{ph},{ph},{ph})",
+                (int(order_id), src["category"], src["name"], float(qty_move), (src.get("area") or "prodotti"), (src.get("unit") or "")),
+            )
+
+        # aggiorno timestamp ordine (così sale in cima)
+        try:
+            cur.execute(f"UPDATE orders SET ts={now} WHERE id={ph}", (int(order_id),))
+        except Exception:
+            pass
+
+        _log(
+            cur,
+            store=from_store,
+            username=user["username"],
+            action="TRANSFER_MODIFICATO",
+            category="SCAMBI",
+            name=f"Scambio #{int(order_id)} modificato",
+            delta=float(len(move_requests)),
+        )
+        _log(
+            cur,
+            store=to_store,
+            username=user["username"],
+            action="TRANSFER_MODIFICATO",
+            category="SCAMBI",
+            name=f"Scambio #{int(order_id)} aggiornato dal mittente",
+            delta=float(len(move_requests)),
+        )
+
+    return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.post("/scambi/submit")

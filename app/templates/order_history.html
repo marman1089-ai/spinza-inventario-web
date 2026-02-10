@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% set title = "Storico ordini" %}
+{% block content %}
+  <div class="card" style="margin-bottom:12px;">
+    <h2 style="margin:0 0 6px 0;">🗂️ Storico ordini</h2>
+    <div class="muted">
+      Qui trovi lo storico di: <strong>ordini</strong> (entrata) e <strong>scambi</strong> tra negozi (entrata/uscita).
+      Gli ordini non vengono più cancellati dopo l'arrivo: rimangono archiviati con le quantità ricevute.
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <form method="get" action="/storico-ordini">
+      <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;">
+        <label class="pill">Filtro:
+          <select name="kind" onchange="this.form.submit()">
+            <option value="" {% if not kind %}selected{% endif %}>Tutti</option>
+            <option value="ordine" {% if kind=='ordine' %}selected{% endif %}>Solo ordini</option>
+            <option value="transfer" {% if kind=='transfer' %}selected{% endif %}>Solo scambi</option>
+          </select>
+        </label>
+        <div style="flex:1;min-width:220px;display:flex;align-items:center;gap:6px;">
+          <span class="pill" style="background:#fff;border-color:#ddd;">🔎</span>
+          <input id="histSearch" type="text" placeholder="Cerca fornitore, prodotto, negozio…" style="flex:1;min-width:160px;" oninput="filterHistory()" />
+        </div>
+      </div>
+    </form>
+  </div>
+
+  {% for o in orders %}
+    <div class="card" style="margin-bottom:12px;" data-search="{{ (o.supplier ~ ' ' ~ (stores.get(o.store, o.store) if stores else '') ~ ' ' ~ (stores.get(o.from_store, o.from_store) if o.from_store else '') ~ ' ' ~ (stores.get(o.to_store, o.to_store) if o.to_store else ''))|lower }}">
+      <div class="row" style="justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+        <div>
+          <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;">
+            <div class="pill">Fornitore: <strong>{{ o.supplier }}</strong></div>
+            {% if o.direction %}
+              {% if o.direction == 'uscita' %}
+                <div class="pill">⬆️ <strong>USCITA</strong></div>
+              {% else %}
+                <div class="pill">⬇️ <strong>ENTRATA</strong></div>
+              {% endif %}
+            {% endif %}
+            {% if (o.kind or 'ordine') == 'transfer' %}
+              <div class="pill">🔁 <strong>SCAMBIO</strong>{% if o.from_store and o.to_store %} • {{ stores.get(o.from_store, o.from_store) }} → {{ stores.get(o.to_store, o.to_store) }}{% endif %}</div>
+            {% endif %}
+            <div class="pill">#{{ o.id }}</div>
+          </div>
+          <div class="muted" style="margin-top:6px;">
+            Creato da {{ o.created_by }} • {{ o.ts }}
+            {% if o.closed_at %} • Chiuso: {{ o.closed_at }}{% endif %}
+            {% if active_store == 'ALL' %} • {{ stores.get(o.store, o.store) }}{% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div style="overflow:auto;margin-top:10px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Categoria</th>
+              <th>Prodotto</th>
+              <th>Ordinato</th>
+              <th>Ricevuto</th>
+              <th>Esito</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for l in o.lines %}
+              <tr data-line-search="{{ (l.category ~ ' ' ~ l.name)|lower }}">
+                <td><span class="pill">{{ l.category }}</span></td>
+                <td><strong>{{ l.name }}</strong>{% if l.unit %} <span class="muted">({{ l.unit }})</span>{% endif %}</td>
+                <td>{{ "%.2f"|format(l.qty) }}</td>
+                <td>{{ "%.2f"|format(l.received_qty or 0) }}</td>
+                <td>
+                  {% if l.is_missing %}
+                    <span class="pill">❌ Mancante</span>
+                  {% else %}
+                    <span class="pill">✅ OK</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+            {% if not o.lines or o.lines|length == 0 %}
+              <tr><td colspan="5" class="muted">Nessuna riga.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% endfor %}
+
+  {% if not orders or orders|length == 0 %}
+    <div class="card"><div class="muted">Nessun ordine archiviato.</div></div>
+  {% endif %}
+
+  <script>
+    function filterHistory(){
+      const q = (document.getElementById('histSearch')?.value || '').toLowerCase().trim();
+      const cards = document.querySelectorAll('[data-search]');
+      cards.forEach(c=>{
+        const hay = (c.getAttribute('data-search') || '') + ' ' + Array.from(c.querySelectorAll('[data-line-search]')).map(r=>r.getAttribute('data-line-search')||'').join(' ');
+        c.style.display = (!q || hay.includes(q)) ? '' : 'none';
+      });
+    }
+  </script>
+{% endblock %}

@@ -15,6 +15,13 @@
           <div>
             <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;">
               <div class="pill">Fornitore: <strong>{{ o.supplier }}</strong></div>
+              {% if o.direction %}
+                {% if o.direction == 'uscita' %}
+                  <div class="pill">⬆️ <strong>USCITA</strong></div>
+                {% else %}
+                  <div class="pill">⬇️ <strong>ENTRATA</strong></div>
+                {% endif %}
+              {% endif %}
               {% if (o.kind or "ordine") == "transfer" %}
                 <div class="pill">🔁 <strong>SCAMBIO</strong>{% if o.from_store %} • da {{ stores.get(o.from_store, o.from_store) }}{% endif %}</div>
               {% endif %}
@@ -22,7 +29,11 @@
             <div class="muted" style="margin-top:6px;">Creato da {{ o.created_by }} • {{ o.ts }}{% if active_store == 'ALL' %} • {{ stores.get(o.store, o.store) }}{% endif %}</div>
           </div>
           <div>
-            <button class="btn" type="submit">Conferma arrivo ✔</button>
+            {% if (o.kind or 'ordine') == 'transfer' and o.direction == 'uscita' %}
+              <a class="btn" href="/scambi/modifica/{{ o.id }}" style="text-decoration:none;display:inline-block;">Modifica ✏️</a>
+            {% else %}
+              <button class="btn" type="submit">Conferma arrivo ✔</button>
+            {% endif %}
           </div>
         </div>
 

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% set title = "Modifica scambio" %}
+{% block content %}
+  <div class="card" style="margin-bottom:12px;">
+    <h2 style="margin:0 0 6px 0;">✏️ Modifica scambio</h2>
+    <div class="muted">
+      Stai modificando uno <strong>scambio in uscita</strong> (ancora non confermato dal negozio ricevente).
+      Puoi aggiungere/togliere righe e cambiare quantità. Quando il ricevente farà <strong>Conferma arrivo</strong>, lo scambio verrà chiuso.
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <div class="row" style="align-items:center;gap:8px;flex-wrap:wrap;">
+      <div class="pill">Da: <strong>{{ stores.get(from_store, from_store) }}</strong></div>
+      <div class="pill">A: <strong>{{ stores.get(to_store, to_store) }}</strong></div>
+      <div class="pill">Scambio / Ordine: <strong>#{{ order_id }}</strong></div>
+      <a class="pill" href="/ordinati" style="text-decoration:none;color:#111;">↩ Torna agli ordini</a>
+      <div style="flex:1;min-width:180px;display:flex;align-items:center;gap:6px;">
+        <span class="pill" style="background:#fff;border-color:#ddd;">🔎</span>
+        <input id="transferSearch" type="text" placeholder="Cerca prodotto o categoria…" style="flex:1;min-width:140px;" oninput="filterTransfers()" />
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <form method="post" action="/scambi/modifica/submit">
+      <input type="hidden" name="order_id" value="{{ order_id }}" />
+      <div style="overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Area</th>
+              <th>Categoria</th>
+              <th>Prodotto</th>
+              <th>Disponibile</th>
+              <th>Da spostare</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in products %}
+              {% set key = (p.category ~ '||' ~ p.name ~ '||' ~ (p.area or 'prodotti')) %}
+              {% set qsel = (selected.get(key) if selected else None) %}
+              <tr data-search="{{ (p.area ~ ' ' ~ p.category ~ ' ' ~ p.name)|lower }}">
+                <td><span class="pill">{{ areas.get(p.area, p.area) }}</span></td>
+                <td><span class="pill">{{ p.category }}</span></td>
+                <td><strong>{{ p.name }}</strong> {% if p.unit %}<span class="muted">({{ p.unit }})</span>{% endif %}</td>
+                <td>
+                  {{ "%.2f"|format(p.qty) }}
+                  <div class="muted total-auto" data-qty="{{ p.qty }}" data-unit="{{ p.unit or '' }}"></div>
+                </td>
+                <td>
+                  <input class="mini" name="qty_{{ p.id }}" type="number" step="0.01" inputmode="decimal" placeholder="0" style="width:140px;" value="{% if qsel is not none %}{{ qsel }}{% endif %}" />
+                </td>
+              </tr>
+            {% endfor %}
+            {% if not products or products|length == 0 %}
+              <tr><td colspan="5" class="muted">Nessun prodotto disponibile nel negozio sorgente.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="row" style="justify-content:flex-end;margin-top:12px;gap:8px;flex-wrap:wrap;">
+        <button class="btn" type="submit" onclick="return confirm('Salvare le modifiche allo scambio?')">Salva modifiche ✅</button>
+        <a class="pill" href="/ordinati" style="text-decoration:none;color:#111;">Annulla</a>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    function filterTransfers(){
+      const q = (document.getElementById('transferSearch')?.value || '').toLowerCase().trim();
+      const rows = document.querySelectorAll('tbody tr[data-search]');
+      rows.forEach(r=>{
+        const hay = r.getAttribute('data-search') || '';
+        r.style.display = (!q || hay.includes(q)) ? '' : 'none';
+      });
+    }
+  </script>
+{% endblock %}

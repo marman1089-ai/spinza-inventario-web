@@ -80,6 +80,7 @@ def init_db():
     ts_default = "TIMESTAMP DEFAULT now()" if pg else "TEXT DEFAULT (datetime('now'))"
     date_col = "DATE" if pg else "TEXT"
     blob_col = "BYTEA" if pg else "BLOB"
+    ts_col = "TIMESTAMP" if pg else "TEXT"
 
     def _safe_exec(cur, sql: str):
         """Execute SQL safely during init.
@@ -280,7 +281,8 @@ def init_db():
             supplier TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'in_corso',
             created_by TEXT NOT NULL,
-            ts {ts_default}
+            ts {ts_default},
+            closed_at {ts_col}
         )
         """)
 
@@ -291,7 +293,9 @@ def init_db():
             product_id INTEGER,
             category TEXT NOT NULL,
             name TEXT NOT NULL,
-            qty {qty_col} NOT NULL
+            qty {qty_col} NOT NULL,
+            received_qty {qty_col} NOT NULL DEFAULT 0,
+            is_missing INTEGER NOT NULL DEFAULT 0
         )
         """)
 # INVOICES docs (archivio fatture)
@@ -389,8 +393,11 @@ def init_db():
                 "ALTER TABLE orders ADD COLUMN IF NOT EXISTS from_store TEXT",
                 "ALTER TABLE orders ADD COLUMN IF NOT EXISTS to_store TEXT",
                 "ALTER TABLE orders ADD COLUMN IF NOT EXISTS transfer_id INTEGER",
+                "ALTER TABLE orders ADD COLUMN IF NOT EXISTS closed_at TIMESTAMP",
                 "ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS area TEXT",
                 "ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS unit TEXT",
+                "ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS received_qty DOUBLE PRECISION NOT NULL DEFAULT 0",
+                "ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS is_missing INTEGER NOT NULL DEFAULT 0",
             ]
         else:
             alters = [
@@ -398,8 +405,11 @@ def init_db():
                 "ALTER TABLE orders ADD COLUMN from_store TEXT",
                 "ALTER TABLE orders ADD COLUMN to_store TEXT",
                 "ALTER TABLE orders ADD COLUMN transfer_id INTEGER",
+                "ALTER TABLE orders ADD COLUMN closed_at TEXT",
                 "ALTER TABLE order_lines ADD COLUMN area TEXT",
                 "ALTER TABLE order_lines ADD COLUMN unit TEXT",
+                "ALTER TABLE order_lines ADD COLUMN received_qty REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE order_lines ADD COLUMN is_missing INTEGER NOT NULL DEFAULT 0",
             ]
         for stmt in alters:
             try:
