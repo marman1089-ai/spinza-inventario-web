@@ -648,6 +648,12 @@ AREAS = {
     "prodotti": "Prodotti (Cucina)",
 }
 
+# =========================
+# LOCATION (MAGAZZINO / BANCO / FRIGO / FREEZER)
+# =========================
+LOCATION_SUGGESTIONS = ["MAGAZZINO", "BANCO", "FRIGO", "FREEZER"]
+
+
 @app.get("/select-area", response_class=HTMLResponse)
 def select_area_get(request: Request, area: str = ""):
     user = require_login(request)
@@ -891,7 +897,7 @@ async def updates_delete(request: Request, update_id: int):
 # INVENTORY
 # =========================
 @app.get("/inventario", response_class=HTMLResponse)
-def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 0):
+def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL", only_low: int = 0):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -912,6 +918,9 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
 
     q = (q or "").strip().lower()
     cat = (cat or "ALL").strip()
+    loc = (loc or "ALL").strip()
+    if not loc:
+        loc = "ALL"
     ph = _ph()
 
     with connect() as conn:
@@ -929,7 +938,30 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
         cats = [r["category"] for r in cur.execute(cats_sql, tuple(cats_params)).fetchall()] if cats_params \
                else [r["category"] for r in cur.execute(cats_sql).fetchall()]
 
+
+        # --- locations (dinamiche) ---
+        locs_sql = "SELECT DISTINCT location FROM products WHERE area=" + ph
+        locs_params = [area]
+        if active_store != "ALL":
+            locs_sql += f" AND store={ph}"
+            locs_params.append(active_store)
+        if cat != "ALL":
+            locs_sql += f" AND category={ph}"
+            locs_params.append(cat)
+        locs_sql += " ORDER BY location"
+
+        db_locs = [ (r["location"] or "").strip() for r in cur.execute(locs_sql, tuple(locs_params)).fetchall() ]
+        loc_set = []
+        for x in LOCATION_SUGGESTIONS + db_locs:
+            x = (x or "").strip()
+            if not x:
+                continue
+            if x not in loc_set:
+                loc_set.append(x)
+        locations = ["ALL"] + loc_set
+
         # --- prodotti ---
+
         sql = "SELECT * FROM products WHERE 1=1"
         params = []
 
@@ -944,6 +976,10 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
             sql += f" AND category={ph}"
             params.append(cat)
 
+        if loc != "ALL":
+            sql += f" AND lower(location)=lower({ph})"
+            params.append(loc)
+
         if q:
             sql += f" AND (lower(name) LIKE {ph} OR lower(category) LIKE {ph})"
             params.extend([f"%{q}%", f"%{q}%"])
@@ -951,7 +987,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
         if only_low:
             sql += " AND qty <= min_qty"
 
-        sql += " ORDER BY category, name"
+        sql += " ORDER BY location, category, name"
         items = cur.execute(sql, tuple(params)).fetchall()
 
     return render(
@@ -963,6 +999,8 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
         cats=cats,
         q=q,
         cat=cat,
+        loc=loc,
+        locations=locations,
         only_low=only_low,
         admin=admin,
         stores=STORES,
@@ -1056,6 +1094,7 @@ def item_add(
     request: Request,
     category: str = Form(...),
     name: str = Form(...),
+    location: str = Form("MAGAZZINO"),
     unit: str = Form(""),
     qty: float = Form(0),
     min_qty: float = Form(0),
@@ -1083,14 +1122,18 @@ def item_add(
 
     unit = (unit or "").strip()
 
+    location = (location or "MAGAZZINO").strip()
+    if not location or location == "ALL":
+        location = "MAGAZZINO"
+
     with connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            f"""INSERT INTO products(store, category, name, area, unit, qty, min_qty, updated_at)
-                VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
+            f"""INSERT INTO products(store, category, name, area, location, unit, qty, min_qty, updated_at)
+                VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
                 ON CONFLICT(store, category, name)
-                DO UPDATE SET area=excluded.area, unit=excluded.unit, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
-            (active_store, category, name, area, unit, float(qty), float(min_qty)),
+                DO UPDATE SET area=excluded.area, location=excluded.location, unit=excluded.unit, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
+            (active_store, category, name, area, location, unit, float(qty), float(min_qty)),
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
@@ -1106,6 +1149,7 @@ def item_edit(
     category: str = Form(...),
     name: str = Form(...),
     unit: str = Form(""),
+    location: str = Form("MAGAZZINO"),
     min_qty: float = Form(0),
     next_url: str = Form("/inventario"),
 ):
@@ -1122,6 +1166,10 @@ def item_edit(
     name = name.strip()
     unit = (unit or "").strip()
 
+    location = (location or "MAGAZZINO").strip()
+    if not location or location == "ALL":
+        location = "MAGAZZINO"
+
     ph = _ph()
     now = _now()
 
@@ -1135,8 +1183,8 @@ def item_edit(
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
         cur.execute(
-            f"UPDATE products SET category={ph}, name={ph}, unit={ph}, min_qty={ph}, updated_at={now} WHERE id={ph}",
-            (category, name, unit, float(min_qty), int(item_id)),
+            f"UPDATE products SET category={ph}, name={ph}, location={ph}, unit={ph}, min_qty={ph}, updated_at={now} WHERE id={ph}",
+            (category, name, location, unit, float(min_qty), int(item_id)),
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
@@ -1193,15 +1241,16 @@ def export_csv(request: Request):
     with connect() as conn:
         cur = conn.cursor()
         rows = cur.execute(
-            f"SELECT category, name, qty, min_qty FROM products WHERE store={ph} ORDER BY category, name",
+            f"SELECT category, name, location, qty, min_qty FROM products WHERE store={ph} ORDER BY category, name",
             (active_store,),
         ).fetchall()
 
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["category", "name", "qty", "min_qty"])
+    w.writerow(["category", "name", "location", "qty", "min_qty"])
+    # Compat: puoi anche ignorare la colonna location se non ti serve
     for r in rows:
-        w.writerow([r["category"], r["name"], r["qty"], r["min_qty"]])
+        w.writerow([r["category"], r["name"], r["location"], r["qty"], r["min_qty"]])
 
     return PlainTextResponse(
         buf.getvalue(),
@@ -1236,6 +1285,9 @@ async def import_csv(request: Request, file: UploadFile = File(...)):
         for row in reader:
             cat = (row.get("category") or row.get("Categoria") or "").strip()
             name = (row.get("name") or row.get("Prodotto") or "").strip()
+            location = (row.get("location") or row.get("posizione") or row.get("zona") or "MAGAZZINO").strip()
+            if not location or location == "ALL":
+                location = "MAGAZZINO"
             if not cat or not name:
                 continue
             try:
@@ -1248,10 +1300,10 @@ async def import_csv(request: Request, file: UploadFile = File(...)):
                 min_qty = 0.0
 
             cur.execute(
-                f"""INSERT INTO products(store, category, name, area, qty, min_qty, updated_at)
-                    VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now})
+                f"""INSERT INTO products(store, category, name, area, location, qty, min_qty, updated_at)
+                    VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
                     ON CONFLICT(store, category, name)
-                    DO UPDATE SET area=excluded.area, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
+                    DO UPDATE SET area=excluded.area, location=excluded.location, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
                 (active_store, cat, name, area, qty, min_qty),
             )
             count += 1
@@ -1814,7 +1866,7 @@ def orders_add_from_inventory(request: Request, item_id: int = Form(...), next_u
         ).fetchone()
         if not existing:
             cur.execute(
-                f"INSERT INTO order_queue(store, product_id, category, name, qty_to_order, added_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now})",
+                f"INSERT INTO order_queue(store, product_id, category, name, qty_to_order, added_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})",
                 (store, int(item_id), row["category"], row["name"], suggested, user["username"]),
             )
             # LOG: richiesta ordine (in arrivo)
@@ -1878,7 +1930,7 @@ def orders_add_from_inventory_with_qty(
             )
         else:
             cur.execute(
-                f"INSERT INTO order_queue(store, product_id, category, name, qty_to_order, added_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now})",
+                f"INSERT INTO order_queue(store, product_id, category, name, qty_to_order, added_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})",
                 (store, int(item_id), row["category"], row["name"], float(qty_to_order), user["username"]),
             )
 
@@ -2292,7 +2344,7 @@ async def orders_mark_arrived(request: Request, order_id: int = Form(...)):
                             )
                         else:
                             cur.execute(
-                                f"INSERT INTO order_queue(store, product_id, category, name, qty_to_order, added_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now})",
+                                f"INSERT INTO order_queue(store, product_id, category, name, qty_to_order, added_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})",
                                 (real_store, int(pid), cat, nm, float(base_qty), user["username"]),
                             )
 
@@ -2330,8 +2382,8 @@ async def orders_mark_arrived(request: Request, order_id: int = Form(...)):
                         )
                     else:
                         cur.execute(
-                            f"INSERT INTO products(store, category, name, area, unit, qty, min_qty, updated_at) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})",
-                            (real_store, cat, nm, line_area, line_unit, float(received_qty), 0.0),
+                            f"INSERT INTO products(store, category, name, area, location, unit, qty, min_qty, updated_at) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})",
+                            (real_store, cat, nm, line_area, 'MAGAZZINO', line_unit, float(received_qty), 0.0),
                         )
                 # --- SCAMBIO: aggiorno il mittente SOLO alla conferma del ricevente ---
                 if is_transfer and src_store and dst_store and src_store in STORES and dst_store in STORES:
@@ -3098,7 +3150,7 @@ async def invoice_import_confirm(request: Request, draft_id: int):
 
         # 3) creo import
         cur.execute(
-            f"INSERT INTO invoice_imports(store, invoice_doc_id, supplier, doc_date, area, created_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now}) RETURNING id",
+            f"INSERT INTO invoice_imports(store, invoice_doc_id, supplier, doc_date, area, created_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{now}) RETURNING id",
             (store, invoice_doc_id, supplier or draft["supplier"], doc_date or str(draft["doc_date"]), area, user["username"]),
         )
         import_id = cur.fetchone()[0]
@@ -3154,7 +3206,7 @@ async def invoice_import_confirm(request: Request, draft_id: int):
                     )
                 else:
                     cur.execute(
-                        f"INSERT INTO products(store, category, name, area, qty, min_qty, updated_at) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{_now()}) RETURNING id",
+                        f"INSERT INTO products(store, category, name, area, location, qty, min_qty, updated_at) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{_now()}) RETURNING id",
                         (store, cat, rn, area, q, 0),
                     )
                     product_id = cur.fetchone()[0]

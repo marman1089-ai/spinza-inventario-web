@@ -167,6 +167,7 @@ def init_db():
             missing_order_date TEXT,
             missing_delivery_date TEXT,
             missing_qty {qty_col} NOT NULL DEFAULT 0,
+            location TEXT NOT NULL DEFAULT 'MAGAZZINO',
             updated_at {ts_default}
         )
         """)
@@ -184,6 +185,7 @@ def init_db():
             _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS missing_order_date TEXT")
             _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS missing_delivery_date TEXT")
             _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS missing_qty DOUBLE PRECISION NOT NULL DEFAULT 0")
+            _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT 'MAGAZZINO'")
         else:
             # SQLite: IF NOT EXISTS non è garantito su versioni vecchie, quindi try/except
             try:
@@ -204,6 +206,10 @@ def init_db():
                 pass
             try:
                 cur.execute("ALTER TABLE products ADD COLUMN missing_qty REAL NOT NULL DEFAULT 0")
+            except Exception:
+                pass
+            try:
+                cur.execute("ALTER TABLE products ADD COLUMN location TEXT NOT NULL DEFAULT 'MAGAZZINO'")
             except Exception:
                 pass
 
