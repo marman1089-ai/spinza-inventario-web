@@ -891,7 +891,7 @@ async def updates_delete(request: Request, update_id: int):
 # INVENTORY
 # =========================
 @app.get("/inventario", response_class=HTMLResponse)
-def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 0):
+def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL", only_low: int = 0):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -912,6 +912,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
 
     q = (q or "").strip().lower()
     cat = (cat or "ALL").strip()
+    loc = (loc or "ALL").strip()
     ph = _ph()
 
     with connect() as conn:
@@ -929,6 +930,19 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
         cats = [r["category"] for r in cur.execute(cats_sql, tuple(cats_params)).fetchall()] if cats_params \
                else [r["category"] for r in cur.execute(cats_sql).fetchall()]
 
+        
+        # --- posizioni ---
+        locations_sql = "SELECT DISTINCT location FROM products WHERE area=" + ph
+        loc_params = [area]
+        if active_store != "ALL":
+            locations_sql += f" AND store={ph}"
+            loc_params.append(active_store)
+        locations_sql += " AND location IS NOT NULL AND TRIM(location)<>'' ORDER BY location"
+        try:
+            locations = [r["location"] for r in cur.execute(locations_sql, tuple(loc_params)).fetchall()]
+        except Exception:
+            locations = []
+
         # --- prodotti ---
         sql = "SELECT * FROM products WHERE 1=1"
         params = []
@@ -944,9 +958,13 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
             sql += f" AND category={ph}"
             params.append(cat)
 
+        if loc != "ALL":
+            sql += f" AND location={ph}"
+            params.append(loc)
+
         if q:
-            sql += f" AND (lower(name) LIKE {ph} OR lower(category) LIKE {ph})"
-            params.extend([f"%{q}%", f"%{q}%"])
+            sql += f" AND (lower(name) LIKE {ph} OR lower(category) LIKE {ph} OR lower(location) LIKE {ph})"
+            params.extend([f"%{q}%", f"%{q}%", f"%{q}%"])
 
         if only_low:
             sql += " AND qty <= min_qty"
@@ -961,8 +979,10 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
         areas=AREAS,
         items=items,
         cats=cats,
+        locations=locations,
         q=q,
         cat=cat,
+        loc=loc,
         only_low=only_low,
         admin=admin,
         stores=STORES,
@@ -1056,6 +1076,7 @@ def item_add(
     request: Request,
     category: str = Form(...),
     name: str = Form(...),
+    location: str = Form("MAGAZZINO"),
     unit: str = Form(""),
     qty: float = Form(0),
     min_qty: float = Form(0),
@@ -1081,16 +1102,18 @@ def item_add(
     if area not in AREAS:
         area = "prodotti"
 
+    location = (location or "MAGAZZINO").strip()
+
     unit = (unit or "").strip()
 
     with connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            f"""INSERT INTO products(store, category, name, area, unit, qty, min_qty, updated_at)
-                VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
+            f"""INSERT INTO products(store, category, name, area, location, unit, qty, min_qty, updated_at)
+                VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
                 ON CONFLICT(store, category, name)
-                DO UPDATE SET area=excluded.area, unit=excluded.unit, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
-            (active_store, category, name, area, unit, float(qty), float(min_qty)),
+                DO UPDATE SET area=excluded.area, location=excluded.location, unit=excluded.unit, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
+            (active_store, category, name, area, location, unit, float(qty), float(min_qty)),
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
@@ -1105,6 +1128,7 @@ def item_edit(
     item_id: int,
     category: str = Form(...),
     name: str = Form(...),
+    location: str = Form("MAGAZZINO"),
     unit: str = Form(""),
     min_qty: float = Form(0),
     next_url: str = Form("/inventario"),
@@ -1120,6 +1144,8 @@ def item_edit(
 
     category = category.strip()
     name = name.strip()
+    location = (location or "MAGAZZINO").strip()
+
     unit = (unit or "").strip()
 
     ph = _ph()
@@ -1135,8 +1161,8 @@ def item_edit(
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
         cur.execute(
-            f"UPDATE products SET category={ph}, name={ph}, unit={ph}, min_qty={ph}, updated_at={now} WHERE id={ph}",
-            (category, name, unit, float(min_qty), int(item_id)),
+            f"UPDATE products SET category={ph}, name={ph}, location={ph}, unit={ph}, min_qty={ph}, updated_at={now} WHERE id={ph}",
+            (category, name, location, unit, float(min_qty), int(item_id)),
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
@@ -2330,7 +2356,7 @@ async def orders_mark_arrived(request: Request, order_id: int = Form(...)):
                         )
                     else:
                         cur.execute(
-                            f"INSERT INTO products(store, category, name, area, unit, qty, min_qty, updated_at) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})",
+                            f"INSERT INTO products(store, category, name, area, location, unit, qty, min_qty, updated_at) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})",
                             (real_store, cat, nm, line_area, line_unit, float(received_qty), 0.0),
                         )
                 # --- SCAMBIO: aggiorno il mittente SOLO alla conferma del ricevente ---

@@ -728,7 +728,7 @@ def profile_change_username(request: Request, new_username: str = Form(...)):
 # INVENTORY
 # =========================
 @app.get("/inventario", response_class=HTMLResponse)
-def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 0):
+def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL", only_low: int = 0):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -749,6 +749,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
 
     q = (q or "").strip().lower()
     cat = (cat or "ALL").strip()
+    loc = (loc or "ALL").strip()
     ph = _ph()
 
     with connect() as conn:
@@ -766,6 +767,19 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
         cats = [r["category"] for r in cur.execute(cats_sql, tuple(cats_params)).fetchall()] if cats_params \
                else [r["category"] for r in cur.execute(cats_sql).fetchall()]
 
+        
+        # --- posizioni ---
+        locations_sql = "SELECT DISTINCT location FROM products WHERE area=" + ph
+        loc_params = [area]
+        if active_store != "ALL":
+            locations_sql += f" AND store={ph}"
+            loc_params.append(active_store)
+        locations_sql += " AND location IS NOT NULL AND TRIM(location)<>'' ORDER BY location"
+        try:
+            locations = [r["location"] for r in cur.execute(locations_sql, tuple(loc_params)).fetchall()]
+        except Exception:
+            locations = []
+
         # --- prodotti ---
         sql = "SELECT * FROM products WHERE 1=1"
         params = []
@@ -781,9 +795,13 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
             sql += f" AND category={ph}"
             params.append(cat)
 
+        if loc != "ALL":
+            sql += f" AND location={ph}"
+            params.append(loc)
+
         if q:
-            sql += f" AND (lower(name) LIKE {ph} OR lower(category) LIKE {ph})"
-            params.extend([f"%{q}%", f"%{q}%"])
+            sql += f" AND (lower(name) LIKE {ph} OR lower(category) LIKE {ph} OR lower(location) LIKE {ph})"
+            params.extend([f"%{q}%", f"%{q}%", f"%{q}%"])
 
         if only_low:
             sql += " AND qty <= min_qty"
@@ -798,8 +816,10 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", only_low: int = 
         areas=AREAS,
         items=items,
         cats=cats,
+        locations=locations,
         q=q,
         cat=cat,
+        loc=loc,
         only_low=only_low,
         admin=admin,
         stores=STORES,
