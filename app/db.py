@@ -194,10 +194,10 @@ def init_db():
                 pass
             try:
                 cur.execute("ALTER TABLE products ADD COLUMN unit TEXT NOT NULL DEFAULT ''")
-            try:
-                cur.execute("ALTER TABLE products ADD COLUMN location TEXT NOT NULL DEFAULT 'MAGAZZINO'")
             except Exception:
                 pass
+            try:
+                cur.execute("ALTER TABLE products ADD COLUMN location TEXT NOT NULL DEFAULT 'MAGAZZINO'")
             except Exception:
                 pass
             try:
