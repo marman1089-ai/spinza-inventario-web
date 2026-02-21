@@ -897,8 +897,11 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
     area = get_selected_area(request)
+    # UX: se non è stata ancora scelta la sezione, imposta un default.
+    # Questo evita che l'admin (o un utente con sessione nuova) resti bloccato su redirect continui.
     if not area or area not in AREAS:
-        return RedirectResponse("/select-area", status_code=HTTP_303_SEE_OTHER)
+        area = "prodotti"
+        set_selected_area(request, area)
 
     admin = is_admin(request)
     if admin:
@@ -987,20 +990,29 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
         admin=admin,
         stores=STORES,
         active_store=active_store,
-        can_edit=(active_store != "ALL"),
+        # can_edit: permette Set / +/- anche se l'admin sta guardando "ALL" (passiamo lo store del prodotto nel form)
+        can_edit=True,
+        # can_bulk_edit: azioni che richiedono un inventario singolo (add/import/export)
+        can_bulk_edit=(active_store != "ALL"),
         brand=active_store if active_store != "ALL" else "spinza",
     )
 
 
 @app.post("/items/{item_id}/delta")
-def item_delta(request: Request, item_id: int, delta: float = Form(...), next_url: str = Form("/inventario")):
+def item_delta(request: Request, item_id: int, delta: float = Form(...), store: str = Form(""), next_url: str = Form("/inventario")):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
     admin = is_admin(request)
     active_store = (request.session.get("active_store") if admin else user.get("store"))
-    if not active_store or active_store == "ALL":
+    effective_store = active_store
+    # Se l'admin sta guardando "ALL", lo store arriva dal form del prodotto.
+    if admin and active_store == "ALL":
+        store = (store or "").strip()
+        if store in STORES:
+            effective_store = store
+    if not effective_store or effective_store == "ALL":
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
     ph = _ph()
@@ -1017,7 +1029,7 @@ def item_delta(request: Request, item_id: int, delta: float = Form(...), next_ur
         cur = conn.cursor()
         row = cur.execute(
             f"SELECT * FROM products WHERE id={ph} AND store={ph}",
-            (int(item_id), active_store),
+            (int(item_id), effective_store),
         ).fetchone()
         if not row:
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
@@ -1032,20 +1044,25 @@ def item_delta(request: Request, item_id: int, delta: float = Form(...), next_ur
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (active_store, user["username"], "DELTA", row["category"], row["name"], float(delta)),
+            (effective_store, user["username"], "DELTA", row["category"], row["name"], float(delta)),
         )
 
     return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
 @app.post("/items/{item_id}/set")
-def item_set(request: Request, item_id: int, qty: float = Form(...), next_url: str = Form("/inventario")):
+def item_set(request: Request, item_id: int, qty: float = Form(...), store: str = Form(""), next_url: str = Form("/inventario")):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
     admin = is_admin(request)
     active_store = (request.session.get("active_store") if admin else user.get("store"))
-    if not active_store or active_store == "ALL":
+    effective_store = active_store
+    if admin and active_store == "ALL":
+        store = (store or "").strip()
+        if store in STORES:
+            effective_store = store
+    if not effective_store or effective_store == "ALL":
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
     ph = _ph()
@@ -1055,7 +1072,7 @@ def item_set(request: Request, item_id: int, qty: float = Form(...), next_url: s
         cur = conn.cursor()
         row = cur.execute(
             f"SELECT * FROM products WHERE id={ph} AND store={ph}",
-            (int(item_id), active_store),
+            (int(item_id), effective_store),
         ).fetchone()
         if not row:
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
@@ -1066,7 +1083,7 @@ def item_set(request: Request, item_id: int, qty: float = Form(...), next_url: s
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (active_store, user["username"], "SET", row["category"], row["name"], float(qty)),
+            (effective_store, user["username"], "SET", row["category"], row["name"], float(qty)),
         )
 
     return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
@@ -1126,6 +1143,7 @@ def item_add(
 def item_edit(
     request: Request,
     item_id: int,
+    store: str = Form(""),
     category: str = Form(...),
     name: str = Form(...),
     location: str = Form("MAGAZZINO"),
@@ -1139,7 +1157,12 @@ def item_edit(
 
     admin = is_admin(request)
     active_store = (request.session.get("active_store") if admin else user.get("store"))
-    if not active_store or active_store == "ALL":
+    effective_store = active_store
+    if admin and active_store == "ALL":
+        store = (store or "").strip()
+        if store in STORES:
+            effective_store = store
+    if not effective_store or effective_store == "ALL":
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
     category = category.strip()
@@ -1155,7 +1178,7 @@ def item_edit(
         cur = conn.cursor()
         row = cur.execute(
             f"SELECT * FROM products WHERE id={ph} AND store={ph}",
-            (int(item_id), active_store),
+            (int(item_id), effective_store),
         ).fetchone()
         if not row:
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
@@ -1166,20 +1189,25 @@ def item_edit(
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (active_store, user["username"], "EDIT", category, name, float(min_qty)),
+            (effective_store, user["username"], "EDIT", category, name, float(min_qty)),
         )
 
     return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
 @app.post("/items/{item_id}/delete")
-def item_delete(request: Request, item_id: int, next_url: str = Form("/inventario")):
+def item_delete(request: Request, item_id: int, store: str = Form(""), next_url: str = Form("/inventario")):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
     admin = is_admin(request)
     active_store = (request.session.get("active_store") if admin else user.get("store"))
-    if not active_store or active_store == "ALL":
+    effective_store = active_store
+    if admin and active_store == "ALL":
+        store = (store or "").strip()
+        if store in STORES:
+            effective_store = store
+    if not effective_store or effective_store == "ALL":
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
     ph = _ph()
@@ -1189,13 +1217,13 @@ def item_delete(request: Request, item_id: int, next_url: str = Form("/inventari
         cur = conn.cursor()
         row = cur.execute(
             f"SELECT * FROM products WHERE id={ph} AND store={ph}",
-            (int(item_id), active_store),
+            (int(item_id), effective_store),
         ).fetchone()
         if row:
             cur.execute(f"DELETE FROM products WHERE id={ph}", (int(item_id),))
             cur.execute(
                 f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-                (active_store, user["username"], "DELETE", row["category"], row["name"], 0.0),
+                (effective_store, user["username"], "DELETE", row["category"], row["name"], 0.0),
             )
 
     return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)

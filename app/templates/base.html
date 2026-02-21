@@ -100,9 +100,13 @@
     @media(max-width:780px){
       .wrap{padding:10px}
       header{padding:10px 10px}
-      header{flex-direction:column;align-items:flex-start;gap:10px}
+      /* Mobile: header tutto in riga (logo + nome negozio + menu) */
+      header{flex-direction:row;align-items:center;gap:10px}
+      .brand-block{flex-direction:row;align-items:center;gap:10px;flex:1;min-width:0}
+      .brand-line{min-width:0}
+      .user-line{max-width:100%;}
       .top-menu{display:none}
-      .menu-btn{display:inline-flex;align-self:flex-end;margin-left:auto}
+      .menu-btn{display:inline-flex;margin-left:auto;flex:0 0 auto}
       th{font-size:.78rem}
       td{font-size:.95rem}
       th,td{padding:.38rem .30rem}
@@ -113,6 +117,15 @@
       .actions form.row input.mini{width:5.4rem!important}
       /* make product cell denser */
       .muted{line-height:1.15}
+    }
+
+    /* Inventario: azioni in 2 righe (soprattutto su mobile) */
+    .inv-actions{display:flex;flex-direction:column;gap:6px;align-items:flex-end;overflow:visible}
+    .inv-actions .inv-row{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center}
+    .inv-actions .inv-row form.row{flex-wrap:nowrap}
+    @media(min-width:780px){
+      /* Desktop: mantieni la sensazione "compatta" */
+      .inv-actions{gap:6px}
     }
 
   </style>

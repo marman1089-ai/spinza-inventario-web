@@ -51,7 +51,7 @@
             Negozio: <strong>{{ user.store_label }}</strong>
           {% endif %}
           • Usa 🧮 (calcolatrice) o Set per modificare la quantità. “Sotto minimo” va in rosso.
-          {% if admin and not can_edit %}
+          {% if admin and not can_bulk_edit %}
             • Per modificare, seleziona un inventario singolo.
           {% endif %}
         </div>
@@ -59,7 +59,7 @@
       <details>
         <summary class="pill" style="cursor:pointer;">➕ Aggiungi prodotto</summary>
         <div style="margin-top:10px;">
-          {% if can_edit %}
+          {% if can_bulk_edit %}
           <form method="post" action="/items/add">
             <input type="hidden" name="next_url" value="" />
             <div class="row">
@@ -78,7 +78,7 @@
         </div>
       </details>
 
-      {% if can_edit %}
+      {% if can_bulk_edit %}
       <details>
         <summary class="pill" style="cursor:pointer;">⬇️⬆️ Import / Export CSV</summary>
         <div style="margin-top:10px;">
@@ -127,37 +127,44 @@
               <td class="qty {% if low %}low{% endif %}">{{ "%.2f"|format(it.qty) }}</td>
               <td class="hide-mobile">{{ "%.2f"|format(it.min_qty) }}</td>
               <td>
-                <div class="actions">
+                <div class="actions inv-actions">
                   {% if can_edit %}
-                  <button class="mini btn2" type="button" title="Calcolatrice (+ / -)" onclick="openCalc({{ it.id }}, {{ it.qty }}, '{{ (it.unit or '')|replace("'","\\'") }}')">🧮</button>
+                  <div class="inv-row">
+                    <button class="mini btn2" type="button" title="Calcolatrice (+ / -)" onclick="openCalc({{ it.id }}, {{ it.qty }}, '{{ (it.unit or '')|replace("'","\\'") }}', '{{ it.store }}')">🧮</button>
+                    <button class="mini btn2" type="button" title="Aggiungi agli ordini da fare" onclick="openOrderQty({{ it.id }}, {{ it.qty }})">🛒 Ordina</button>
 
-                  <form method="post" action="/items/{{ it.id }}/set" class="row" style="gap:6px;">
-                    <input type="hidden" name="next_url" value="" />
-                    <input class="mini" name="qty" type="number" step="0.01" value="{{ it.qty }}" style="width:110px;" inputmode="decimal" oninput="updateTotalForItem({{ it.id }}, this.value)">
-                    <button class="mini btn" type="submit">Set</button>
-                  </form>
+                    <details>
+                      <summary class="mini btn2" style="list-style:none;cursor:pointer;">✏️ Modifica</summary>
+                      <div style="margin-top:8px;">
+                        <form method="post" action="/items/{{ it.id }}/edit" class="row" style="gap:6px;">
+                          <input type="hidden" name="next_url" value="" />
+                          <input type="hidden" name="store" value="{{ it.store }}" />
+                          <input class="mini" name="category" value="{{ it.category }}" style="width:140px;" required />
+                          <input class="mini" name="name" value="{{ it.name }}" style="width:200px;" required />
+                          <input class="mini" name="location" value="{{ it.location or '' }}" placeholder="Posizione" style="width:160px;" />
+                          <input class="mini" name="unit" value="{{ it.unit or '' }}" placeholder="Unità" style="width:140px;" />
+                          <input class="mini" name="min_qty" type="number" step="0.01" value="{{ it.min_qty }}" style="width:110px;" />
+                          <button class="mini btn" type="submit">Salva</button>
+                        </form>
+                        <div class="muted" style="margin-top:6px;">Modifica categoria/nome/minimo (la quantità si cambia con Set / +/-).</div>
+                      </div>
+                    </details>
 
-                  <button class="mini btn2" type="button" title="Aggiungi agli ordini da fare" onclick="openOrderQty({{ it.id }}, {{ it.qty }})">🛒 Ordina</button>
+                    <form method="post" action="/items/{{ it.id }}/delete" onsubmit="return confirm('Eliminare {{ it.name }}?')">
+                      <input type="hidden" name="next_url" value="" />
+                      <input type="hidden" name="store" value="{{ it.store }}" />
+                      <button class="mini" type="submit" title="Elimina prodotto">🗑</button>
+                    </form>
+                  </div>
 
-                  <details>
-                    <summary class="mini btn2" style="list-style:none;cursor:pointer;">✏️ Modifica</summary>
-                    <div style="margin-top:8px;">
-                      <form method="post" action="/items/{{ it.id }}/edit" class="row" style="gap:6px;">
-                        <input type="hidden" name="next_url" value="" />
-                        <input class="mini" name="category" value="{{ it.category }}" style="width:140px;" required />
-                        <input class="mini" name="name" value="{{ it.name }}" style="width:200px;" required />
-                        <input class="mini" name="location" value="{{ it.location or '' }}" placeholder="Posizione" style="width:160px;" />
-                        <input class="mini" name="unit" value="{{ it.unit or '' }}" placeholder="Unità" style="width:140px;" />
-                        <input class="mini" name="min_qty" type="number" step="0.01" value="{{ it.min_qty }}" style="width:110px;" />
-                        <button class="mini btn" type="submit">Salva</button>
-                      </form>
-                      <div class="muted" style="margin-top:6px;">Modifica categoria/nome/minimo (la quantità si cambia con Set / +/-).</div>
-                    </div>
-                  </details>
-                  <form method="post" action="/items/{{ it.id }}/delete" onsubmit="return confirm('Eliminare {{ it.name }}?')">
-                    <input type="hidden" name="next_url" value="" />
-                    <button class="mini" type="submit" title="Elimina prodotto">🗑</button>
-                  </form>
+                  <div class="inv-row">
+                    <form method="post" action="/items/{{ it.id }}/set" class="row" style="gap:6px;">
+                      <input type="hidden" name="next_url" value="" />
+                      <input type="hidden" name="store" value="{{ it.store }}" />
+                      <input class="mini" name="qty" type="number" step="0.01" value="{{ it.qty }}" style="width:110px;" inputmode="decimal" oninput="updateTotalForItem({{ it.id }}, this.value)">
+                      <button class="mini btn" type="submit">Set</button>
+                    </form>
+                  </div>
                   {% else %}
                     <span class="muted" style="font-size:12px;">(Vista sola lettura)</span>
                   {% endif %}
@@ -239,6 +246,7 @@
     let _calcCurrent = 0;
     let _calcSign = -1;
     let _calcUnit = '';
+    let _calcStore = '';
 
     // aggiorna il "Totale: ..." sotto al prodotto (solo informativo, non sostituisce la quantità)
     function updateTotalForItem(itemId, qty){
@@ -248,11 +256,12 @@
       if(window._updateTotalEl) window._updateTotalEl(el);
     }
 
-    function openCalc(id, currentQty, unitStr) {
+    function openCalc(id, currentQty, unitStr, storeCode) {
       _calcItemId = id;
       _calcCurrent = Number(currentQty) || 0;
       _calcSign = -1;
       _calcUnit = (unitStr || '');
+      _calcStore = (storeCode || '');
       document.getElementById('calcDelta').value = '';
       document.getElementById('calcInfo').textContent = `Rimasti: ${_calcCurrent.toFixed(2)}. Scegli + o - e scrivi la quantità.`;
       document.getElementById('calcResult').textContent = '';
@@ -304,9 +313,11 @@
       f.innerHTML = '';
       const next = document.createElement('input');
       next.type = 'hidden'; next.name = 'next_url'; next.value = window.location.pathname + window.location.search;
+      const st = document.createElement('input');
+      st.type = 'hidden'; st.name = 'store'; st.value = (_calcStore || '');
       const d = document.createElement('input');
       d.type = 'hidden'; d.name = 'delta'; d.value = String(delta);
-      f.appendChild(next); f.appendChild(d);
+      f.appendChild(next); f.appendChild(st); f.appendChild(d);
       f.submit();
     }
 
