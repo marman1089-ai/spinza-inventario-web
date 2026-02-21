@@ -60,7 +60,6 @@
               <input name="category" placeholder="Categoria" required />
               <input name="name" placeholder="Nome prodotto" required />
               <input name="unit" placeholder="Unità (es. 1kg, 120g, 1L)" />
-              <input name="location" placeholder="Posizione (es. Frigo 1, Banco, Magazzino...)" />
               <input name="qty" placeholder="Q.tà" type="number" step="0.01" />
               <input name="min_qty" placeholder="Minimo" type="number" step="0.01" />
               <button class="btn" type="submit">Salva</button>
@@ -110,7 +109,6 @@
                   <strong>{{ it.name }}</strong>
                   <div class="muted" style="font-size:12px;">
                     {% if it.unit %}📏 {{ it.unit }}{% endif %}
-                    {% if it.location %}<span class="pill" style="margin-left:6px;">📍 {{ it.location }}</span>{% endif %}
                     <div class="muted total-auto" id="total-{{ it.id }}" data-qty="{{ it.qty }}" data-unit="{{ it.unit or '' }}"></div>
                     {% if it.missing_qty and it.missing_qty > 0 %}
                       <span class="pill" style="background:#ffe6e6;border-color:#ffb3b3;">⚠️ Mancante nell’ordine del {{ it.missing_order_date or '?' }} (arrivo {{ it.missing_delivery_date or '?' }})</span>
@@ -141,7 +139,6 @@
                         <input class="mini" name="category" value="{{ it.category }}" style="width:140px;" required />
                         <input class="mini" name="name" value="{{ it.name }}" style="width:200px;" required />
                         <input class="mini" name="unit" value="{{ it.unit or '' }}" placeholder="Unità" style="width:140px;" />
-                        <input class="mini" name="location" value="{{ it.location or '' }}" placeholder="Posizione" style="width:170px;" />
                         <input class="mini" name="min_qty" type="number" step="0.01" value="{{ it.min_qty }}" style="width:110px;" />
                         <button class="mini btn" type="submit">Salva</button>
                       </form>

@@ -1057,7 +1057,6 @@ def item_add(
     category: str = Form(...),
     name: str = Form(...),
     unit: str = Form(""),
-    location: str = Form(""),
     qty: float = Form(0),
     min_qty: float = Form(0),
     next_url: str = Form("/inventario"),
@@ -1083,16 +1082,15 @@ def item_add(
         area = "prodotti"
 
     unit = (unit or "").strip()
-    location = (location or "").strip() or "MAGAZZINO"
 
     with connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            f"""INSERT INTO products(store, category, name, area, unit, location, qty, min_qty, updated_at)
-                VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
+            f"""INSERT INTO products(store, category, name, area, unit, qty, min_qty, updated_at)
+                VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
                 ON CONFLICT(store, category, name)
-                DO UPDATE SET area=excluded.area, unit=excluded.unit, location=excluded.location, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
-            (active_store, category, name, area, unit, location, float(qty), float(min_qty)),
+                DO UPDATE SET area=excluded.area, unit=excluded.unit, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
+            (active_store, category, name, area, unit, float(qty), float(min_qty)),
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
@@ -1108,7 +1106,6 @@ def item_edit(
     category: str = Form(...),
     name: str = Form(...),
     unit: str = Form(""),
-    location: str = Form(""),
     min_qty: float = Form(0),
     next_url: str = Form("/inventario"),
 ):
@@ -1124,7 +1121,6 @@ def item_edit(
     category = category.strip()
     name = name.strip()
     unit = (unit or "").strip()
-    location = (location or "").strip() or "MAGAZZINO"
 
     ph = _ph()
     now = _now()
@@ -1139,8 +1135,8 @@ def item_edit(
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
         cur.execute(
-            f"UPDATE products SET category={ph}, name={ph}, unit={ph}, location={ph}, min_qty={ph}, updated_at={now} WHERE id={ph}",
-            (category, name, unit, location, float(min_qty), int(item_id)),
+            f"UPDATE products SET category={ph}, name={ph}, unit={ph}, min_qty={ph}, updated_at={now} WHERE id={ph}",
+            (category, name, unit, float(min_qty), int(item_id)),
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",

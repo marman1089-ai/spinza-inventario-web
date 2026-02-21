@@ -35,6 +35,14 @@
     .low{color:#b40000;font-weight:800}
     .pill{display:inline-block;padding:6px 10px;border-radius:999px;background:#f0f0f0;font-size:13px}
     .right{margin-left:auto;display:flex;gap:10px;align-items:center}
+    /* Mobile: menu orizzontale scrollabile (stile Google) */
+    .top-menu{display:flex;gap:10px;align-items:center;overflow-x:auto;white-space:nowrap;min-width:0;flex:1;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+    .top-menu::-webkit-scrollbar{display:none;}
+    header{overflow:hidden;}
+    body{overflow-x:hidden;}
+    .right{min-width:0;max-width:100%;}
+    .top-menu .pill{flex:0 0 auto;}
+
     form{margin:0}
     .actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
     .mini{padding:8px 10px;font-size:14px;border-radius:10px}
@@ -87,6 +95,7 @@
         {% if user.store_label %} • {{ user.store_label }}{% endif %}
         {% if user.role == 'admin' %} • admin{% endif %}
       </span>
+      <nav class="top-menu">
       <a href="/select-area" class="pill" style="text-decoration:none;color:#111">🧭 Sezione</a>
       <a href="/chiusure" class="pill" style="text-decoration:none;color:#111">📸 Chiusure</a>
       <a href="/fatture" class="pill" style="text-decoration:none;color:#111">🧾 Fatture</a>
@@ -107,7 +116,8 @@
       <a href="/profile" class="pill" style="text-decoration:none;color:#111">⚙️ Profilo</a>
       {% if user.role == 'admin' %}
         <a href="/admin" class="pill" style="text-decoration:none;color:#111">🛠️ Admin</a>
-      {% endif %}
+            </nav>
+{% endif %}
       
       {% if user.role == 'admin' %}
         <form method="post" action="/set-active-store" style="display:inline;">
