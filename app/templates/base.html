@@ -15,7 +15,7 @@
   {% endif %}
   <style>
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;background:#f5f5f5;color:#111}
-    header{background:#fff;padding:12px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 1px 8px rgba(0,0,0,.06);position:sticky;top:0}
+    header{background:#fff;padding:12px 14px;display:flex;align-items:center;gap:12px;box-shadow:0 1px 8px rgba(0,0,0,.06);position:sticky;top:0;z-index:100}
     header img{height:34px}
     .wrap{max-width:980px;margin:0 auto;padding:14px}
     .card{background:#fff;border-radius:14px;padding:14px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
@@ -38,10 +38,13 @@
     /* Mobile: menu orizzontale scrollabile (stile Google) */
     .top-menu{display:flex;gap:10px;align-items:center;overflow-x:auto;white-space:nowrap;min-width:0;flex:1;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
     .top-menu::-webkit-scrollbar{display:none;}
-    header{overflow:hidden;}
     body{overflow-x:hidden;}
-    .right{min-width:0;max-width:100%;}
     .top-menu .pill{flex:0 0 auto;}
+
+    /* Header layout (logo + utente/sede sotto logo su mobile) */
+    .brand-block{display:flex;flex-direction:column;gap:6px;min-width:0}
+    .brand-line{display:flex;align-items:center;gap:10px;min-width:0}
+    .user-line{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
     form{margin:0}
     .actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
@@ -65,6 +68,8 @@
     @media(max-width:780px){
       .wrap{padding:10px}
       header{padding:10px 10px}
+      header{flex-direction:column;align-items:flex-start;gap:10px}
+      .top-menu{width:100%}
       th{font-size:.78rem}
       td{font-size:.95rem}
       th,td{padding:.38rem .30rem}
@@ -81,45 +86,38 @@
 </head>
 <body>
 <header>
-  {% if _brand == 'spinza' %}
-    <img src="/static/logo_scritta_spinza.png" alt="Spinza" style="height:34px" />
-  {% elif _brand.startswith('reburger') %}
-    <img src="/static/logo_reburger.png" alt="Reburger"/>
-  {% else %}
-    <strong style="font-size:18px;letter-spacing:.02em">Inventari</strong>
-  {% endif %}
-  <div class="right">
+  <div class="brand-block">
+    <div class="brand-line">
+      {% if _brand == 'spinza' %}
+        <img src="/static/logo_scritta_spinza.png" alt="Spinza" style="height:34px" />
+      {% elif _brand.startswith('reburger') %}
+        <img src="/static/logo_reburger.png" alt="Reburger"/>
+      {% else %}
+        <strong style="font-size:18px;letter-spacing:.02em">Inventari</strong>
+      {% endif %}
+    </div>
     {% if user %}
-      <span class="pill">
+      <div class="user-line pill" style="width:max-content;max-width:100%;">
         👤 {{ user.username }}
         {% if user.store_label %} • {{ user.store_label }}{% endif %}
         {% if user.role == 'admin' %} • admin{% endif %}
-      </span>
-      <nav class="top-menu">
+      </div>
+    {% endif %}
+  </div>
+
+  {% if user %}
+    <nav class="top-menu" aria-label="Menu">
       <a href="/select-area" class="pill" style="text-decoration:none;color:#111">🧭 Sezione</a>
       <a href="/chiusure" class="pill" style="text-decoration:none;color:#111">📸 Chiusure</a>
       <a href="/fatture" class="pill" style="text-decoration:none;color:#111">🧾 Fatture</a>
       <a href="/updates" class="pill" style="text-decoration:none;color:#111">🆕 Novità</a>
       <a href="/spese-secondarie" class="pill" style="text-decoration:none;color:#111">💸 Spese secondarie</a>
-      <details style="display:inline-block;margin:0;padding:0;">
-        <summary class="pill" style="list-style:none;cursor:pointer;user-select:none;">🚚 Logistica</summary>
-        <div class="card" style="position:absolute;right:14px;top:58px;min-width:220px;z-index:50;padding:10px;border-radius:14px;">
-          <div style="display:flex;flex-direction:column;gap:8px;">
-            <a href="/ordini" class="pill" style="text-decoration:none;color:#111">🛒 Ordini da fare</a>
-            <a href="/ordinati" class="pill" style="text-decoration:none;color:#111">📦 Ordini in corso</a>
-            <a href="/storico-ordini" class="pill" style="text-decoration:none;color:#111">🗂️ Storico ordini</a>
-            <a href="/scambi" class="pill" style="text-decoration:none;color:#111">🔁 Scambi tra negozi</a>
-            <div class="muted" style="padding:6px 10px;">Sezioni: Bibite • Cucina</div>
-          </div>
-        </div>
-      </details>
+      <a href="/ordini" class="pill" style="text-decoration:none;color:#111">🚚 Logistica</a>
       <a href="/profile" class="pill" style="text-decoration:none;color:#111">⚙️ Profilo</a>
+
       {% if user.role == 'admin' %}
         <a href="/admin" class="pill" style="text-decoration:none;color:#111">🛠️ Admin</a>
-            </nav>
-{% endif %}
-      
-      {% if user.role == 'admin' %}
+
         <form method="post" action="/set-active-store" style="display:inline;">
           <input type="hidden" name="next_url" value="" />
           <select name="store" class="pill" style="cursor:pointer" onchange="
@@ -136,8 +134,8 @@
       {% endif %}
 
       <a href="/logout" class="pill" style="text-decoration:none;color:#111">Esci</a>
-    {% endif %}
-  </div>
+    </nav>
+  {% endif %}
 </header>
 <div class="wrap">
   {% block content %}{% endblock %}
