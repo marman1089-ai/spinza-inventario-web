@@ -15,8 +15,8 @@
   {% endif %}
   <style>
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;background:#f5f5f5;color:#111}
-    header{background:#fff;padding:12px 14px;display:flex;align-items:center;gap:12px;box-shadow:0 1px 8px rgba(0,0,0,.06);position:sticky;top:0;z-index:100}
-    header img{height:34px}
+    header{background:#fff;padding:8px 10px;display:flex;align-items:center;gap:10px;box-shadow:0 1px 8px rgba(0,0,0,.06);position:sticky;top:0;z-index:100;overflow:visible}
+    header img{height:30px}
     .wrap{max-width:980px;margin:0 auto;padding:14px}
     .card{background:#fff;border-radius:14px;padding:14px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
     .row{display:flex;gap:10px;flex-wrap:wrap}
@@ -33,13 +33,11 @@
     th{font-size:13px;color:#555;text-transform:uppercase;letter-spacing:.04em}
     .qty{font-weight:700}
     .low{color:#b40000;font-weight:800}
-    .pill{display:inline-block;padding:6px 10px;border-radius:999px;background:#f0f0f0;font-size:13px}
+    .pill{display:inline-block;padding:5px 9px;border-radius:999px;background:#f0f0f0;font-size:13px}
     .right{margin-left:auto;display:flex;gap:10px;align-items:center}
-    /* Mobile: menu orizzontale scrollabile (stile Google) */
-    .top-menu{display:flex;gap:10px;align-items:center;overflow-x:auto;white-space:nowrap;min-width:0;flex:1;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
-    .top-menu::-webkit-scrollbar{display:none;}
+    /* Desktop: menu compatto (NO overflow, così il dropdown non viene tagliato) */
+    .top-menu{display:flex;gap:8px;align-items:center;flex:1;flex-wrap:wrap;min-width:0;overflow:visible;white-space:normal}
     body{overflow-x:hidden;}
-    .top-menu .pill{flex:0 0 auto;}
 
     /* Desktop: dropdown Logistica (4 voci) */
     .nav-dd{position:relative;flex:0 0 auto;}
@@ -66,6 +64,12 @@
     .brand-block{display:flex;flex-direction:column;gap:6px;min-width:0}
     .brand-line{display:flex;align-items:center;gap:10px;min-width:0}
     .user-line{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+    /* Desktop: logo + utente/negozio in riga per ridurre altezza header */
+    @media(min-width:780px){
+      .brand-block{flex-direction:row;align-items:center;gap:10px}
+      .user-line{margin-top:0}
+    }
 
     form{margin:0}
     .actions::-webkit-scrollbar{display:none}
