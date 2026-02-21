@@ -162,12 +162,12 @@ def init_db():
             name TEXT NOT NULL,
             area TEXT NOT NULL DEFAULT 'prodotti',
             unit TEXT NOT NULL DEFAULT '',
+            location TEXT NOT NULL DEFAULT 'MAGAZZINO',
             qty {qty_col} NOT NULL DEFAULT 0,
             min_qty {qty_col} NOT NULL DEFAULT 0,
             missing_order_date TEXT,
             missing_delivery_date TEXT,
             missing_qty {qty_col} NOT NULL DEFAULT 0,
-            location TEXT NOT NULL DEFAULT 'MAGAZZINO',
             updated_at {ts_default}
         )
         """)
@@ -182,10 +182,10 @@ def init_db():
             # Postgres: evita errore (e transazione abortita) se la colonna esiste già
             _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS area TEXT NOT NULL DEFAULT 'prodotti'")
             _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT ''")
+            _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT 'MAGAZZINO'")
             _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS missing_order_date TEXT")
             _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS missing_delivery_date TEXT")
             _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS missing_qty DOUBLE PRECISION NOT NULL DEFAULT 0")
-            _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT 'MAGAZZINO'")
         else:
             # SQLite: IF NOT EXISTS non è garantito su versioni vecchie, quindi try/except
             try:
@@ -194,6 +194,10 @@ def init_db():
                 pass
             try:
                 cur.execute("ALTER TABLE products ADD COLUMN unit TEXT NOT NULL DEFAULT ''")
+            try:
+                cur.execute("ALTER TABLE products ADD COLUMN location TEXT NOT NULL DEFAULT 'MAGAZZINO'")
+            except Exception:
+                pass
             except Exception:
                 pass
             try:
@@ -206,10 +210,6 @@ def init_db():
                 pass
             try:
                 cur.execute("ALTER TABLE products ADD COLUMN missing_qty REAL NOT NULL DEFAULT 0")
-            except Exception:
-                pass
-            try:
-                cur.execute("ALTER TABLE products ADD COLUMN location TEXT NOT NULL DEFAULT 'MAGAZZINO'")
             except Exception:
                 pass
 

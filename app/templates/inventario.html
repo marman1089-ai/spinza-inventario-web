@@ -22,12 +22,6 @@
             <option value="{{ c }}" {% if cat==c %}selected{% endif %}>{{ c }}</option>
           {% endfor %}
         </select>
-        <select name="loc">
-          <option value="ALL" {% if (loc or 'ALL')=='ALL' %}selected{% endif %}>Tutte le posizioni</option>
-          {% for l in locations if l!='ALL' %}
-            <option value="{{ l }}" {% if (loc or 'ALL')==l %}selected{% endif %}>{{ l }}</option>
-          {% endfor %}
-        </select>
         <label class="pill" style="display:flex;gap:8px;align-items:center;">
           <input type="checkbox" name="only_low" value="1" {% if only_low %}checked{% endif %} />
           Solo sotto minimo
@@ -37,13 +31,7 @@
           <a class="pill" href="/logs" style="text-decoration:none;color:#111">📜 Log</a>
         {% endif %}
       </div>
-    
-  <datalist id="locationList">
-    {% for l in locations if l!='ALL' %}
-      <option value="{{ l }}"></option>
-    {% endfor %}
-  </datalist>
-</form>
+    </form>
   </div>
 
   <div class="card">
@@ -71,8 +59,8 @@
             <div class="row">
               <input name="category" placeholder="Categoria" required />
               <input name="name" placeholder="Nome prodotto" required />
-              <input name="location" list="locationList" placeholder="Es. Frigo 1, Banco, Magazzino..." value="MAGAZZINO" style="width:220px;">
               <input name="unit" placeholder="Unità (es. 1kg, 120g, 1L)" />
+              <input name="location" placeholder="Posizione (es. Frigo 1, Banco, Freezer 2)" />
               <input name="qty" placeholder="Q.tà" type="number" step="0.01" />
               <input name="min_qty" placeholder="Minimo" type="number" step="0.01" />
               <button class="btn" type="submit">Salva</button>
@@ -102,12 +90,11 @@
     </div>
 
     <div style="overflow:auto;margin-top:10px;">
-      <table>
+      <div class="table-wrap"><table>
         <thead>
           <tr>
             <th>Categoria</th>
             <th>Prodotto</th>
-            <th class="hide-mobile">Posizione</th>
             <th>Q.tà</th>
             <th class="hide-mobile">Min</th>
             <th style="text-align:right;">Azioni <span class="pill" style="margin-left:6px;">🧮 / Set</span></th>
@@ -121,7 +108,9 @@
               <td>
                 <div style="display:flex;flex-direction:column;gap:4px;">
                   <strong>{{ it.name }}</strong>
-                  <div class="muted" style="font-size:12px;">
+                  
+                  <div class="muted" style="font-size:12px;">📍 {{ it.location or \'MAGAZZINO\' }}</div>
+<div class="muted" style="font-size:12px;">
                     {% if it.unit %}📏 {{ it.unit }}{% endif %}
                     <div class="muted total-auto" id="total-{{ it.id }}" data-qty="{{ it.qty }}" data-unit="{{ it.unit or '' }}"></div>
                     {% if it.missing_qty and it.missing_qty > 0 %}
@@ -129,9 +118,6 @@
                     {% endif %}
                   </div>
                 </div>
-              </td>
-              <td class="hide-mobile">
-                <span class="pill">{{ (it.location or "MAGAZZINO") }}</span>
               </td>
               <td class="qty {% if low %}low{% endif %}">{{ "%.2f"|format(it.qty) }}</td>
               <td class="hide-mobile">{{ "%.2f"|format(it.min_qty) }}</td>
@@ -155,8 +141,8 @@
                         <input type="hidden" name="next_url" value="" />
                         <input class="mini" name="category" value="{{ it.category }}" style="width:140px;" required />
                         <input class="mini" name="name" value="{{ it.name }}" style="width:200px;" required />
-                        <input class="mini" name="location" list="locationList" value="{{ it.location or 'MAGAZZINO' }}" style="width:140px;">
                         <input class="mini" name="unit" value="{{ it.unit or '' }}" placeholder="Unità" style="width:140px;" />
+                        <input class="mini" name="location" value="{{ it.location or 'MAGAZZINO' }}" placeholder="Posizione" style="width:160px;" />
                         <input class="mini" name="min_qty" type="number" step="0.01" value="{{ it.min_qty }}" style="width:110px;" />
                         <button class="mini btn" type="submit">Salva</button>
                       </form>
@@ -175,10 +161,10 @@
             </tr>
           {% endfor %}
           {% if not items %}
-            <tr><td colspan="6" class="muted">Nessun prodotto trovato.</td></tr>
+            <tr><td colspan="5" class="muted">Nessun prodotto trovato.</td></tr>
           {% endif %}
         </tbody>
-      </table>
+      </table></div>
     </div>
   </div>
 
