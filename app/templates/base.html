@@ -15,7 +15,7 @@
   {% endif %}
   <style>
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;background:#f5f5f5;color:#111}
-    header{background:#fff;padding:12px 14px;display:flex;align-items:center;gap:12px;box-shadow:0 1px 8px rgba(0,0,0,.06);position:sticky;top:0;z-index:40}
+    header{background:#fff;padding:12px 14px;display:flex;align-items:center;gap:12px;box-shadow:0 1px 8px rgba(0,0,0,.06);position:sticky;top:0;z-index:100}
     header img{height:34px}
     .wrap{max-width:980px;margin:0 auto;padding:14px}
     .card{background:#fff;border-radius:14px;padding:14px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
@@ -34,186 +34,196 @@
     .qty{font-weight:700}
     .low{color:#b40000;font-weight:800}
     .pill{display:inline-block;padding:6px 10px;border-radius:999px;background:#f0f0f0;font-size:13px}
-
-    /* Header layout */
-    .header-left{display:flex;align-items:center;gap:12px;min-width:0}
-    .brand-block{display:flex;flex-direction:column;min-width:0;gap:4px}
-    .user-sub{display:flex;gap:6px;flex-wrap:wrap;align-items:center;min-width:0}
-    .user-sub .pill{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
-    .header-right{margin-left:auto;display:flex;align-items:center;gap:10px;min-width:0}
-
-    /* Desktop nav pills (scrollable like Google if needed) */
-    .top-menu{display:flex;gap:10px;align-items:center;overflow-x:auto;white-space:nowrap;min-width:0;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+    .right{margin-left:auto;display:flex;gap:10px;align-items:center}
+    /* Mobile: menu orizzontale scrollabile (stile Google) */
+    .top-menu{display:flex;gap:10px;align-items:center;overflow-x:auto;white-space:nowrap;min-width:0;flex:1;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
     .top-menu::-webkit-scrollbar{display:none;}
+    body{overflow-x:hidden;}
     .top-menu .pill{flex:0 0 auto;}
 
-    /* Mobile menu button */
-    .menu-btn{border:1px solid #ddd;background:#fff;border-radius:12px;padding:10px 12px;font-size:18px;line-height:1}
+    /* Desktop: dropdown Logistica (4 voci) */
+    .nav-dd{position:relative;flex:0 0 auto;}
+    .nav-dd > summary{list-style:none;cursor:pointer;user-select:none}
+    .nav-dd > summary::-webkit-details-marker{display:none;}
+    .nav-dd[open] .nav-dd-panel{position:absolute;top:calc(100% + 8px);left:0;background:#fff;border:1px solid #eee;border-radius:14px;padding:10px;box-shadow:0 10px 30px rgba(0,0,0,.12);min-width:240px;z-index:2000}
+    .nav-dd-panel a{display:block;text-decoration:none;color:#111;padding:10px 10px;border-radius:12px;}
+    .nav-dd-panel a:hover{background:#f3f3f3}
 
-    /* Hide/show helpers */
-    .desktop-only{display:none}
-    .mobile-only{display:inline-flex}
-    @media(min-width:860px){
-      .desktop-only{display:flex}
-      .mobile-only{display:none}
-    }
+    /* Mobile: un solo pulsante menu (hamburger) + pannello a tendina full screen */
+    .menu-btn{border:1px solid #ddd;background:#fff;border-radius:999px;padding:10px 12px;display:none;align-items:center;gap:8px}
+    .menu-btn:active{transform:scale(.98)}
+    .menu-overlay{position:fixed;inset:0;background:#fff;z-index:1000;display:none;flex-direction:column}
+    .menu-overlay.open{display:flex}
+    .menu-overlay .menu-head{display:flex;align-items:center;justify-content:space-between;padding:14px 14px;border-bottom:1px solid #eee}
+    .menu-overlay .menu-title{font-weight:800;font-size:18px}
+    .menu-overlay .menu-body{padding:14px 14px;overflow:auto;-webkit-overflow-scrolling:touch}
+    .menu-overlay a{display:block;text-decoration:none;color:#111;padding:12px 12px;border-radius:14px;background:#f3f3f3;margin-bottom:10px;font-size:16px}
+    .menu-overlay a:active{filter:brightness(.96)}
+    .menu-overlay .section{margin:14px 0 10px;font-size:13px;color:#666;text-transform:uppercase;letter-spacing:.04em}
+    .menu-overlay .sub a{background:#fafafa;border:1px solid #eee}
 
-    /* Prevent horizontal page drag */
-    header{overflow:hidden;}
-    body{overflow-x:hidden;}
+    /* Header layout (logo + utente/sede sotto logo su mobile) */
+    .brand-block{display:flex;flex-direction:column;gap:6px;min-width:0}
+    .brand-line{display:flex;align-items:center;gap:10px;min-width:0}
+    .user-line{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-    /* Fullscreen mobile overlay menu */
-    .menu-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:100;display:none}
-    .menu-overlay.open{display:block}
-    .menu-sheet{position:absolute;inset:0;background:#fff;overflow-y:auto;padding:14px}
-    .menu-top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-    .menu-top .close-btn{margin-left:auto;border:1px solid #ddd;background:#fff;border-radius:12px;padding:10px 12px;font-size:18px;line-height:1}
-    .menu-title{font-weight:800;font-size:16px}
-    .menu-section{margin-top:12px;margin-bottom:6px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#666}
-    .menu-item{display:flex;align-items:center;gap:10px;padding:12px 12px;border-radius:14px;text-decoration:none;color:#111;background:#f3f3f3;margin-bottom:8px}
-    .menu-item:active{filter:brightness(.96)}
-    .menu-item.danger{background:#ffefef;border:1px solid #ffb3b3}
+    form{margin:0}
+    .actions::-webkit-scrollbar{display:none}
 
+    /* details popover inside actions (keeps buttons on one row) */
+    .actions details{position:relative} 
+    .actions details > summary{list-style:none} 
+    .actions details[open] > div{position:absolute;top:calc(100% + 6px);right:0;background:#fff;border:1px solid #eee;border-radius:14px;padding:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:50;min-width:280px;max-width:90vw} 
+    .actions details[open] > div .row{flex-wrap:wrap} 
+    .actions{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+    .mini{padding:8px 10px;font-size:14px;border-radius:10px}
+    .hide-mobile{display:none}
+    @media(min-width:780px){ .hide-mobile{display:table-cell} }
+  
     /* --- Mobile compact + scalable UI (works with browser zoom) --- */
     html{font-size:clamp(12px, 3.2vw, 16px);}
     body{font-size:1rem;}
-    .wrap{max-width:1100px;}
+    .wrap{max-width:1100px;} /* a touch wider on desktop */
     th,td{padding:.55rem .45rem;}
     .pill{padding:.28rem .55rem;}
+    .mini{padding:.34rem .55rem;font-size:.9rem;}
     input,select,button{font-size:1rem;}
     table{font-size:1rem;}
-    @media(max-width:860px){
+    .actions{gap:.4rem;align-items:center}
+    /* keep action controls on ONE line when possible */
+    .actions form.row{flex-wrap:nowrap}
+    .actions form.row input.mini{width:7.5rem}
+    @media(max-width:780px){
       .wrap{padding:10px}
-      header{padding:10px 10px;align-items:flex-start}
-      .header-left{align-items:flex-start}
+      header{padding:10px 10px}
+      header{flex-direction:column;align-items:flex-start;gap:10px}
+      .top-menu{display:none}
+      .menu-btn{display:inline-flex;align-self:flex-end;margin-left:auto}
       th{font-size:.78rem}
       td{font-size:.95rem}
       th,td{padding:.38rem .30rem}
-      .pill{font-size:.86rem}
+      .pill{font-size:.82rem}
+      .mini{padding:.30rem .45rem;font-size:.85rem}
+      .actions{gap:.28rem}
+      .actions form.row{gap:.25rem!important}
+      .actions form.row input.mini{width:5.4rem!important}
+      /* make product cell denser */
       .muted{line-height:1.15}
     }
+
   </style>
 </head>
 <body>
 <header>
-  <div class="header-left">
-    {% if _brand == 'spinza' %}
-      <img src="/static/logo_scritta_spinza.png" alt="Spinza" style="height:34px" />
-    {% elif _brand.startswith('reburger') %}
-      <img src="/static/logo_reburger.png" alt="Reburger"/>
-    {% else %}
-      <strong style="font-size:18px;letter-spacing:.02em">Inventari</strong>
-    {% endif %}
-
-    <div class="brand-block">
-      {% if user %}
-        <div class="user-sub">
-          <span class="pill">👤 {{ user.username }}{% if user.role == 'admin' %} • admin{% endif %}</span>
-          {% if user.store_label %}
-            <span class="pill">🏪 {{ user.store_label }}</span>
-          {% endif %}
-        </div>
+  <div class="brand-block">
+    <div class="brand-line">
+      {% if _brand == 'spinza' %}
+        <img src="/static/logo_scritta_spinza.png" alt="Spinza" style="height:34px" />
+      {% elif _brand.startswith('reburger') %}
+        <img src="/static/logo_reburger.png" alt="Reburger"/>
+      {% else %}
+        <strong style="font-size:18px;letter-spacing:.02em">Inventari</strong>
       {% endif %}
     </div>
-  </div>
-
-  <div class="header-right">
     {% if user %}
-      <!-- Desktop: menu a pill (come prima) -->
-      <nav class="top-menu desktop-only">
-        <a href="/select-area" class="pill" style="text-decoration:none;color:#111">🧭 Sezione</a>
-        <a href="/chiusure" class="pill" style="text-decoration:none;color:#111">📸 Chiusure</a>
-        <a href="/fatture" class="pill" style="text-decoration:none;color:#111">🧾 Fatture</a>
-        <a href="/updates" class="pill" style="text-decoration:none;color:#111">🆕 Novità</a>
-        <a href="/spese-secondarie" class="pill" style="text-decoration:none;color:#111">💸 Spese secondarie</a>
-        <details style="display:inline-block;margin:0;padding:0;position:relative;">
-          <summary class="pill" style="list-style:none;cursor:pointer;user-select:none;">🚚 Logistica</summary>
-          <div class="card" style="position:absolute;right:0;top:42px;min-width:240px;z-index:60;padding:10px;border-radius:14px;">
-            <div style="display:flex;flex-direction:column;gap:8px;">
-              <a href="/ordini" class="pill" style="text-decoration:none;color:#111">🛒 Ordini da fare</a>
-              <a href="/ordinati" class="pill" style="text-decoration:none;color:#111">📦 Ordini in corso</a>
-              <a href="/storico-ordini" class="pill" style="text-decoration:none;color:#111">🗂️ Storico ordini</a>
-              <a href="/scambi" class="pill" style="text-decoration:none;color:#111">🔁 Scambi tra negozi</a>
-            </div>
-          </div>
-        </details>
-        <a href="/profile" class="pill" style="text-decoration:none;color:#111">⚙️ Profilo</a>
-        {% if user.role == 'admin' %}
-          <a href="/admin" class="pill" style="text-decoration:none;color:#111">🛠️ Admin</a>
-          <form method="post" action="/set-active-store" style="display:inline;">
-            <input type="hidden" name="next_url" value="" />
-            <select name="store" class="pill" style="cursor:pointer" onchange="
-              this.form.next_url.value = window.location.pathname + window.location.search;
-              this.form.submit();
-            ">
-              {% set _sel = active_store or 'spinza' %}
-              <option value="spinza" {% if _sel=='spinza' %}selected{% endif %}>Negozio: Spinza</option>
-              <option value="reburger_camaldoli" {% if _sel=='reburger_camaldoli' %}selected{% endif %}>Negozio: Reburger Camaldoli</option>
-              <option value="reburger_palazzuolo" {% if _sel=='reburger_palazzuolo' %}selected{% endif %}>Negozio: Reburger Palazzuolo</option>
-              <option value="ALL" {% if _sel=='ALL' %}selected{% endif %}>Visualizzali tutti</option>
-            </select>
-          </form>
-        {% endif %}
-        <a href="/logout" class="pill" style="text-decoration:none;color:#111">Esci</a>
-      </nav>
-
-      <!-- Mobile: un solo pulsante a destra che apre il menu a schermo intero -->
-      <button class="menu-btn mobile-only" type="button" aria-label="Apri menu" onclick="openMobileMenu()">☰</button>
+      <div class="user-line pill" style="width:max-content;max-width:100%;">
+        👤 {{ user.username }}
+        {% if user.store_label %} • {{ user.store_label }}{% endif %}
+        {% if user.role == 'admin' %} • admin{% endif %}
+      </div>
     {% endif %}
   </div>
+
+  {% if user %}
+    <button class="menu-btn" type="button" onclick="openMobileMenu()">☰ Menu</button>
+
+    <nav class="top-menu" aria-label="Menu">
+      <a href="/select-area" class="pill" style="text-decoration:none;color:#111">🧭 Sezione</a>
+      <a href="/chiusure" class="pill" style="text-decoration:none;color:#111">📸 Chiusure</a>
+      <a href="/fatture" class="pill" style="text-decoration:none;color:#111">🧾 Fatture</a>
+      <a href="/updates" class="pill" style="text-decoration:none;color:#111">🆕 Novità</a>
+      <a href="/spese-secondarie" class="pill" style="text-decoration:none;color:#111">💸 Spese secondarie</a>
+      <details class="nav-dd" id="navLogistica">
+        <summary class="pill" style="text-decoration:none;color:#111">🚚 Logistica</summary>
+        <div class="nav-dd-panel">
+          <a href="/ordini">🚚 Ordini da fare</a>
+          <a href="/ordinati">📦 Ordini in corso</a>
+          <a href="/storico-ordini">🗂️ Storico ordini</a>
+          <a href="/scambi">🔁 Scambi tra negozi</a>
+        </div>
+      </details>
+      <a href="/profile" class="pill" style="text-decoration:none;color:#111">⚙️ Profilo</a>
+
+      {% if user.role == 'admin' %}
+        <a href="/admin" class="pill" style="text-decoration:none;color:#111">🛠️ Admin</a>
+
+        <form method="post" action="/set-active-store" style="display:inline;">
+          <input type="hidden" name="next_url" value="" />
+          <select name="store" class="pill" style="cursor:pointer" onchange="
+            this.form.next_url.value = window.location.pathname + window.location.search;
+            this.form.submit();
+          ">
+            {% set _sel = active_store or 'spinza' %}
+            <option value="spinza" {% if _sel=='spinza' %}selected{% endif %}>Negozio: Spinza</option>
+            <option value="reburger_camaldoli" {% if _sel=='reburger_camaldoli' %}selected{% endif %}>Negozio: Reburger Camaldoli</option>
+            <option value="reburger_palazzuolo" {% if _sel=='reburger_palazzuolo' %}selected{% endif %}>Negozio: Reburger Palazzuolo</option>
+            <option value="ALL" {% if _sel=='ALL' %}selected{% endif %}>Visualizzali tutti</option>
+          </select>
+        </form>
+      {% endif %}
+
+      <a href="/logout" class="pill" style="text-decoration:none;color:#111">Esci</a>
+    </nav>
+  {% endif %}
 </header>
 
 {% if user %}
-<div id="mobileMenuOverlay" class="menu-overlay" onclick="closeMobileMenu(event)">
-  <div class="menu-sheet">
-    <div class="menu-top">
-      <div>
-        <div class="menu-title">Menu</div>
-        <div class="muted">{{ user.username }}{% if user.store_label %} • {{ user.store_label }}{% endif %}</div>
-      </div>
-      <button class="close-btn" type="button" aria-label="Chiudi menu" onclick="forceCloseMobileMenu()">✕</button>
+  <div id="mobileMenu" class="menu-overlay" aria-hidden="true">
+    <div class="menu-head">
+      <div class="menu-title">Menu</div>
+      <button class="btn2" type="button" onclick="closeMobileMenu()" style="border-radius:999px">Chiudi ✕</button>
     </div>
+    <div class="menu-body">
+      <div class="section">Sezioni</div>
+      <a href="/select-area" onclick="closeMobileMenu()">🧭 Sezione</a>
+      <a href="/chiusure" onclick="closeMobileMenu()">📸 Chiusure</a>
+      <a href="/fatture" onclick="closeMobileMenu()">🧾 Fatture</a>
+      <a href="/updates" onclick="closeMobileMenu()">🆕 Novità</a>
+      <a href="/spese-secondarie" onclick="closeMobileMenu()">💸 Spese secondarie</a>
 
-    <div class="menu-section">Sezioni</div>
-    <a class="menu-item" href="/select-area">🧭 Sezione</a>
-    <a class="menu-item" href="/chiusure">📸 Chiusure</a>
-    <a class="menu-item" href="/fatture">🧾 Fatture</a>
-    <a class="menu-item" href="/updates">🆕 Novità</a>
-    <a class="menu-item" href="/spese-secondarie">💸 Spese secondarie</a>
+      <div class="section">Logistica</div>
+      <div class="sub">
+        <a href="/ordini" onclick="closeMobileMenu()">🚚 Ordini da fare</a>
+        <a href="/ordinati" onclick="closeMobileMenu()">📦 Ordini in corso</a>
+        <a href="/storico-ordini" onclick="closeMobileMenu()">🗂️ Storico ordini</a>
+        <a href="/scambi" onclick="closeMobileMenu()">🔁 Scambi tra negozi</a>
+      </div>
 
-    <div class="menu-section">Logistica</div>
-    <a class="menu-item" href="/ordini">🛒 Ordini da fare</a>
-    <a class="menu-item" href="/ordinati">📦 Ordini in corso</a>
-    <a class="menu-item" href="/storico-ordini">🗂️ Storico ordini</a>
-    <a class="menu-item" href="/scambi">🔁 Scambi tra negozi</a>
+      <div class="section">Account</div>
+      <a href="/profile" onclick="closeMobileMenu()">⚙️ Profilo</a>
 
-    <div class="menu-section">Account</div>
-    <a class="menu-item" href="/profile">⚙️ Profilo</a>
+      {% if user.role == 'admin' %}
+        <a href="/admin" onclick="closeMobileMenu()">🛠️ Admin</a>
+        <form method="post" action="/set-active-store" style="margin-top:10px;">
+          <input type="hidden" name="next_url" value="" />
+          <div class="section">Negozio attivo</div>
+          <select name="store" style="width:100%;" onchange="
+            this.form.next_url.value = window.location.pathname + window.location.search;
+            this.form.submit();
+          ">
+            {% set _sel2 = active_store or 'spinza' %}
+            <option value="spinza" {% if _sel2=='spinza' %}selected{% endif %}>Spinza</option>
+            <option value="reburger_camaldoli" {% if _sel2=='reburger_camaldoli' %}selected{% endif %}>Reburger Camaldoli</option>
+            <option value="reburger_palazzuolo" {% if _sel2=='reburger_palazzuolo' %}selected{% endif %}>Reburger Palazzuolo</option>
+            <option value="ALL" {% if _sel2=='ALL' %}selected{% endif %}>Tutti</option>
+          </select>
+        </form>
+      {% endif %}
 
-    {% if user.role == 'admin' %}
-      <a class="menu-item" href="/admin">🛠️ Admin</a>
-      <div class="menu-section">Negozio attivo</div>
-      <form method="post" action="/set-active-store" style="margin:0;">
-        <input type="hidden" name="next_url" value="" />
-        <select name="store" style="width:100%;" onchange="
-          this.form.next_url.value = window.location.pathname + window.location.search;
-          this.form.submit();
-        ">
-          {% set _sel = active_store or 'spinza' %}
-          <option value="spinza" {% if _sel=='spinza' %}selected{% endif %}>Spinza</option>
-          <option value="reburger_camaldoli" {% if _sel=='reburger_camaldoli' %}selected{% endif %}>Reburger Camaldoli</option>
-          <option value="reburger_palazzuolo" {% if _sel=='reburger_palazzuolo' %}selected{% endif %}>Reburger Palazzuolo</option>
-          <option value="ALL" {% if _sel=='ALL' %}selected{% endif %}>Visualizzali tutti</option>
-        </select>
-      </form>
-    {% endif %}
-
-    <a class="menu-item danger" href="/logout">🚪 Esci</a>
+      <a href="/logout" onclick="closeMobileMenu()" style="background:#111;color:#fff">Esci</a>
+    </div>
   </div>
-</div>
 {% endif %}
-
 <div class="wrap">
   {% block content %}{% endblock %}
 </div>
@@ -231,8 +241,49 @@
 </script>
 
 <script>
+  function openMobileMenu(){
+    var el = document.getElementById('mobileMenu');
+    if(!el) return;
+    el.classList.add('open');
+    el.setAttribute('aria-hidden','false');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeMobileMenu(){
+    var el = document.getElementById('mobileMenu');
+    if(!el) return;
+    el.classList.remove('open');
+    el.setAttribute('aria-hidden','true');
+    document.body.style.overflow = '';
+  }
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape') closeMobileMenu();
+  });
+
+  // Desktop dropdown: chiudi Logistica cliccando fuori o scegliendo una voce
+  (function(){
+    const dd = document.getElementById('navLogistica');
+    if(!dd) return;
+
+    document.addEventListener('click', function(ev){
+      // se clicco fuori dal dropdown, chiudo
+      if(dd.hasAttribute('open') && !dd.contains(ev.target)){
+        dd.removeAttribute('open');
+      }
+    });
+
+    dd.addEventListener('click', function(ev){
+      const a = ev.target && ev.target.closest ? ev.target.closest('a') : null;
+      if(a){
+        dd.removeAttribute('open');
+      }
+    });
+  })();
+</script>
+
+<script>
   // Mantieni posizione pagina dopo POST/redirect + conserva filtri (q/cat/only_low)
   (function(){
+    // restore scroll after a form submit
     document.addEventListener('DOMContentLoaded', function(){
       try{
         const y = sessionStorage.getItem('scrollY');
@@ -244,7 +295,11 @@
     });
 
     document.addEventListener('submit', function(ev){
-      try{ sessionStorage.setItem('scrollY', String(window.scrollY || 0)); }catch(e){}
+      try{
+        sessionStorage.setItem('scrollY', String(window.scrollY || 0));
+      }catch(e){}
+
+      // Se il form ha un campo next_url, lo valorizzo con la pagina corrente (solo path + query)
       const form = ev.target;
       if(form && form.querySelector){
         const inp = form.querySelector('input[name="next_url"]');
@@ -254,45 +309,6 @@
       }
     }, true);
   })();
-</script>
-
-<script>
-  // Mobile fullscreen menu
-  function openMobileMenu(){
-    const ov = document.getElementById('mobileMenuOverlay');
-    if(!ov) return;
-    ov.classList.add('open');
-    document.documentElement.style.overflow = 'hidden';
-    document.body.style.overflow = 'hidden';
-  }
-  function forceCloseMobileMenu(){
-    const ov = document.getElementById('mobileMenuOverlay');
-    if(!ov) return;
-    ov.classList.remove('open');
-    document.documentElement.style.overflow = '';
-    document.body.style.overflow = '';
-  }
-  function closeMobileMenu(ev){
-    // Close only if click on the dark backdrop
-    const ov = document.getElementById('mobileMenuOverlay');
-    if(!ov) return;
-    if(ev && ev.target === ov){
-      forceCloseMobileMenu();
-    }
-  }
-  // Close on ESC
-  document.addEventListener('keydown', function(e){
-    if(e.key === 'Escape') forceCloseMobileMenu();
-  });
-  // Auto-close after tapping a menu link
-  document.addEventListener('click', function(e){
-    const ov = document.getElementById('mobileMenuOverlay');
-    if(!ov || !ov.classList.contains('open')) return;
-    const a = e.target && e.target.closest ? e.target.closest('a') : null;
-    if(a && a.classList && a.classList.contains('menu-item')){
-      forceCloseMobileMenu();
-    }
-  });
 </script>
 
 <script>
@@ -306,36 +322,50 @@
     function parseUnit(unitStr){
       const s = _trim(unitStr);
       if(!s) return null;
+      // prende un numero iniziale (es. 2, 2.5, 2,5) + il resto come unità testuale
       const m = s.match(/^\s*([0-9]+(?:[\.,][0-9]+)?)\s*(.*)$/);
       if(!m) return null;
-      const n = parseFloat(m[1].replace(',', '.'));
-      const u = _trim(m[2] || '');
-      if(isNaN(n)) return null;
-      return {n:n, u:u};
+      const num = parseFloat(m[1].replace(',', '.'));
+      if(!isFinite(num)) return null;
+      const label = _trim(m[2]) || '';
+      return { value: num, label };
     }
 
-    function fmt(n){
-      if(n === null || n === undefined || isNaN(n)) return '';
-      const abs = Math.abs(n);
-      let d = 2;
-      if(abs >= 100) d = 0;
-      else if(abs >= 10) d = 1;
-      return n.toFixed(d).replace('.', ',');
+    function formatNumber(n){
+      if(!isFinite(n)) return '';
+      // massimo 3 decimali, senza zeri finali
+      const s = (Math.round(n * 1000) / 1000).toString();
+      return s;
     }
 
-    function compute(){
-      document.querySelectorAll('.total-auto').forEach(function(el){
-        const qty = parseFloat(_trim(el.dataset.qty).replace(',', '.'));
-        const unit = parseUnit(el.dataset.unit);
-        if(isNaN(qty) || !unit) return;
-        const tot = qty * unit.n;
-        el.textContent = 'Totale: ' + fmt(tot) + (unit.u ? (' ' + unit.u) : '');
-      });
+    function computeTotalText(qty, unitStr){
+      const u = parseUnit(unitStr);
+      const q = parseFloat((qty ?? '').toString().replace(',', '.'));
+      if(!u || !isFinite(q)) return '';
+      const total = q * u.value;
+      const n = formatNumber(total);
+      if(!n) return '';
+      return 'Totale: ' + n + (u.label ? (' ' + u.label) : '');
     }
 
-    document.addEventListener('DOMContentLoaded', compute);
+    function updateEl(el){
+      if(!el) return;
+      const qty = el.dataset.qty;
+      const unit = el.dataset.unit;
+      const t = computeTotalText(qty, unit);
+      el.textContent = t;
+      el.style.display = t ? '' : 'none';
+    }
+
+    // expose helpers
+    window.computeTotalText = computeTotalText;
+    window._updateTotalEl = updateEl;
+
+    document.addEventListener('DOMContentLoaded', function(){
+      document.querySelectorAll('.total-auto').forEach(updateEl);
+    });
   })();
 </script>
-
 </body>
+
 </html>
