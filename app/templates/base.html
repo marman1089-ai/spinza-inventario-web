@@ -132,68 +132,92 @@
 
 <style>
 
-/* ===== PROFESSIONAL COMPACT UI ===== */
 
-/* Desktop slightly more compact */
+
+
+<style>
+
+/* ===== ULTRA COMPACT PROFESSIONAL MODE ===== */
+
+/* Remove excessive spacing */
 .card {
-  padding:10px !important;
-}
-
-.btn, .btn2 {
-  padding:7px 14px !important;
-  font-size:14px !important;
-}
-
-.mini {
-  padding:5px 10px !important;
-  font-size:13px !important;
-}
-
-input, select {
-  padding:7px !important;
-  font-size:14px !important;
-}
-
-strong {
-  font-size:15px !important;
+  padding:6px !important;
+  margin-bottom:8px !important;
 }
 
 .row {
-  gap:8px !important;
+  gap:5px !important;
 }
 
-/* ===== Mobile ultra compact but readable ===== */
+h2 {
+  margin:4px 0 6px 0 !important;
+}
+
+strong {
+  font-size:14px !important;
+}
+
+.muted {
+  font-size:12px !important;
+}
+
+/* Buttons tighter but still clickable */
+.btn, .btn2 {
+  padding:5px 10px !important;
+  font-size:13px !important;
+  border-radius:8px !important;
+}
+
+.mini {
+  padding:4px 8px !important;
+  font-size:12px !important;
+}
+
+/* Inputs tighter */
+input, select {
+  padding:5px !important;
+  font-size:13px !important;
+}
+
+/* Reduce spacing inside product cards */
+.card .card {
+  padding:6px !important;
+}
+
+/* Reduce total spacing */
+.muted + .muted {
+  margin-top:2px !important;
+}
+
+/* ===== MOBILE EVEN MORE COMPACT ===== */
 @media (max-width: 768px) {
 
   .card {
-    padding:7px !important;
+    padding:5px !important;
+    margin-bottom:6px !important;
   }
 
   .btn, .btn2 {
-    padding:6px 10px !important;
-    font-size:13px !important;
-  }
-
-  .mini {
     padding:4px 8px !important;
     font-size:12px !important;
   }
 
+  .mini {
+    padding:3px 6px !important;
+    font-size:11px !important;
+  }
+
   input, select {
-    padding:6px !important;
-    font-size:13px !important;
-  }
-
-  strong {
-    font-size:14px !important;
-  }
-
-  .muted {
+    padding:4px !important;
     font-size:12px !important;
   }
 
+  strong {
+    font-size:13px !important;
+  }
+
   .row {
-    gap:6px !important;
+    gap:4px !important;
   }
 
 }
