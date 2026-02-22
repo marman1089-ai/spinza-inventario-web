@@ -108,38 +108,23 @@
                 
 <strong style="font-size:16px;">{{ g.name }}</strong>
 <div style="display:flex;flex-direction:column;align-items:flex-end;margin-left:auto;gap:6px;">
-{% if g.positions|length > 1 %}
-<button class="btn2" type="button"
-onclick="openTransfer('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}','{{ g.positions[0].location|replace("'","\\'") }}','{{ g.positions[1].location|replace("'","\\'") }}')">
-⇄ SCAMBIA
-</button>
-{% endif %}
-
-<form method="post" action="/items/add" style="margin:0;">
-  <input type="hidden" name="category" value="{{ g.category }}">
-  <input type="hidden" name="name" value="{{ g.name }}">
-  <input type="hidden" name="qty" value="0">
-  <input type="hidden" name="min_qty" value="0">
-  <button class="btn2" type="submit">➕ AGGIUNGI POSIZIONE</button>
-</form>
+  {% if g.positions|length > 1 %}
+    <button class="btn2" type="button"
+      onclick="openTransfer('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}', [{% for pp in g.positions %}'{{ pp.location|replace("'","\\'") }}'{% if not loop.last %},{% endif %}{% endfor %}])">
+      ⇄ SCAMBIA
+    </button>
+  {% endif %}
+  <button class="btn2" type="button"
+    onclick="openAddPos('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}','{{ g.unit|replace("'","\\'") }}')">
+    ➕ AGGIUNGI POSIZIONE
+  </button>
 </div>
 
-<div style="display:flex;flex-direction:column;align-items:flex-end;margin-left:auto;gap:6px;">
-{% if g.positions|length > 1 %}
-<button class="btn2" type="button"
-onclick="openTransfer('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}','{{ g.positions[0].location|replace("'","\\'") }}','{{ g.positions[1].location|replace("'","\\'") }}')">
-⇄ SCAMBIA
-</button>
-{% endif %}
-
-<button class="btn2" type="button"
-onclick="openAddPosition('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}')">
 
 
 
 
-                {% if g.unit %}<span class="pill">📏 {{ g.unit }}</span>{% endif %}
-              </div>
+
               <div class="muted" style="margin-top:6px;font-size:12px;">
                 Totale: <strong>
 {% if g.unit and 'kg' in g.unit|lower %}
@@ -240,11 +225,11 @@ onclick="openAddPosition('{{ g.store }}','{{ g.area }}','{{ g.category|replace("
         <div class="row" style="gap:8px;">
           <div style="flex:1;">
             <div class="muted" style="font-size:12px;">Da</div>
-            <input class="mini" name="from_location" id="tFrom" required />
+            <select class="mini" name="from_location" id="tFrom" required></select>
           </div>
           <div style="flex:1;">
             <div class="muted" style="font-size:12px;">A</div>
-            <input class="mini" name="to_location" id="tTo" required />
+            <select class="mini" name="to_location" id="tTo" required></select>
           </div>
         </div>
         <div>
@@ -462,16 +447,36 @@ onclick="openAddPosition('{{ g.store }}','{{ g.area }}','{{ g.category|replace("
     }
 
     // ===== SCAMBIA / AGGIUNGI POSIZIONE =====
-    function openTransfer(store, area, category, name, fromLoc, toLoc){
-      // next_url
+    function openTransfer(store, area, category, name, locations){
       const next = window.location.pathname + window.location.search;
       const modal = document.getElementById('transferModal');
       document.getElementById('transferInfo').textContent = `${name} • ${category}`;
       document.getElementById('tStore').value = store || '';
       document.getElementById('tCat').value = category || '';
       document.getElementById('tName').value = name || '';
-      document.getElementById('tFrom').value = fromLoc || '';
-      document.getElementById('tTo').value = toLoc || '';
+
+      // Popola i menu a tendina con le posizioni disponibili
+      const fromSel = document.getElementById('tFrom');
+      const toSel = document.getElementById('tTo');
+      fromSel.innerHTML = '';
+      toSel.innerHTML = '';
+      const locs = Array.isArray(locations) ? locations : [];
+      locs.forEach((l)=>{
+        const opt1 = document.createElement('option');
+        opt1.value = l;
+        opt1.textContent = l;
+        fromSel.appendChild(opt1);
+        const opt2 = document.createElement('option');
+        opt2.value = l;
+        opt2.textContent = l;
+        toSel.appendChild(opt2);
+      });
+
+      // default: prima posizione -> seconda posizione (se esistono)
+      if(locs.length >= 1) fromSel.value = locs[0];
+      if(locs.length >= 2) toSel.value = locs[1];
+      else if(locs.length >= 1) toSel.value = locs[0];
+
       modal.querySelector('input[name=next_url]').value = next;
       modal.style.display = 'flex';
       setTimeout(()=>{
