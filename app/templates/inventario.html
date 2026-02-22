@@ -115,11 +115,26 @@ onclick="openTransfer('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'",
 </button>
 {% endif %}
 
+<form method="post" action="/items/add" style="margin:0;">
+  <input type="hidden" name="category" value="{{ g.category }}">
+  <input type="hidden" name="name" value="{{ g.name }}">
+  <input type="hidden" name="qty" value="0">
+  <input type="hidden" name="min_qty" value="0">
+  <button class="btn2" type="submit">➕ AGGIUNGI POSIZIONE</button>
+</form>
+</div>
+
+<div style="display:flex;flex-direction:column;align-items:flex-end;margin-left:auto;gap:6px;">
+{% if g.positions|length > 1 %}
+<button class="btn2" type="button"
+onclick="openTransfer('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}','{{ g.positions[0].location|replace("'","\\'") }}','{{ g.positions[1].location|replace("'","\\'") }}')">
+⇄ SCAMBIA
+</button>
+{% endif %}
+
 <button class="btn2" type="button"
 onclick="openAddPosition('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}')">
-➕ AGGIUNGI POSIZIONE
-</button>
-</div>
+
 
 
 
@@ -194,7 +209,7 @@ onclick="openAddPosition('{{ g.store }}','{{ g.area }}','{{ g.category|replace("
                 {% endfor %}
 
                 {% if g.positions|length == 1 and can_edit %}
-                  <button class="btn2" type="button" style="white-space:nowrap;align-self:center;" onclick="openAddPos('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}','{{ g.unit|replace("'","\\'") }}')">+ Aggiungi in un’altra posizione</button>
+                  <button class="btn2" type="button" style="white-space:nowrap;align-self:center;" onclick="openAddPos('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}','{{ g.unit|replace("'","\\'") }}')">+ 
                 {% endif %}
               </div>
 
