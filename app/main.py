@@ -4,6 +4,7 @@ import json
 import csv
 import io
 from datetime import date, datetime
+import re
 
 from fastapi import FastAPI, Request, Form, UploadFile, File
 from .pdf_tools import ensure_pdf, merge_pdfs
@@ -3535,5 +3536,4 @@ def invoices_delete(request: Request, doc_id: int):
             )
 
     return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
-
 
