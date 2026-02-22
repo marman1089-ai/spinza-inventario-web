@@ -923,18 +923,14 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
 
         # --- categorie ---
         cats_sql = "SELECT DISTINCT category FROM products WHERE area=" + ph
-        cats_params = []
-        cats_params.append(area)
+        cats_params = [area]
         if active_store != "ALL":
             cats_sql += f" AND store={ph}"
             cats_params.append(active_store)
         cats_sql += " ORDER BY category"
+        cats = [r["category"] for r in cur.execute(cats_sql, tuple(cats_params)).fetchall()]
 
-        cats = [r["category"] for r in cur.execute(cats_sql, tuple(cats_params)).fetchall()] if cats_params \
-               else [r["category"] for r in cur.execute(cats_sql).fetchall()]
-
-        
-        # --- posizioni ---
+        # --- posizioni (per filtro) ---
         locations_sql = "SELECT DISTINCT location FROM products WHERE area=" + ph
         loc_params = [area]
         if active_store != "ALL":
@@ -946,41 +942,115 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
         except Exception:
             locations = []
 
-        # --- prodotti ---
-        sql = "SELECT * FROM products WHERE 1=1"
-        params = []
-
-        sql += f" AND area={ph}"
-        params.append(area)
+        # --- Selezione "chiavi prodotto" in base ai filtri, poi fetch di TUTTE le posizioni per quelle chiavi ---
+        key_sql = "SELECT DISTINCT store, area, category, name FROM products WHERE 1=1"
+        key_params = []
+        key_sql += f" AND area={ph}"
+        key_params.append(area)
 
         if active_store != "ALL":
-            sql += f" AND store={ph}"
-            params.append(active_store)
+            key_sql += f" AND store={ph}"
+            key_params.append(active_store)
 
         if cat != "ALL":
-            sql += f" AND category={ph}"
-            params.append(cat)
+            key_sql += f" AND category={ph}"
+            key_params.append(cat)
 
         if loc != "ALL":
-            sql += f" AND location={ph}"
-            params.append(loc)
+            # filtro per posizione: seleziona i prodotti che esistono in quella posizione,
+            # ma poi mostriamo tutte le altre posizioni del prodotto.
+            key_sql += f" AND location={ph}"
+            key_params.append(loc)
 
         if q:
-            sql += f" AND (lower(name) LIKE {ph} OR lower(category) LIKE {ph} OR lower(location) LIKE {ph})"
-            params.extend([f"%{q}%", f"%{q}%", f"%{q}%"])
+            key_sql += f" AND (lower(name) LIKE {ph} OR lower(category) LIKE {ph} OR lower(location) LIKE {ph})"
+            key_params.extend([f"%{q}%", f"%{q}%", f"%{q}%"])
 
         if only_low:
-            sql += " AND qty <= min_qty"
+            key_sql += " AND qty <= min_qty"
 
-        sql += " ORDER BY category, name"
-        items = cur.execute(sql, tuple(params)).fetchall()
+        key_sql += " ORDER BY category, name"
+
+        keys = cur.execute(key_sql, tuple(key_params)).fetchall()
+
+        if not keys:
+            rows = []
+        else:
+            # costruisci WHERE (store,area,category,name) IN (...)
+            # compatibile anche con SQLite (senza tuple IN): usa OR.
+            clauses = []
+            params = []
+            for k in keys:
+                clauses.append(f"(store={ph} AND area={ph} AND category={ph} AND name={ph})")
+                params.extend([k["store"], k["area"], k["category"], k["name"]])
+            rows = cur.execute(
+                "SELECT * FROM products WHERE " + " OR ".join(clauses) + " ORDER BY category, name, location",
+                tuple(params),
+            ).fetchall()
+
+    # --- Raggruppa per prodotto (stesso store+area+category+name), con posizioni affiancate e totale ---
+    def _gkey(r):
+        return (r["store"], r.get("area") or area, r["category"], r["name"])
+
+    grouped = {}
+    for r in rows:
+        k = _gkey(r)
+        grouped.setdefault(k, []).append(r)
+
+    groups = []
+    for (store_k, area_k, cat_k, name_k), lst in grouped.items():
+        # ordina posizioni
+        lst_sorted = sorted(lst, key=lambda x: (str(x.get("location") or "").lower(), int(x.get("id") or 0)))
+        unit = ""
+        # prendi unit non vuota se esiste
+        for rr in lst_sorted:
+            if (rr.get("unit") or "").strip():
+                unit = (rr.get("unit") or "").strip()
+                break
+        positions = []
+        total = 0.0
+        any_low = False
+        for rr in lst_sorted:
+            qty = float(rr.get("qty") or 0)
+            mn = float(rr.get("min_qty") or 0)
+            low = qty <= mn
+            total += qty
+            any_low = any_low or low
+            positions.append({
+                "id": rr.get("id"),
+                "store": rr.get("store"),
+                "category": rr.get("category"),
+                "name": rr.get("name"),
+                "area": rr.get("area") or area_k,
+                "location": (rr.get("location") or "").strip() or "MAGAZZINO",
+                "unit": unit,
+                "qty": qty,
+                "min_qty": mn,
+                "low": low,
+                "missing_qty": float(rr.get("missing_qty") or 0),
+                "missing_order_date": rr.get("missing_order_date"),
+                "missing_delivery_date": rr.get("missing_delivery_date"),
+            })
+        groups.append({
+            "store": store_k,
+            "area": area_k,
+            "category": cat_k,
+            "name": name_k,
+            "unit": unit,
+            "positions": positions,
+            "total": total,
+            "any_low": any_low,
+        })
+
+    # mantieni ordine categoria/nome
+    groups.sort(key=lambda g: (str(g["category"]).lower(), str(g["name"]).lower()))
 
     return render(
         "inventario.html",
         user=user,
         area=area,
         areas=AREAS,
-        items=items,
+        groups=groups,
         cats=cats,
         locations=locations,
         q=q,
@@ -1088,6 +1158,112 @@ def item_set(request: Request, item_id: int, qty: float = Form(...), store: str 
 
     return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
+
+@app.post("/items/transfer")
+def item_transfer(
+    request: Request,
+    category: str = Form(...),
+    name: str = Form(...),
+    from_location: str = Form(...),
+    to_location: str = Form(...),
+    qty: float = Form(...),
+    store: str = Form(""),
+    next_url: str = Form("/inventario"),
+):
+    """Sposta quantità tra due posizioni dello stesso prodotto.
+
+    Implementato in modo robusto senza duplicare 'prodotti' diversi:
+    stessa (store, area, category, name), location diversa.
+    """
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    admin = is_admin(request)
+    active_store = (request.session.get("active_store") if admin else user.get("store"))
+    effective_store = active_store
+    if admin and active_store == "ALL":
+        store = (store or "").strip()
+        if store in STORES:
+            effective_store = store
+    if not effective_store or effective_store == "ALL":
+        return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+
+    area = get_selected_area(request) or "prodotti"
+    if area not in AREAS:
+        area = "prodotti"
+
+    category = (category or "").strip()
+    name = (name or "").strip()
+    from_location = (from_location or "").strip() or "MAGAZZINO"
+    to_location = (to_location or "").strip() or "MAGAZZINO"
+
+    try:
+        qty = float(qty)
+    except Exception:
+        qty = 0.0
+    if qty <= 0 or from_location == to_location:
+        return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
+
+    ph = _ph()
+    now = _now()
+
+    with connect() as conn:
+        cur = conn.cursor()
+
+        src = cur.execute(
+            f"SELECT * FROM products WHERE store={ph} AND area={ph} AND category={ph} AND name={ph} AND location={ph}",
+            (effective_store, area, category, name, from_location),
+        ).fetchone()
+        if not src:
+            return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
+
+        src_qty = float(src.get("qty") or 0)
+        move_qty = min(src_qty, qty)
+        if move_qty <= 0:
+            return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
+
+        dst = cur.execute(
+            f"SELECT * FROM products WHERE store={ph} AND area={ph} AND category={ph} AND name={ph} AND location={ph}",
+            (effective_store, area, category, name, to_location),
+        ).fetchone()
+
+        # decrementa sorgente
+        cur.execute(
+            f"UPDATE products SET qty={ph}, updated_at={now} WHERE id={ph}",
+            (float(src_qty - move_qty), int(src.get("id"))),
+        )
+
+        if dst:
+            dst_qty = float(dst.get("qty") or 0)
+            cur.execute(
+                f"UPDATE products SET qty={ph}, updated_at={now} WHERE id={ph}",
+                (float(dst_qty + move_qty), int(dst.get("id"))),
+            )
+        else:
+            # crea la riga per la nuova posizione (minimo a 0 di default; modificabile dall'edit)
+            unit = (src.get("unit") or "").strip()
+            cur.execute(
+                f"""INSERT INTO products(store, category, name, area, location, unit, qty, min_qty, updated_at)
+                    VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
+                    ON CONFLICT(store, area, category, name, location)
+                    DO UPDATE SET qty=excluded.qty, updated_at={now}""",
+                (effective_store, category, name, area, to_location, unit, float(move_qty), 0.0),
+            )
+
+        # log (chiaro e auditabile)
+        _log(
+            cur,
+            store=effective_store,
+            username=user["username"],
+            action="MOVE",
+            category=category,
+            name=f"{name} | {from_location} → {to_location}",
+            delta=float(move_qty),
+        )
+
+    return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
+
 @app.post("/items/add")
 def item_add(
     request: Request,
@@ -1128,8 +1304,8 @@ def item_add(
         cur.execute(
             f"""INSERT INTO products(store, category, name, area, location, unit, qty, min_qty, updated_at)
                 VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
-                ON CONFLICT(store, category, name)
-                DO UPDATE SET area=excluded.area, location=excluded.location, unit=excluded.unit, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
+                ON CONFLICT(store, area, category, name, location)
+                DO UPDATE SET unit=excluded.unit, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
             (active_store, category, name, area, location, unit, float(qty), float(min_qty)),
         )
         cur.execute(
@@ -1247,15 +1423,15 @@ def export_csv(request: Request):
     with connect() as conn:
         cur = conn.cursor()
         rows = cur.execute(
-            f"SELECT category, name, qty, min_qty FROM products WHERE store={ph} ORDER BY category, name",
+            f"SELECT area, category, name, location, unit, qty, min_qty FROM products WHERE store={ph} ORDER BY area, category, name, location",
             (active_store,),
         ).fetchall()
 
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["category", "name", "qty", "min_qty"])
+    w.writerow(["area", "category", "name", "location", "unit", "qty", "min_qty"])
     for r in rows:
-        w.writerow([r["category"], r["name"], r["qty"], r["min_qty"]])
+        w.writerow([r["area"], r["category"], r["name"], r["location"], r.get("unit") or "", r["qty"], r["min_qty"]])
 
     return PlainTextResponse(
         buf.getvalue(),
@@ -1302,11 +1478,11 @@ async def import_csv(request: Request, file: UploadFile = File(...)):
                 min_qty = 0.0
 
             cur.execute(
-                f"""INSERT INTO products(store, category, name, area, qty, min_qty, updated_at)
-                    VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now})
-                    ON CONFLICT(store, category, name)
-                    DO UPDATE SET area=excluded.area, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
-                (active_store, cat, name, area, qty, min_qty),
+                f"""INSERT INTO products(store, category, name, area, location, qty, min_qty, updated_at)
+                    VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
+                    ON CONFLICT(store, area, category, name, location)
+                    DO UPDATE SET qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
+                (active_store, cat, name, area, "MAGAZZINO", qty, min_qty),
             )
             count += 1
 

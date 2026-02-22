@@ -172,9 +172,17 @@ def init_db():
         )
         """)
 
+        # NOTE: Supporto multi-posizione.
+        # In passato l'indice unico era (store, category, name) e impediva di avere
+        # lo stesso prodotto in più posizioni. Ora includiamo area + location.
+        try:
+            _safe_exec(cur, "DROP INDEX IF EXISTS ux_products_store_cat_name")
+        except Exception:
+            pass
+
         _safe_exec(cur, """
-        CREATE UNIQUE INDEX IF NOT EXISTS ux_products_store_cat_name
-        ON products(store, category, name)
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_products_store_cat_name_loc
+        ON products(store, area, category, name, location)
         """)
 
         # ensure 'area' column exists on older DBs
