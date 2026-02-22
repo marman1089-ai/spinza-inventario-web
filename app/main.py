@@ -69,6 +69,57 @@ def _today_str() -> str:
 
 
 # =========================
+# UNIT PARSING (display totals)
+# =========================
+def _parse_pack_unit(unit: str):
+    """Parsa unità tipo '1kg', '0,2kg', '120g', '0.5L', '500ml'.
+    Ritorna (value: float|None, suffix: str|None).
+    """
+    u = (unit or "").strip().lower().replace(" ", "")
+    if not u:
+        return (None, None)
+    u = u.replace("lt", "l")
+    m = re.match(r"^([0-9]+(?:[\.,][0-9]+)?)\s*(kg|g|l|ml)$", u)
+    if not m:
+        return (None, None)
+    val_s = m.group(1).replace(",", ".")
+    try:
+        val = float(val_s)
+    except Exception:
+        return (None, None)
+    return (val, m.group(2))
+
+def _compute_display_totals(total_qty: float, unit: str):
+    """Heuristica:
+    - Se unit è un pack (es. 0,2kg / 1kg / 0,75l / 120g / 500ml),
+      calcola anche il totale convertito (kg o l) e decide come mostrarlo.
+    """
+    val, suf = _parse_pack_unit(unit)
+    pieces = float(total_qty or 0.0)
+
+    if val is None or suf is None:
+        return {"show_pieces": False, "pieces": pieces, "conv_val": None, "conv_unit": None}
+
+    if suf == "kg":
+        conv_val = pieces * val
+        conv_unit = "kg"
+    elif suf == "g":
+        conv_val = pieces * (val / 1000.0)
+        conv_unit = "kg"
+    elif suf == "l":
+        conv_val = pieces * val
+        conv_unit = "l"
+    elif suf == "ml":
+        conv_val = pieces * (val / 1000.0)
+        conv_unit = "l"
+    else:
+        conv_val = None
+        conv_unit = None
+
+    show_pieces = (suf in ("g", "ml")) or (abs(val - 1.0) > 1e-9)
+    return {"show_pieces": show_pieces, "pieces": pieces, "conv_val": conv_val, "conv_unit": conv_unit}
+
+# =========================
 # LOG HELPERS
 # =========================
 def _log(cur, *, store: str, username: str, action: str, category: str, name: str, delta: float = 0.0):
@@ -1040,6 +1091,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
             "positions": positions,
             "total": total,
             "any_low": any_low,
+            "disp": _compute_display_totals(total, unit),
         })
 
     # mantieni ordine categoria/nome

@@ -104,31 +104,35 @@
                 <span class="pill">{{ g.category }}</span>
                 {% if g.any_low %}<span class="pill" style="background:#ffe6e6;border-color:#ffb3b3;">● Sotto minimo</span>{% endif %}
               </div>
-              <div style="margin-top:6px;display:flex;gap:8px;align-items:center;">
-                
-<strong style="font-size:16px;">{{ g.name }}</strong>
-<div style="display:flex;flex-direction:column;align-items:flex-end;margin-left:auto;gap:6px;">
-  {% if g.positions|length > 1 %}
+              
+<div style="margin-top:6px;display:flex;gap:10px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;">
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+    <strong style="font-size:16px;">{{ g.name }}</strong>
+    {% if g.unit %}<span class="pill">📏 {{ g.unit }}</span>{% endif %}
+  </div>
+
+  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+    {% if g.positions|length > 1 %}
+      <button class="btn2" type="button"
+        onclick="openTransfer('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}', [{% for pp in g.positions %}'{{ pp.location|replace("'","\\'") }}'{% if not loop.last %},{% endif %}{% endfor %}])">
+        ⇄ SCAMBIA
+      </button>
+    {% endif %}
     <button class="btn2" type="button"
-      onclick="openTransfer('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}', [{% for pp in g.positions %}'{{ pp.location|replace("'","\\'") }}'{% if not loop.last %},{% endif %}{% endfor %}])">
-      ⇄ SCAMBIA
+      onclick="openAddPos('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}','{{ g.unit|replace("'","\\'") }}')">
+      ➕ AGGIUNGI POSIZIONE
     </button>
-  {% endif %}
-  <button class="btn2" type="button"
-    onclick="openAddPos('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}','{{ g.unit|replace("'","\\'") }}')">
-    ➕ AGGIUNGI POSIZIONE
-  </button>
+  </div>
 </div>
 
+<div class="muted" style="margin-top:6px;font-size:12px;">
 
-
-
-
-
-              <div class="muted" style="margin-top:6px;font-size:12px;">
                 Totale: <strong>
-{% if g.unit and 'kg' in g.unit|lower %}
-  {{ "%.2f"|format(g.total) }} KG
+{% if g.disp and g.disp.conv_val is not none and g.disp.show_pieces %}
+  {{ "%.0f"|format(g.disp.pieces) }}<br/>
+  {{ "%.2f"|format(g.disp.conv_val) }} {{ g.disp.conv_unit }}
+{% elif g.unit and g.disp and g.disp.conv_val is not none and (g.disp.conv_unit in ['kg','l']) %}
+  {{ "%.2f"|format(g.disp.conv_val) }} {{ g.disp.conv_unit }}
 {% else %}
   {{ "%.2f"|format(g.total) }}{% if g.unit %} {{ g.unit }}{% endif %}
 {% endif %}
