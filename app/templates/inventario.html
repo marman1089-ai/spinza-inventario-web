@@ -105,20 +105,32 @@
                 {% if g.any_low %}<span class="pill" style="background:#ffe6e6;border-color:#ffb3b3;">● Sotto minimo</span>{% endif %}
               </div>
               <div style="margin-top:6px;display:flex;gap:8px;align-items:center;">
-                <strong style="font-size:16px;">{{ g.name }}</strong>
+                
+<strong style="font-size:16px;">{{ g.name }}</strong>
+{% if g.positions|length > 1 %}
+<button class="btn2" type="button" 
+style="margin-left:auto;white-space:nowrap;"
+onclick="openTransfer('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\'") }}','{{ g.name|replace("'","\'") }}','{{ g.positions[0].location|replace("'","\'") }}','{{ g.positions[1].location|replace("'","\'") }}')">
+⇄ SCAMBIA
+</button>
+{% endif %}
+
                 {% if g.unit %}<span class="pill">📏 {{ g.unit }}</span>{% endif %}
               </div>
               <div class="muted" style="margin-top:6px;font-size:12px;">
-                Totale: <strong>{{ "%.2f"|format(g.total) }}</strong>
+                Totale: <strong>
+{% if g.unit and 'kg' in g.unit|lower %}
+  {{ "%.2f"|format(g.total) }} KG
+{% else %}
+  {{ "%.2f"|format(g.total) }}{% if g.unit %} {{ g.unit }}{% endif %}
+{% endif %}
+</strong>
               </div>
             </div>
 
             <div style="flex:1;min-width:260px;">
               <div style="display:flex;gap:10px;align-items:stretch;overflow-x:auto;padding-bottom:6px;">
                 {% for p in g.positions %}
-                  {% if loop.index0 > 0 %}
-                    <button class="btn2" type="button" style="white-space:nowrap;align-self:center;" onclick="openTransfer('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}','{{ g.positions[loop.index0-1].location|replace("'","\\'") }}','{{ p.location|replace("'","\\'") }}')">⇄ SCAMBIA</button>
-                  {% endif %}
 
                   <div class="card" style="padding:10px;min-width:220px;">
                     <div class="row" style="justify-content:space-between;align-items:center;gap:8px;">
