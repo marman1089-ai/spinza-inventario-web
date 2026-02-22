@@ -107,13 +107,21 @@
               <div style="margin-top:6px;display:flex;gap:8px;align-items:center;">
                 
 <strong style="font-size:16px;">{{ g.name }}</strong>
+<div style="display:flex;flex-direction:column;align-items:flex-end;margin-left:auto;gap:6px;">
 {% if g.positions|length > 1 %}
-<button class="btn2" type="button" 
-style="margin-left:auto;white-space:nowrap;"
-onclick="openTransfer('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\'") }}','{{ g.name|replace("'","\'") }}','{{ g.positions[0].location|replace("'","\'") }}','{{ g.positions[1].location|replace("'","\'") }}')">
+<button class="btn2" type="button"
+onclick="openTransfer('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}','{{ g.positions[0].location|replace("'","\\'") }}','{{ g.positions[1].location|replace("'","\\'") }}')">
 ⇄ SCAMBIA
 </button>
 {% endif %}
+
+<button class="btn2" type="button"
+onclick="openAddPosition('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}')">
+➕ AGGIUNGI POSIZIONE
+</button>
+</div>
+
+
 
                 {% if g.unit %}<span class="pill">📏 {{ g.unit }}</span>{% endif %}
               </div>
