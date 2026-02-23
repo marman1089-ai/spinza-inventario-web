@@ -142,97 +142,52 @@
 
 <style>
 
-/* ===== MAX COMPACT INVENTORY MODE ===== */
-
-/* Product card tighter */
-.card {
-  padding:4px !important;
-  margin-bottom:6px !important;
-}
-
-/* Remove big vertical spaces */
-h2, h3 {
-  margin:2px 0 4px 0 !important;
-}
-
-strong {
-  font-size:13px !important;
-}
-
-/* Inline product header */
-.card > div:first-child {
-  margin-bottom:2px !important;
-}
-
-/* Buttons very compact */
-.btn, .btn2 {
-  padding:3px 8px !important;
-  font-size:12px !important;
-  height:30px !important;
-}
-
-.mini {
-  padding:2px 6px !important;
-  font-size:11px !important;
-  height:26px !important;
-}
-
-/* Inputs compact */
-input, select {
-  padding:3px !important;
-  font-size:12px !important;
-  height:28px !important;
-}
-
-/* Position cards much tighter */
-.card .card {
-  padding:4px !important;
-  margin-bottom:4px !important;
-}
-
-/* Reduce total block spacing */
-.muted {
-  font-size:11px !important;
-  margin:2px 0 !important;
-}
-
-/* Force tighter row layout */
-.row {
-  gap:4px !important;
-}
-
-/* Make positions grid compact */
+/* ===== MOBILE STRUCTURAL COMPACT MODE ONLY ===== */
 @media (max-width: 768px) {
 
   .card {
-    padding:3px !important;
-    margin-bottom:4px !important;
+    padding:2px !important;
+    margin-bottom:3px !important;
   }
 
-  strong {
+  .card strong {
     font-size:12px !important;
+  }
+
+  .card > div {
+    margin-bottom:1px !important;
   }
 
   .btn, .btn2 {
     padding:2px 6px !important;
     font-size:11px !important;
-    height:26px !important;
+    height:22px !important;
   }
 
   .mini {
-    padding:2px 5px !important;
+    padding:2px 4px !important;
     font-size:10px !important;
-    height:24px !important;
+    height:20px !important;
   }
 
   input, select {
     padding:2px !important;
     font-size:11px !important;
-    height:24px !important;
+    height:22px !important;
   }
 
   .muted {
     font-size:10px !important;
+    margin:1px 0 !important;
+  }
+
+  .row {
+    gap:2px !important;
+  }
+
+  .card .card {
+    padding:2px !important;
+    margin-bottom:2px !important;
   }
 
 }
