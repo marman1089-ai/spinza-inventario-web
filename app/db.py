@@ -121,7 +121,7 @@ def init_db():
             id {id_col},
             store TEXT NOT NULL,
             username TEXT NOT NULL,
-            role TEXT NOT NULL DEFAULT 'staff',
+            role TEXT NOT NULL DEFAULT 'employee',
             pw_salt TEXT,
             pw_hash TEXT,
             legacy_sha256 TEXT,
@@ -140,7 +140,7 @@ def init_db():
             _safe_exec(cur, """
             CREATE UNIQUE INDEX IF NOT EXISTS ux_users_admin_username
             ON users(username)
-            WHERE role = 'admin'
+            WHERE role = 'super_admin'
             """)
         except Exception:
             # SQLite vecchie o DB particolari potrebbero non supportare indici parziali
@@ -371,6 +371,28 @@ def init_db():
             unit TEXT,
             product_id INTEGER,
             product_name TEXT
+        )
+        """)
+
+
+        # GESTIONALE - ENTRATE / INCASSI
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS sales_entries (
+            id {id_col},
+            sale_date {date_col} NOT NULL,
+            store TEXT NOT NULL,
+            sales_channel TEXT NOT NULL DEFAULT '',
+            sales_location TEXT NOT NULL DEFAULT '',
+            order_type TEXT NOT NULL DEFAULT '',
+            payment_method TEXT NOT NULL DEFAULT '',
+            order_count INTEGER NOT NULL DEFAULT 0,
+            gross_amount {qty_col} NOT NULL DEFAULT 0,
+            discounts_amount {qty_col} NOT NULL DEFAULT 0,
+            commissions_amount {qty_col} NOT NULL DEFAULT 0,
+            net_amount {qty_col} NOT NULL DEFAULT 0,
+            notes TEXT,
+            created_by TEXT NOT NULL DEFAULT '',
+            ts {ts_default}
         )
         """)
 

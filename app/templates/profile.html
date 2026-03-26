@@ -26,7 +26,7 @@
       </div>
     </details>
 
-    {% if user and user.role == 'admin' %}
+    {% if user and user.role == 'super_admin' %}
     <details style="margin-top:12px;">
       <summary class="pill" style="cursor:pointer;">✏️ Cambia username (solo admin)</summary>
       <div style="margin-top:10px;">
@@ -35,7 +35,7 @@
             <input name="new_username" placeholder="Nuovo username" required />
             <button class="btn2" type="submit">Aggiorna</button>
           </div>
-          <div class="muted" style="margin-top:8px;">Per lo staff lo username lo cambia solo l’admin dal pannello utenti.</div>
+          <div class="muted" style="margin-top:8px;">Per lo staff lo username lo cambia solo il super admin dal pannello utenti.</div>
         </form>
       </div>
     </details>

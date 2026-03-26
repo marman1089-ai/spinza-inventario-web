@@ -3,7 +3,8 @@ import datetime
 import json
 import csv
 import io
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
+import re
 
 from fastapi import FastAPI, Request, Form, UploadFile, File
 from .pdf_tools import ensure_pdf, merge_pdfs
@@ -26,6 +27,16 @@ templates = Environment(
 def render(name: str, **ctx):
     tpl = templates.get_template(name)
     return HTMLResponse(tpl.render(**ctx))
+
+
+def _safe_next_url(next_url: str | None, default: str = "/inventario") -> str:
+    """Permette redirect SOLO interni (evita open-redirect)."""
+    if not next_url:
+        return default
+    u = (next_url or "").strip()
+    if not u.startswith("/"):
+        return default
+    return u
 
 app = FastAPI(title="Spinza Inventario")
 
@@ -54,6 +65,60 @@ def _ph() -> str:
 def _now() -> str:
     return "NOW()" if using_postgres() else "datetime('now')"
 
+def _today_str() -> str:
+    return date.today().isoformat()
+
+
+# =========================
+# UNIT PARSING (display totals)
+# =========================
+def _parse_pack_unit(unit: str):
+    """Parsa unità tipo '1kg', '0,2kg', '120g', '0.5L', '500ml'.
+    Ritorna (value: float|None, suffix: str|None).
+    """
+    u = (unit or "").strip().lower().replace(" ", "")
+    if not u:
+        return (None, None)
+    u = u.replace("lt", "l")
+    m = re.match(r"^([0-9]+(?:[\.,][0-9]+)?)\s*(kg|g|l|ml)$", u)
+    if not m:
+        return (None, None)
+    val_s = m.group(1).replace(",", ".")
+    try:
+        val = float(val_s)
+    except Exception:
+        return (None, None)
+    return (val, m.group(2))
+
+def _compute_display_totals(total_qty: float, unit: str):
+    """Heuristica:
+    - Se unit è un pack (es. 0,2kg / 1kg / 0,75l / 120g / 500ml),
+      calcola anche il totale convertito (kg o l) e decide come mostrarlo.
+    """
+    val, suf = _parse_pack_unit(unit)
+    pieces = float(total_qty or 0.0)
+
+    if val is None or suf is None:
+        return {"show_pieces": False, "pieces": pieces, "conv_val": None, "conv_unit": None}
+
+    if suf == "kg":
+        conv_val = pieces * val
+        conv_unit = "kg"
+    elif suf == "g":
+        conv_val = pieces * (val / 1000.0)
+        conv_unit = "kg"
+    elif suf == "l":
+        conv_val = pieces * val
+        conv_unit = "l"
+    elif suf == "ml":
+        conv_val = pieces * (val / 1000.0)
+        conv_unit = "l"
+    else:
+        conv_val = None
+        conv_unit = None
+
+    show_pieces = (suf in ("g", "ml")) or (abs(val - 1.0) > 1e-9)
+    return {"show_pieces": show_pieces, "pieces": pieces, "conv_val": conv_val, "conv_unit": conv_unit}
 
 # =========================
 # LOG HELPERS
@@ -117,6 +182,12 @@ def get_selected_area(request: Request) -> str | None:
 def set_selected_area(request: Request, area: str):
     request.session["selected_area"] = area
 
+def get_selected_module(request: Request) -> str | None:
+    return request.session.get("selected_module")
+
+def set_selected_module(request: Request, module: str):
+    request.session["selected_module"] = module
+
 def is_admin(request: Request) -> bool:
     u = request.session.get("user")
     return bool(u and u.get("role") == "admin")
@@ -127,10 +198,54 @@ def _admin_store(request: Request) -> str:
 
 def _render_admin(request: Request, *, user, users, msg=None, error=None):
     admin_store = _admin_store(request)
+
+    # Arricchisce la lista utenti per la vista admin:
+    # - online: True se last_seen è recente
+    # - last_seen_str: ultimo accesso formattato (data + ORARIO)
+    ONLINE_MINUTES = 5
+
+    def _parse_last_seen(v):
+        if v is None:
+            return None
+        # psycopg può tornare un datetime, sqlite spesso una stringa
+        if isinstance(v, datetime):
+            return v
+        try:
+            s = str(v).replace("T", " ").strip()
+            # prova formati comuni
+            for fmt in ("%Y-%m-%d %H:%M:%S.%f%z", "%Y-%m-%d %H:%M:%S%z", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+                try:
+                    return datetime.strptime(s, fmt)
+                except Exception:
+                    pass
+        except Exception:
+            return None
+        return None
+
+    def _fmt_last_seen(dt: datetime | None) -> str | None:
+        if not dt:
+            return None
+        # Mostriamo data + orario (richiesto per gli offline)
+        return dt.strftime("%d/%m/%Y %H:%M")
+
+    now = datetime.utcnow()
+    decorated = []
+    for u in (users or []):
+        # dict_row -> dict; sqlite.Row -> mapping
+        d = dict(u)
+        dt = _parse_last_seen(d.get("last_seen"))
+        d["last_seen_str"] = _fmt_last_seen(dt)
+        if dt:
+            age = now - (dt.replace(tzinfo=None) if getattr(dt, "tzinfo", None) else dt)
+            d["online"] = age.total_seconds() <= ONLINE_MINUTES * 60
+        else:
+            d["online"] = False
+        decorated.append(d)
+
     return render(
         "admin.html",
         user=user,
-        users=users,
+        users=decorated,
         msg=msg,
         error=error,
         stores=STORES,
@@ -219,10 +334,14 @@ def _startup():
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     if require_login(request):
-        # dopo login l'utente deve scegliere la sezione (bibite / prodotti)
-        if not get_selected_area(request):
-            return RedirectResponse("/select-area", status_code=HTTP_303_SEE_OTHER)
-        return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+        module = get_selected_module(request)
+        if module == "inventario":
+            if not get_selected_area(request):
+                return RedirectResponse("/select-inventory-area", status_code=HTTP_303_SEE_OTHER)
+            return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+        if module == "gestionale":
+            return RedirectResponse("/gestionale/dashboard", status_code=HTTP_303_SEE_OTHER)
+        return RedirectResponse("/select-inventory-area", status_code=HTTP_303_SEE_OTHER)
     return RedirectResponse("/select-store", status_code=HTTP_303_SEE_OTHER)
 
 @app.get("/select-store", response_class=HTMLResponse)
@@ -281,27 +400,15 @@ def login_post(request: Request, username: str = Form(...), password: str = Form
             "store_label": STORES.get(row["store"], row["store"]),
         }
 
-    # reset area ad ogni login per forzare la scelta sala/cucina
+    # reset selezioni ad ogni login per mostrare la home del sistema
     request.session.pop("selected_area", None)
+    request.session.pop("selected_module", None)
     return RedirectResponse("/select-area", status_code=HTTP_303_SEE_OTHER)
 
 
-@app.get("/select-area", response_class=HTMLResponse)
-def select_area_get(request: Request, area: str = ""):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-
-    area = (area or "").strip().lower()
-    if area in ("bibite", "prodotti"):
-        set_selected_area(request, area)
-        return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
-
-    # brand: store scelto
-    brand = (request.session.get("active_store") if is_admin(request) else user.get("store")) or "spinza"
-    if brand not in STORES and brand != "ALL":
-        brand = "spinza"
-    return render("select_area.html", user=user, brand=brand)
+## NOTE:
+## Route /select-area definita più sotto (con AREAS e UI completa).
+## Questa vecchia versione è stata rimossa per evitare doppia registrazione.
 
 
 @app.get("/register", response_class=HTMLResponse)
@@ -597,7 +704,7 @@ def set_active_store(request: Request, store: str = Form(...), next_url: str = F
 
 
 # =========================
-# AREA SELECTION (BIBITE / PRODOTTI)
+# MAIN MODULE SELECTION + INVENTORY AREA SELECTION
 # =========================
 AREAS = {
     "bibite": "Bibite (Sala)",
@@ -605,22 +712,40 @@ AREAS = {
 }
 
 @app.get("/select-area", response_class=HTMLResponse)
-def select_area_get(request: Request, area: str = ""):
+def select_area_get(request: Request, module: str = ""):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
+    module = (module or "").strip().lower()
+    if module in ("inventario", "gestionale"):
+        set_selected_module(request, module)
+        if module == "inventario":
+            request.session.pop("selected_area", None)
+            return RedirectResponse("/select-inventory-area", status_code=HTTP_303_SEE_OTHER)
+        return RedirectResponse("/gestionale/dashboard", status_code=HTTP_303_SEE_OTHER)
+
+    brand = (request.session.get("active_store") if is_admin(request) else user.get("store")) or "spinza"
+    if brand not in STORES:
+        brand = "spinza"
+    return render("select_area.html", user=user, brand=brand, active_store=request.session.get("active_store"), current_module=get_selected_module(request))
+
+@app.get("/select-inventory-area", response_class=HTMLResponse)
+def select_inventory_area_get(request: Request, area: str = ""):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    set_selected_module(request, "inventario")
     area = (area or "").strip()
     if area in AREAS:
         set_selected_area(request, area)
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
-    # brand: store selezionato (admin usa active_store se presente)
     brand = (request.session.get("active_store") if is_admin(request) else user.get("store")) or "spinza"
     if brand not in STORES:
         brand = "spinza"
-    return render("select_area.html", user=user, areas=AREAS, brand=brand)
-
+    return render("select_inventory_area.html", user=user, areas=AREAS, brand=brand, active_store=request.session.get("active_store"), current_module="inventario")
 
 # =========================
 # PROFILE (admin can change own username/password)
@@ -724,6 +849,341 @@ def profile_change_username(request: Request, new_username: str = Form(...)):
     return render("profile.html", user=request.session["user"], msg="Username aggiornato.", error=None, brand=brand)
 
 
+
+# =========================
+# NOVITÀ E AGGIORNAMENTI
+# =========================
+@app.get("/novita")
+def novita_alias():
+    """Alias per comodità: mantiene compatibilità con chi cerca /novita."""
+    return RedirectResponse("/updates", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get("/updates", response_class=HTMLResponse)
+def updates_page(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        rows = cur.execute(
+            "SELECT id, day, message, created_by, ts FROM updates ORDER BY day DESC, ts ASC, id ASC"
+        ).fetchall()
+
+    # Normalizza righe tra Postgres (dict_row) e SQLite (sqlite3.Row)
+    # In SQLite le righe non hanno `.get()`, quindi convertiamo tutto a dict.
+    rows = [dict(r) for r in rows]
+
+    grouped = []
+    by_day = {}
+    for r in rows:
+        day = str(r.get("day") or "")[:10]
+        if day not in by_day:
+            by_day[day] = {"day": day, "items": []}
+            grouped.append(by_day[day])
+        by_day[day]["items"].append(r)
+
+    active_store = request.session.get("active_store") if is_admin(request) else None
+    brand = (active_store or user.get("store") or "spinza") if is_admin(request) else (user.get("store") or "spinza")
+    return render("updates.html", user=user, grouped=grouped, brand=brand, active_store=active_store)
+
+
+@app.post("/updates/post")
+async def updates_post(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not is_admin(request):
+        return RedirectResponse("/updates", status_code=HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    msg = (form.get("message") or "").strip()
+    if not msg:
+        return RedirectResponse("/updates", status_code=HTTP_303_SEE_OTHER)
+
+    day = _today_str()
+    now = _now()
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"INSERT INTO updates(day, message, created_by, ts) VALUES({ph},{ph},{ph},{now})",
+            (day, msg, user["username"]),
+        )
+
+        # log (solo per traccia admin, store = active_store o store utente)
+        st = request.session.get("active_store") if is_admin(request) and request.session.get("active_store") else (user.get("store") or "spinza")
+        _log(
+            cur,
+            store=st,
+            username=user["username"],
+            action="UPDATE_POST",
+            category="NOVITA",
+            name=msg[:120],
+            delta=0.0,
+        )
+
+    return RedirectResponse("/updates", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/updates/delete/{update_id}")
+async def updates_delete(request: Request, update_id: int):
+    """Elimina un messaggio dalla bacheca Novità (solo admin)."""
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not is_admin(request):
+        return RedirectResponse("/updates", status_code=HTTP_303_SEE_OTHER)
+
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+
+        # Recupera il messaggio prima di eliminarlo (per log)
+        row = cur.execute(
+            f"SELECT message FROM updates WHERE id={ph}",
+            (int(update_id),),
+        ).fetchone()
+        msg_preview = (dict(row).get("message") if row is not None else "")
+        if msg_preview is None:
+            msg_preview = ""
+
+        cur.execute(
+            f"DELETE FROM updates WHERE id={ph}",
+            (int(update_id),),
+        )
+
+        st = request.session.get("active_store") if request.session.get("active_store") else (user.get("store") or "spinza")
+        _log(
+            cur,
+            store=st,
+            username=user["username"],
+            action="UPDATE_DELETE",
+            category="NOVITA",
+            name=str(msg_preview)[:120],
+            delta=0.0,
+        )
+
+    return RedirectResponse("/updates", status_code=HTTP_303_SEE_OTHER)
+
+def _current_store_for_scope(request: Request, user: dict):
+    admin = is_admin(request)
+    if admin:
+        active_store = (request.query_params.get("store") or request.session.get("active_store") or "spinza").strip()
+        if active_store not in STORES and active_store != "ALL":
+            active_store = "spinza"
+        request.session["active_store"] = active_store
+        return active_store
+    active_store = user.get("store") or get_selected_store(request) or "spinza"
+    set_selected_store(request, active_store)
+    return active_store
+
+
+def _sales_scope_clause(active_store: str):
+    ph = _ph()
+    if active_store == "ALL":
+        return "", []
+    return f" WHERE store={ph}", [active_store]
+
+
+def _sales_dashboard_data(cur, active_store: str):
+    ph = _ph()
+    where_sql, params = _sales_scope_clause(active_store)
+    today = _today_str()
+    month = today[:7] + "%"
+
+    def scalar(sql: str, args):
+        row = cur.execute(sql, tuple(args)).fetchone()
+        if not row:
+            return 0.0
+        val = list(dict(row).values())[0]
+        return float(val or 0)
+
+    today_net = scalar(f"SELECT COALESCE(SUM(net_amount),0) AS v FROM sales_entries{where_sql + (' AND' if where_sql else ' WHERE')} sale_date={ph}", params + [today])
+    today_orders = scalar(f"SELECT COALESCE(SUM(order_count),0) AS v FROM sales_entries{where_sql + (' AND' if where_sql else ' WHERE')} sale_date={ph}", params + [today])
+    month_net = scalar(f"SELECT COALESCE(SUM(net_amount),0) AS v FROM sales_entries{where_sql + (' AND' if where_sql else ' WHERE')} sale_date LIKE {ph}", params + [month])
+    month_orders = scalar(f"SELECT COALESCE(SUM(order_count),0) AS v FROM sales_entries{where_sql + (' AND' if where_sql else ' WHERE')} sale_date LIKE {ph}", params + [month])
+
+    by_channel = cur.execute(
+        f"""
+        SELECT sales_channel, COALESCE(SUM(net_amount),0) AS net_total, COALESCE(SUM(order_count),0) AS order_total
+        FROM sales_entries
+        {where_sql}
+        GROUP BY sales_channel
+        ORDER BY net_total DESC, sales_channel
+        """,
+        tuple(params),
+    ).fetchall()
+
+    recent = cur.execute(
+        f"""
+        SELECT * FROM sales_entries
+        {where_sql}
+        ORDER BY sale_date DESC, id DESC
+        LIMIT 12
+        """,
+        tuple(params),
+    ).fetchall()
+
+    total_all = sum(float(r.get("net_total") or 0) for r in by_channel)
+    channels = []
+    for row in by_channel:
+        net_total = float(row.get("net_total") or 0)
+        order_total = int(row.get("order_total") or 0)
+        channels.append({
+            "sales_channel": row.get("sales_channel") or "-",
+            "net_total": net_total,
+            "order_total": order_total,
+            "avg_ticket": (net_total / order_total) if order_total else 0,
+            "weight": (net_total / total_all * 100.0) if total_all else 0,
+        })
+
+    return {
+        "today_net": today_net,
+        "today_orders": int(today_orders),
+        "today_avg": (today_net / today_orders) if today_orders else 0,
+        "month_net": month_net,
+        "month_orders": int(month_orders),
+        "month_avg": (month_net / month_orders) if month_orders else 0,
+        "channels": channels,
+        "recent": recent,
+    }
+
+
+@app.get("/gestionale", response_class=HTMLResponse)
+def gestionale_home(request: Request):
+    return RedirectResponse("/gestionale/dashboard", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get("/gestionale/dashboard", response_class=HTMLResponse)
+def gestionale_dashboard(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    set_selected_module(request, "gestionale")
+    active_store = _current_store_for_scope(request, user)
+    brand = active_store if active_store in STORES else (user.get("store") or "spinza")
+    with connect() as conn:
+        cur = conn.cursor()
+        data = _sales_dashboard_data(cur, active_store)
+    return render("gestionale_dashboard.html", user=user, brand=brand, active_store=active_store, current_module="gestionale", stores=STORES, **data)
+
+
+@app.get("/gestionale/entrate", response_class=HTMLResponse)
+def gestionale_entrate_get(request: Request, sale_date: str = "", sales_channel: str = "ALL"):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    set_selected_module(request, "gestionale")
+    active_store = _current_store_for_scope(request, user)
+    brand = active_store if active_store in STORES else (user.get("store") or "spinza")
+    sale_date = (sale_date or "").strip()
+    sales_channel = (sales_channel or "ALL").strip()
+    ph = _ph()
+    where = []
+    params = []
+    if active_store != "ALL":
+        where.append(f"store={ph}")
+        params.append(active_store)
+    if sale_date:
+        where.append(f"sale_date={ph}")
+        params.append(sale_date)
+    if sales_channel != "ALL":
+        where.append(f"sales_channel={ph}")
+        params.append(sales_channel)
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+    with connect() as conn:
+        cur = conn.cursor()
+        rows = cur.execute(f"SELECT * FROM sales_entries{where_sql} ORDER BY sale_date DESC, id DESC LIMIT 100", tuple(params)).fetchall()
+        channel_rows = cur.execute(f"SELECT DISTINCT sales_channel FROM sales_entries" + (f" WHERE store={ph}" if active_store != "ALL" else "") + " ORDER BY sales_channel", tuple([active_store] if active_store != "ALL" else [])).fetchall()
+    channels = [r.get("sales_channel") for r in channel_rows if (r.get("sales_channel") or '').strip()]
+    return render("gestionale_entrate.html", user=user, brand=brand, active_store=active_store, current_module="gestionale", rows=rows, channels=channels, sale_date=sale_date, selected_channel=sales_channel, today=_today_str())
+
+
+@app.post("/gestionale/entrate", response_class=HTMLResponse)
+def gestionale_entrate_post(
+    request: Request,
+    sale_date: str = Form(...),
+    store: str = Form(""),
+    sales_channel: str = Form(...),
+    sales_location: str = Form(""),
+    order_type: str = Form(""),
+    payment_method: str = Form(""),
+    order_count: int = Form(0),
+    gross_amount: float = Form(0),
+    discounts_amount: float = Form(0),
+    commissions_amount: float = Form(0),
+    net_amount: str = Form(""),
+    notes: str = Form(""),
+):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    set_selected_module(request, "gestionale")
+    active_store = _current_store_for_scope(request, user)
+    store = (store or "").strip() or (active_store if active_store != "ALL" else user.get("store") or "spinza")
+    if store not in STORES:
+        store = user.get("store") or "spinza"
+    try:
+        net = float(str(net_amount).replace(",", ".")) if str(net_amount).strip() else float(gross_amount or 0) - float(discounts_amount or 0) - float(commissions_amount or 0)
+    except Exception:
+        net = float(gross_amount or 0) - float(discounts_amount or 0) - float(commissions_amount or 0)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"""
+            INSERT INTO sales_entries(
+                sale_date, store, sales_channel, sales_location, order_type, payment_method,
+                order_count, gross_amount, discounts_amount, commissions_amount, net_amount,
+                notes, created_by
+            ) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
+            """,
+            (
+                sale_date or _today_str(), store, (sales_channel or "").strip(), (sales_location or "").strip(),
+                (order_type or "").strip(), (payment_method or "").strip(), int(order_count or 0),
+                float(gross_amount or 0), float(discounts_amount or 0), float(commissions_amount or 0),
+                float(net), (notes or "").strip(), user.get("username") or "",
+            ),
+        )
+    return RedirectResponse("/gestionale/entrate", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get("/gestionale/uscite", response_class=HTMLResponse)
+def gestionale_uscite(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    set_selected_module(request, "gestionale")
+    active_store = _current_store_for_scope(request, user)
+    brand = active_store if active_store in STORES else (user.get("store") or "spinza")
+    return render("gestionale_placeholder.html", user=user, brand=brand, active_store=active_store, current_module="gestionale", section_title="Uscite", section_desc="Qui andremo a gestire costi, fornitori, reparti, categorie, metodi di pagamento e allegati documento.")
+
+
+@app.get("/gestionale/cassa", response_class=HTMLResponse)
+def gestionale_cassa(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    set_selected_module(request, "gestionale")
+    active_store = _current_store_for_scope(request, user)
+    brand = active_store if active_store in STORES else (user.get("store") or "spinza")
+    return render("gestionale_placeholder.html", user=user, brand=brand, active_store=active_store, current_module="gestionale", section_title="Cassa / Prima nota", section_desc="Qui andremo a gestire fondo cassa, prelievi, versamenti, spese cash e quadratura giornaliera.")
+
+
+@app.get("/gestionale/report", response_class=HTMLResponse)
+def gestionale_report(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    set_selected_module(request, "gestionale")
+    active_store = _current_store_for_scope(request, user)
+    brand = active_store if active_store in STORES else (user.get("store") or "spinza")
+    return render("gestionale_placeholder.html", user=user, brand=brand, active_store=active_store, current_module="gestionale", section_title="Report", section_desc="Qui andremo a leggere entrate, uscite, scontrino medio, peso dei canali e andamento per sede e periodo.")
+
+
 # =========================
 # INVENTORY
 # =========================
@@ -733,9 +1193,10 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
+    set_selected_module(request, "inventario")
     area = get_selected_area(request)
     if not area or area not in AREAS:
-        return RedirectResponse("/select-area", status_code=HTTP_303_SEE_OTHER)
+        return RedirectResponse("/select-inventory-area", status_code=HTTP_303_SEE_OTHER)
 
     admin = is_admin(request)
     if admin:
@@ -757,18 +1218,14 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
 
         # --- categorie ---
         cats_sql = "SELECT DISTINCT category FROM products WHERE area=" + ph
-        cats_params = []
-        cats_params.append(area)
+        cats_params = [area]
         if active_store != "ALL":
             cats_sql += f" AND store={ph}"
             cats_params.append(active_store)
         cats_sql += " ORDER BY category"
+        cats = [r["category"] for r in cur.execute(cats_sql, tuple(cats_params)).fetchall()]
 
-        cats = [r["category"] for r in cur.execute(cats_sql, tuple(cats_params)).fetchall()] if cats_params \
-               else [r["category"] for r in cur.execute(cats_sql).fetchall()]
-
-        
-        # --- posizioni ---
+        # --- posizioni (per filtro) ---
         locations_sql = "SELECT DISTINCT location FROM products WHERE area=" + ph
         loc_params = [area]
         if active_store != "ALL":
@@ -780,41 +1237,116 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
         except Exception:
             locations = []
 
-        # --- prodotti ---
-        sql = "SELECT * FROM products WHERE 1=1"
-        params = []
-
-        sql += f" AND area={ph}"
-        params.append(area)
+        # --- Selezione "chiavi prodotto" in base ai filtri, poi fetch di TUTTE le posizioni per quelle chiavi ---
+        key_sql = "SELECT DISTINCT store, area, category, name FROM products WHERE 1=1"
+        key_params = []
+        key_sql += f" AND area={ph}"
+        key_params.append(area)
 
         if active_store != "ALL":
-            sql += f" AND store={ph}"
-            params.append(active_store)
+            key_sql += f" AND store={ph}"
+            key_params.append(active_store)
 
         if cat != "ALL":
-            sql += f" AND category={ph}"
-            params.append(cat)
+            key_sql += f" AND category={ph}"
+            key_params.append(cat)
 
         if loc != "ALL":
-            sql += f" AND location={ph}"
-            params.append(loc)
+            # filtro per posizione: seleziona i prodotti che esistono in quella posizione,
+            # ma poi mostriamo tutte le altre posizioni del prodotto.
+            key_sql += f" AND location={ph}"
+            key_params.append(loc)
 
         if q:
-            sql += f" AND (lower(name) LIKE {ph} OR lower(category) LIKE {ph} OR lower(location) LIKE {ph})"
-            params.extend([f"%{q}%", f"%{q}%", f"%{q}%"])
+            key_sql += f" AND (lower(name) LIKE {ph} OR lower(category) LIKE {ph} OR lower(location) LIKE {ph})"
+            key_params.extend([f"%{q}%", f"%{q}%", f"%{q}%"])
 
         if only_low:
-            sql += " AND qty <= min_qty"
+            key_sql += " AND qty <= min_qty"
 
-        sql += " ORDER BY category, name"
-        items = cur.execute(sql, tuple(params)).fetchall()
+        key_sql += " ORDER BY category, name"
+
+        keys = cur.execute(key_sql, tuple(key_params)).fetchall()
+
+        if not keys:
+            rows = []
+        else:
+            # costruisci WHERE (store,area,category,name) IN (...)
+            # compatibile anche con SQLite (senza tuple IN): usa OR.
+            clauses = []
+            params = []
+            for k in keys:
+                clauses.append(f"(store={ph} AND area={ph} AND category={ph} AND name={ph})")
+                params.extend([k["store"], k["area"], k["category"], k["name"]])
+            rows = cur.execute(
+                "SELECT * FROM products WHERE " + " OR ".join(clauses) + " ORDER BY category, name, location",
+                tuple(params),
+            ).fetchall()
+
+    # --- Raggruppa per prodotto (stesso store+area+category+name), con posizioni affiancate e totale ---
+    def _gkey(r):
+        return (r["store"], r.get("area") or area, r["category"], r["name"])
+
+    grouped = {}
+    for r in rows:
+        k = _gkey(r)
+        grouped.setdefault(k, []).append(r)
+
+    groups = []
+    for (store_k, area_k, cat_k, name_k), lst in grouped.items():
+        # ordina posizioni
+        lst_sorted = sorted(lst, key=lambda x: (str(x.get("location") or "").lower(), int(x.get("id") or 0)))
+        unit = ""
+        # prendi unit non vuota se esiste
+        for rr in lst_sorted:
+            if (rr.get("unit") or "").strip():
+                unit = (rr.get("unit") or "").strip()
+                break
+        positions = []
+        total = 0.0
+        any_low = False
+        for rr in lst_sorted:
+            qty = float(rr.get("qty") or 0)
+            mn = float(rr.get("min_qty") or 0)
+            low = qty <= mn
+            total += qty
+            any_low = any_low or low
+            positions.append({
+                "id": rr.get("id"),
+                "store": rr.get("store"),
+                "category": rr.get("category"),
+                "name": rr.get("name"),
+                "area": rr.get("area") or area_k,
+                "location": (rr.get("location") or "").strip() or "MAGAZZINO",
+                "unit": unit,
+                "qty": qty,
+                "min_qty": mn,
+                "low": low,
+                "missing_qty": float(rr.get("missing_qty") or 0),
+                "missing_order_date": rr.get("missing_order_date"),
+                "missing_delivery_date": rr.get("missing_delivery_date"),
+            })
+        groups.append({
+            "store": store_k,
+            "area": area_k,
+            "category": cat_k,
+            "name": name_k,
+            "unit": unit,
+            "positions": positions,
+            "total": total,
+            "any_low": any_low,
+            "disp": _compute_display_totals(total, unit),
+        })
+
+    # mantieni ordine categoria/nome
+    groups.sort(key=lambda g: (str(g["category"]).lower(), str(g["name"]).lower()))
 
     return render(
         "inventario.html",
         user=user,
         area=area,
         areas=AREAS,
-        items=items,
+        groups=groups,
         cats=cats,
         locations=locations,
         q=q,
@@ -824,20 +1356,29 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
         admin=admin,
         stores=STORES,
         active_store=active_store,
-        can_edit=(active_store != "ALL"),
+        # can_edit: permette Set / +/- anche se l'admin sta guardando "ALL" (passiamo lo store del prodotto nel form)
+        can_edit=True,
+        # can_bulk_edit: azioni che richiedono un inventario singolo (add/import/export)
+        can_bulk_edit=(active_store != "ALL"),
         brand=active_store if active_store != "ALL" else "spinza",
     )
 
 
 @app.post("/items/{item_id}/delta")
-def item_delta(request: Request, item_id: int, delta: float = Form(...)):
+def item_delta(request: Request, item_id: int, delta: float = Form(...), store: str = Form(""), next_url: str = Form("/inventario")):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
     admin = is_admin(request)
     active_store = (request.session.get("active_store") if admin else user.get("store"))
-    if not active_store or active_store == "ALL":
+    effective_store = active_store
+    # Se l'admin sta guardando "ALL", lo store arriva dal form del prodotto.
+    if admin and active_store == "ALL":
+        store = (store or "").strip()
+        if store in STORES:
+            effective_store = store
+    if not effective_store or effective_store == "ALL":
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
     ph = _ph()
@@ -854,7 +1395,7 @@ def item_delta(request: Request, item_id: int, delta: float = Form(...)):
         cur = conn.cursor()
         row = cur.execute(
             f"SELECT * FROM products WHERE id={ph} AND store={ph}",
-            (int(item_id), active_store),
+            (int(item_id), effective_store),
         ).fetchone()
         if not row:
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
@@ -869,22 +1410,25 @@ def item_delta(request: Request, item_id: int, delta: float = Form(...)):
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (active_store, user["username"], "DELTA", row["category"], row["name"], float(delta)),
+            (effective_store, user["username"], "DELTA", row["category"], row["name"], float(delta)),
         )
 
-    # dopo login deve scegliere la sezione (bibite / prodotti)
-    request.session.pop("selected_area", None)
-    return RedirectResponse("/select-area", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
 @app.post("/items/{item_id}/set")
-def item_set(request: Request, item_id: int, qty: float = Form(...)):
+def item_set(request: Request, item_id: int, qty: float = Form(...), store: str = Form(""), next_url: str = Form("/inventario")):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
     admin = is_admin(request)
     active_store = (request.session.get("active_store") if admin else user.get("store"))
-    if not active_store or active_store == "ALL":
+    effective_store = active_store
+    if admin and active_store == "ALL":
+        store = (store or "").strip()
+        if store in STORES:
+            effective_store = store
+    if not effective_store or effective_store == "ALL":
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
     ph = _ph()
@@ -894,7 +1438,7 @@ def item_set(request: Request, item_id: int, qty: float = Form(...)):
         cur = conn.cursor()
         row = cur.execute(
             f"SELECT * FROM products WHERE id={ph} AND store={ph}",
-            (int(item_id), active_store),
+            (int(item_id), effective_store),
         ).fetchone()
         if not row:
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
@@ -905,18 +1449,127 @@ def item_set(request: Request, item_id: int, qty: float = Form(...)):
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (active_store, user["username"], "SET", row["category"], row["name"], float(qty)),
+            (effective_store, user["username"], "SET", row["category"], row["name"], float(qty)),
         )
 
-    return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/items/transfer")
+def item_transfer(
+    request: Request,
+    category: str = Form(...),
+    name: str = Form(...),
+    from_location: str = Form(...),
+    to_location: str = Form(...),
+    qty: float = Form(...),
+    store: str = Form(""),
+    next_url: str = Form("/inventario"),
+):
+    """Sposta quantità tra due posizioni dello stesso prodotto.
+
+    Implementato in modo robusto senza duplicare 'prodotti' diversi:
+    stessa (store, area, category, name), location diversa.
+    """
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    admin = is_admin(request)
+    active_store = (request.session.get("active_store") if admin else user.get("store"))
+    effective_store = active_store
+    if admin and active_store == "ALL":
+        store = (store or "").strip()
+        if store in STORES:
+            effective_store = store
+    if not effective_store or effective_store == "ALL":
+        return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+
+    area = get_selected_area(request) or "prodotti"
+    if area not in AREAS:
+        area = "prodotti"
+
+    category = (category or "").strip()
+    name = (name or "").strip()
+    from_location = (from_location or "").strip() or "MAGAZZINO"
+    to_location = (to_location or "").strip() or "MAGAZZINO"
+
+    try:
+        qty = float(qty)
+    except Exception:
+        qty = 0.0
+    if qty <= 0 or from_location == to_location:
+        return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
+
+    ph = _ph()
+    now = _now()
+
+    with connect() as conn:
+        cur = conn.cursor()
+
+        src = cur.execute(
+            f"SELECT * FROM products WHERE store={ph} AND area={ph} AND category={ph} AND name={ph} AND location={ph}",
+            (effective_store, area, category, name, from_location),
+        ).fetchone()
+        if not src:
+            return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
+
+        src_qty = float(src.get("qty") or 0)
+        move_qty = min(src_qty, qty)
+        if move_qty <= 0:
+            return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
+
+        dst = cur.execute(
+            f"SELECT * FROM products WHERE store={ph} AND area={ph} AND category={ph} AND name={ph} AND location={ph}",
+            (effective_store, area, category, name, to_location),
+        ).fetchone()
+
+        # decrementa sorgente
+        cur.execute(
+            f"UPDATE products SET qty={ph}, updated_at={now} WHERE id={ph}",
+            (float(src_qty - move_qty), int(src.get("id"))),
+        )
+
+        if dst:
+            dst_qty = float(dst.get("qty") or 0)
+            cur.execute(
+                f"UPDATE products SET qty={ph}, updated_at={now} WHERE id={ph}",
+                (float(dst_qty + move_qty), int(dst.get("id"))),
+            )
+        else:
+            # crea la riga per la nuova posizione (minimo a 0 di default; modificabile dall'edit)
+            unit = (src.get("unit") or "").strip()
+            cur.execute(
+                f"""INSERT INTO products(store, category, name, area, location, unit, qty, min_qty, updated_at)
+                    VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
+                    ON CONFLICT(store, area, category, name, location)
+                    DO UPDATE SET qty=excluded.qty, updated_at={now}""",
+                (effective_store, category, name, area, to_location, unit, float(move_qty), 0.0),
+            )
+
+        # log (chiaro e auditabile)
+        _log(
+            cur,
+            store=effective_store,
+            username=user["username"],
+            action="MOVE",
+            category=category,
+            name=f"{name} | {from_location} → {to_location}",
+            delta=float(move_qty),
+        )
+
+    return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
 @app.post("/items/add")
 def item_add(
     request: Request,
     category: str = Form(...),
     name: str = Form(...),
+    location: str = Form("MAGAZZINO"),
+    unit: str = Form(""),
     qty: float = Form(0),
     min_qty: float = Form(0),
+    next_url: str = Form("/inventario"),
 ):
     user = require_login(request)
     if not user:
@@ -933,29 +1586,42 @@ def item_add(
     ph = _ph()
     now = _now()
 
+    # area corrente (bibite / prodotti) => salva correttamente e evita 500
+    area = get_selected_area(request) or "prodotti"
+    if area not in AREAS:
+        area = "prodotti"
+
+    location = (location or "MAGAZZINO").strip()
+
+    unit = (unit or "").strip()
+
     with connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            f"""INSERT INTO products(store, category, name, area, qty, min_qty, updated_at)
-                VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now})
-                ON CONFLICT(store, category, name)
-                DO UPDATE SET area=excluded.area, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
-            (active_store, category, name, area, float(qty), float(min_qty)),
+            f"""INSERT INTO products(store, category, name, area, location, unit, qty, min_qty, updated_at)
+                VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
+                ON CONFLICT(store, area, category, name, location)
+                DO UPDATE SET unit=excluded.unit, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
+            (active_store, category, name, area, location, unit, float(qty), float(min_qty)),
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
             (active_store, user["username"], "ADD", category, name, float(qty)),
         )
 
-    return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
 @app.post("/items/{item_id}/edit")
 def item_edit(
     request: Request,
     item_id: int,
+    store: str = Form(""),
     category: str = Form(...),
     name: str = Form(...),
+    location: str = Form("MAGAZZINO"),
+    unit: str = Form(""),
     min_qty: float = Form(0),
+    next_url: str = Form("/inventario"),
 ):
     user = require_login(request)
     if not user:
@@ -963,11 +1629,19 @@ def item_edit(
 
     admin = is_admin(request)
     active_store = (request.session.get("active_store") if admin else user.get("store"))
-    if not active_store or active_store == "ALL":
+    effective_store = active_store
+    if admin and active_store == "ALL":
+        store = (store or "").strip()
+        if store in STORES:
+            effective_store = store
+    if not effective_store or effective_store == "ALL":
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
     category = category.strip()
     name = name.strip()
+    location = (location or "MAGAZZINO").strip()
+
+    unit = (unit or "").strip()
 
     ph = _ph()
     now = _now()
@@ -976,31 +1650,36 @@ def item_edit(
         cur = conn.cursor()
         row = cur.execute(
             f"SELECT * FROM products WHERE id={ph} AND store={ph}",
-            (int(item_id), active_store),
+            (int(item_id), effective_store),
         ).fetchone()
         if not row:
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
         cur.execute(
-            f"UPDATE products SET category={ph}, name={ph}, min_qty={ph}, updated_at={now} WHERE id={ph}",
-            (category, name, float(min_qty), int(item_id)),
+            f"UPDATE products SET category={ph}, name={ph}, location={ph}, unit={ph}, min_qty={ph}, updated_at={now} WHERE id={ph}",
+            (category, name, location, unit, float(min_qty), int(item_id)),
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (active_store, user["username"], "EDIT", category, name, float(min_qty)),
+            (effective_store, user["username"], "EDIT", category, name, float(min_qty)),
         )
 
-    return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
 @app.post("/items/{item_id}/delete")
-def item_delete(request: Request, item_id: int):
+def item_delete(request: Request, item_id: int, store: str = Form(""), next_url: str = Form("/inventario")):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
     admin = is_admin(request)
     active_store = (request.session.get("active_store") if admin else user.get("store"))
-    if not active_store or active_store == "ALL":
+    effective_store = active_store
+    if admin and active_store == "ALL":
+        store = (store or "").strip()
+        if store in STORES:
+            effective_store = store
+    if not effective_store or effective_store == "ALL":
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
     ph = _ph()
@@ -1010,16 +1689,16 @@ def item_delete(request: Request, item_id: int):
         cur = conn.cursor()
         row = cur.execute(
             f"SELECT * FROM products WHERE id={ph} AND store={ph}",
-            (int(item_id), active_store),
+            (int(item_id), effective_store),
         ).fetchone()
         if row:
             cur.execute(f"DELETE FROM products WHERE id={ph}", (int(item_id),))
             cur.execute(
                 f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-                (active_store, user["username"], "DELETE", row["category"], row["name"], 0.0),
+                (effective_store, user["username"], "DELETE", row["category"], row["name"], 0.0),
             )
 
-    return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
 
 # =========================
@@ -1040,15 +1719,15 @@ def export_csv(request: Request):
     with connect() as conn:
         cur = conn.cursor()
         rows = cur.execute(
-            f"SELECT category, name, qty, min_qty FROM products WHERE store={ph} ORDER BY category, name",
+            f"SELECT area, category, name, location, unit, qty, min_qty FROM products WHERE store={ph} ORDER BY area, category, name, location",
             (active_store,),
         ).fetchall()
 
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["category", "name", "qty", "min_qty"])
+    w.writerow(["area", "category", "name", "location", "unit", "qty", "min_qty"])
     for r in rows:
-        w.writerow([r["category"], r["name"], r["qty"], r["min_qty"]])
+        w.writerow([r["area"], r["category"], r["name"], r["location"], r.get("unit") or "", r["qty"], r["min_qty"]])
 
     return PlainTextResponse(
         buf.getvalue(),
@@ -1095,11 +1774,11 @@ async def import_csv(request: Request, file: UploadFile = File(...)):
                 min_qty = 0.0
 
             cur.execute(
-                f"""INSERT INTO products(store, category, name, area, qty, min_qty, updated_at)
-                    VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now})
-                    ON CONFLICT(store, category, name)
-                    DO UPDATE SET area=excluded.area, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
-                (active_store, cat, name, area, qty, min_qty),
+                f"""INSERT INTO products(store, category, name, area, location, qty, min_qty, updated_at)
+                    VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
+                    ON CONFLICT(store, area, category, name, location)
+                    DO UPDATE SET qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
+                (active_store, cat, name, area, "MAGAZZINO", qty, min_qty),
             )
             count += 1
 
@@ -1120,28 +1799,12 @@ def _normalize_active_store_for_admin(request: Request) -> str:
     return active_store
 
 
-def _logs_sql_day_range(using_pg: bool, field: str = "ts"):
-    """Ritorna una condizione SQL robusta per filtrare un singolo giorno.
-
-    Evita DATE(ts)=... che in alcuni DB/driver può causare errori.
-
-    Ritorna una tupla: (sql_condition, params_builder)
-    dove params_builder(day_str) -> [start, end)
-    """
-
-    ph = _ph()
-
-    def _build(day_str: str):
-        # day_str: 'YYYY-MM-DD'
-        d0 = datetime.strptime(day_str, "%Y-%m-%d")
-        d1 = d0 + timedelta(days=1)
-        if using_pg:
-            # timestamp compare
-            return [d0, d1]
-        # sqlite: ts è testo 'YYYY-MM-DD HH:MM:SS' => confronto lessicografico ok
-        return [d0.strftime("%Y-%m-%d 00:00:00"), d1.strftime("%Y-%m-%d 00:00:00")]
-
-    return f"({field} >= {ph} AND {field} < {ph})", _build
+def _logs_sql_date_filter(using_pg: bool, field: str = "ts"):
+    """Ritorna la condizione SQL e la funzione di conversione per filtrare per giorno (YYYY-MM-DD)."""
+    if using_pg:
+        return f"DATE({field}) = {_ph()}"
+    # sqlite: ts è una stringa 'YYYY-MM-DD HH:MM:SS'
+    return f"substr({field}, 1, 10) = {_ph()}"
 
 
 def _fetch_logs(
@@ -1161,8 +1824,8 @@ def _fetch_logs(
     using_pg = using_postgres()
 
     # condizioni sezione
-    order_cond = "(UPPER(action) LIKE 'ORDER_%' OR UPPER(category) IN ('ORDINI','ORDER'))"
-    doc_cond = "(UPPER(action) LIKE 'DOC_%' OR UPPER(category) IN ('CHIUSURE','FATTURE','SPESE'))"
+    order_cond = "(UPPER(action) LIKE 'ORDER_%%' OR UPPER(category) IN ('ORDINI','ORDER'))"
+    doc_cond = "(UPPER(action) LIKE 'DOC_%%' OR UPPER(category) IN ('CHIUSURE','FATTURE','SPESE'))"
     if section == "orders":
         section_cond = order_cond
     elif section == "docs":
@@ -1189,9 +1852,8 @@ def _fetch_logs(
 
     q_day = (q_day or "").strip()
     if q_day:
-        day_sql, day_params_builder = _logs_sql_day_range(using_pg, "ts")
-        where.append(day_sql)
-        params.extend(day_params_builder(q_day))
+        where.append(_logs_sql_date_filter(using_pg, "ts"))
+        params.append(q_day)
 
     where_sql = " AND ".join(where) if where else "1=1"
 
@@ -1644,7 +2306,7 @@ def secondary_expenses_delete(request: Request, doc_id: int):
 # LOGISTICA: ORDINI
 # =========================
 @app.post("/ordini/add")
-def orders_add_from_inventory(request: Request, item_id: int = Form(...)):
+def orders_add_from_inventory(request: Request, item_id: int = Form(...), next_url: str = Form("/inventario")):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -1692,8 +2354,71 @@ def orders_add_from_inventory(request: Request, item_id: int = Form(...)):
                 delta=float(suggested),
             )
 
-    # torna all'inventario mantenendo query string se c'è
-    return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+    # torna dove eri (inventario con filtri)
+    return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/ordini/add_with_qty")
+def orders_add_from_inventory_with_qty(
+    request: Request,
+    item_id: int = Form(...),
+    qty_to_order: float = Form(...),
+    next_url: str = Form("/inventario"),
+):
+    """Aggiunge (o aggiorna) la riga in coda ordini con una quantità scelta dall'utente."""
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    if qty_to_order is None:
+        return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
+
+    try:
+        qty_to_order = float(qty_to_order)
+    except Exception:
+        qty_to_order = 1.0
+    if qty_to_order <= 0:
+        qty_to_order = 1.0
+
+    ph = _ph()
+    now = _now()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(
+            f"SELECT id, category, name, qty, min_qty FROM products WHERE id={ph} AND store={ph}",
+            (int(item_id), store),
+        ).fetchone()
+        if not row:
+            return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
+
+        existing = cur.execute(
+            f"SELECT id FROM order_queue WHERE store={ph} AND product_id={ph}",
+            (store, int(item_id)),
+        ).fetchone()
+
+        if existing:
+            cur.execute(
+                f"UPDATE order_queue SET qty_to_order={ph}, added_by={ph}, ts={now} WHERE id={ph}",
+                (float(qty_to_order), user["username"], int(existing["id"])),
+            )
+        else:
+            cur.execute(
+                f"INSERT INTO order_queue(store, product_id, category, name, qty_to_order, added_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now})",
+                (store, int(item_id), row["category"], row["name"], float(qty_to_order), user["username"]),
+            )
+
+        _log(
+            cur,
+            store=store,
+            username=user["username"],
+            action="ORDER_IN_ARRIVO",
+            category=row["category"],
+            name=row["name"],
+            delta=float(qty_to_order),
+        )
+
+    return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/ordini", response_class=HTMLResponse)
@@ -1709,17 +2434,93 @@ def orders_queue_page(request: Request):
     with connect() as conn:
         cur = conn.cursor()
         if store == "ALL":
+            # join per mostrare "rimasti" in inventario
             rows = cur.execute(
-                "SELECT id, store, category, name, qty_to_order, added_by, ts FROM order_queue ORDER BY store, category, name",
+                """
+                SELECT q.id, q.store, q.category, q.name, q.qty_to_order, q.added_by, q.ts,
+                       p.qty AS qty_left, p.unit AS unit
+                FROM order_queue q
+                LEFT JOIN products p ON p.id = q.product_id
+                ORDER BY q.store, q.category, q.name
+                """,
             ).fetchall()
         else:
             rows = cur.execute(
-                f"SELECT id, store, category, name, qty_to_order, added_by, ts FROM order_queue WHERE store={ph} ORDER BY category, name",
+                f"""
+                SELECT q.id, q.store, q.category, q.name, q.qty_to_order, q.added_by, q.ts,
+                       p.qty AS qty_left, p.unit AS unit
+                FROM order_queue q
+                LEFT JOIN products p ON p.id = q.product_id
+                WHERE q.store={ph}
+                ORDER BY q.category, q.name
+                """,
                 (store,),
             ).fetchall()
 
     active_store = request.session.get("active_store") if is_admin(request) else None
     return render("orders.html", user=user, rows=rows, stores=STORES, brand=brand, active_store=active_store)
+
+
+@app.post("/ordini/queue-update")
+def orders_queue_update(request: Request, queue_id: int = Form(...), qty_to_order: float = Form(...)):
+    """Aggiorna quantità da ordinare (decisa dall'utente)."""
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    ph = _ph()
+    now = _now()
+
+    try:
+        qty_to_order = float(qty_to_order)
+    except Exception:
+        qty_to_order = 1.0
+    if qty_to_order <= 0:
+        qty_to_order = 1.0
+
+    with connect() as conn:
+        cur = conn.cursor()
+        if store == "ALL" and is_admin(request):
+            info = cur.execute(
+                f"SELECT store, category, name FROM order_queue WHERE id={ph}",
+                (int(queue_id),),
+            ).fetchone()
+            if info:
+                cur.execute(
+                    f"UPDATE order_queue SET qty_to_order={ph}, ts={now}, added_by={ph} WHERE id={ph}",
+                    (float(qty_to_order), user["username"], int(queue_id)),
+                )
+                _log(
+                    cur,
+                    store=info["store"],
+                    username=user["username"],
+                    action="ORDER_QTY_UPDATE",
+                    category=info["category"],
+                    name=info["name"],
+                    delta=float(qty_to_order),
+                )
+        else:
+            info = cur.execute(
+                f"SELECT category, name FROM order_queue WHERE id={ph} AND store={ph}",
+                (int(queue_id), store),
+            ).fetchone()
+            if info:
+                cur.execute(
+                    f"UPDATE order_queue SET qty_to_order={ph}, ts={now}, added_by={ph} WHERE id={ph} AND store={ph}",
+                    (float(qty_to_order), user["username"], int(queue_id), store),
+                )
+                _log(
+                    cur,
+                    store=store,
+                    username=user["username"],
+                    action="ORDER_QTY_UPDATE",
+                    category=info["category"],
+                    name=info["name"],
+                    delta=float(qty_to_order),
+                )
+
+    return RedirectResponse("/ordini", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.post("/ordini/queue-delete")
@@ -1865,21 +2666,36 @@ def orders_in_progress_page(request: Request):
         cur = conn.cursor()
         if store == "ALL":
             os_ = cur.execute(
-                "SELECT id, store, supplier, status, created_by, ts FROM orders WHERE status='in_corso' ORDER BY ts DESC, id DESC",
+                "SELECT id, store, supplier, status, created_by, ts, kind, from_store, to_store, transfer_id FROM orders WHERE status='in_corso' ORDER BY ts DESC, id DESC",
             ).fetchall()
         else:
+            # Mostra anche gli scambi in uscita (creati da questo negozio) così il mittente li vede e può modificarli.
             os_ = cur.execute(
-                f"SELECT id, store, supplier, status, created_by, ts FROM orders WHERE status='in_corso' AND store={ph} ORDER BY ts DESC, id DESC",
-                (store,),
+                f"""
+                SELECT id, store, supplier, status, created_by, ts, kind, from_store, to_store, transfer_id
+                FROM orders
+                WHERE status='in_corso'
+                  AND (store={ph} OR (kind='transfer' AND from_store={ph}))
+                ORDER BY ts DESC, id DESC
+                """,
+                (store, store),
             ).fetchall()
 
         orders = []
         for o in os_:
             lines = cur.execute(
-                f"SELECT category, name, qty FROM order_lines WHERE order_id={ph} ORDER BY category, name",
+                f"SELECT id, product_id, category, name, qty, area, unit FROM order_lines WHERE order_id={ph} ORDER BY category, name",
                 (int(o["id"]),),
             ).fetchall()
             od = dict(o)
+            # direzione (solo per visualizzazione)
+            try:
+                if (od.get("kind") or "ordine") == "transfer" and store != "ALL":
+                    od["direction"] = "uscita" if od.get("from_store") == store else "entrata"
+                else:
+                    od["direction"] = "entrata"
+            except Exception:
+                od["direction"] = "entrata"
             od["lines"] = lines
             orders.append(od)
 
@@ -1888,8 +2704,360 @@ def orders_in_progress_page(request: Request):
 
 
 @app.post("/ordinati/arrivato")
-def orders_mark_arrived(request: Request, order_id: int = Form(...)):
-    """Pulsante 'Arrivato': elimina definitivamente l'ordine in corso."""
+async def orders_mark_arrived(request: Request, order_id: int = Form(...)):
+    """Conferma arrivo: aggiorna inventario (+ quantità ricevute), gestisce mancanti e chiude l'ordine."""
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    ph = _ph()
+
+    delivered_date = _today_str()
+
+    with connect() as conn:
+        cur = conn.cursor()
+
+        # carico ordine + store reale
+        if store == "ALL" and is_admin(request):
+            info = cur.execute(
+                f"SELECT store, supplier, ts, kind, from_store, to_store, transfer_id FROM orders WHERE id={ph} AND status='in_corso'",
+                (int(order_id),),
+            ).fetchone()
+        else:
+            info = cur.execute(
+                f"SELECT store, supplier, ts, kind, from_store, to_store, transfer_id FROM orders WHERE id={ph} AND status='in_corso' AND store={ph}",
+                (int(order_id), store),
+            ).fetchone()
+
+        if not info:
+            return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+        real_store = info["store"]
+        supplier = info["supplier"]
+        order_ts = str(info.get("ts") or "")
+        order_date = order_ts[:10] if len(order_ts) >= 10 else delivered_date
+
+        lines = cur.execute(
+            f"SELECT id, product_id, category, name, qty, area, unit FROM order_lines WHERE order_id={ph}",
+            (int(order_id),),
+        ).fetchall()
+
+        form = await request.form()
+        missing_ids = set()
+        try:
+            missing_ids = {int(x) for x in form.getlist("missing_ids")}
+        except Exception:
+            missing_ids = set()
+
+        now = _now()
+
+        kind = str(info.get("kind") or "ordine").lower()
+        is_transfer = kind in ("transfer", "scambio")
+        src_store = info.get("from_store")
+        dst_store = info.get("to_store")
+
+        for ln in lines:
+            lid = int(ln["id"])
+            pid = ln.get("product_id")
+            base_qty = float(ln.get("qty") or 0)
+            cat = ln.get("category")
+            nm = ln.get("name")
+
+            # quantità ricevuta (default = quantità ordinata)
+            recv_key = f"received_{lid}"
+            recv_raw = form.get(recv_key)
+            try:
+                received_qty = float(recv_raw) if recv_raw is not None else base_qty
+            except Exception:
+                received_qty = base_qty
+            if received_qty < 0:
+                received_qty = 0.0
+
+            is_missing = lid in missing_ids
+            # salvo esito riga (storico)
+            try:
+                cur.execute(
+                    f"UPDATE order_lines SET received_qty={ph}, is_missing={ph} WHERE id={ph}",
+                    (float(received_qty), 1 if is_missing else 0, int(lid)),
+                )
+            except Exception:
+                # non bloccare la consegna se la migrazione non è ancora stata applicata
+                pass
+            if is_missing or received_qty == 0:
+                if is_transfer:
+                    # Scambio: NON reinserisco in "ordini da fare" e non segno mancanti sul prodotto.
+
+                    _log(
+                        cur,
+                        store=real_store,
+                        username=user["username"],
+                        action="TRANSFER_MANCANTE",
+                        category=cat,
+                        name=f"{nm} (scambio da {STORES.get(src_store, src_store)})" if src_store else f"{nm} (scambio)",
+                        delta=float(base_qty),
+                    )
+                else:
+                    # NON va in inventario: metto "mancante" + reinserisco in coda ordini
+                    if pid:
+                        cur.execute(
+                            f"UPDATE products SET missing_order_date={ph}, missing_delivery_date={ph}, missing_qty={ph}, updated_at={now} WHERE id={ph} AND store={ph}",
+                            (order_date, delivered_date, float(base_qty), int(pid), real_store),
+                        )
+
+                    # reinserisci/aggiorna in coda per riordino
+                    if pid:
+                        ex = cur.execute(
+                            f"SELECT id FROM order_queue WHERE store={ph} AND product_id={ph}",
+                            (real_store, int(pid)),
+                        ).fetchone()
+                        if ex:
+                            cur.execute(
+                                f"UPDATE order_queue SET qty_to_order={ph}, added_by={ph}, ts={now} WHERE id={ph}",
+                                (float(base_qty), user["username"], int(ex["id"])),
+                            )
+                        else:
+                            cur.execute(
+                                f"INSERT INTO order_queue(store, product_id, category, name, qty_to_order, added_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now})",
+                                (real_store, int(pid), cat, nm, float(base_qty), user["username"]),
+                            )
+
+                    _log(
+                        cur,
+                        store=real_store,
+                        username=user["username"],
+                        action="ORDER_MANCANTE",
+                        category=cat,
+                        name=f"{nm} (ordine {order_date})",
+                        delta=float(base_qty),
+                    )
+            else:
+                # Va in inventario
+                line_area = (ln.get("area") or (get_selected_area(request) or "prodotti") or "prodotti")
+                if line_area not in AREAS:
+                    line_area = "prodotti"
+                line_unit = (ln.get("unit") or "").strip()
+
+                if pid:
+                    cur.execute(
+                        f"UPDATE products SET qty=qty+{ph}, missing_order_date=NULL, missing_delivery_date=NULL, missing_qty={ph}, updated_at={now} WHERE id={ph} AND store={ph}",
+                        (float(received_qty), 0.0, int(pid), real_store),
+                    )
+                else:
+                    # Ordine senza product_id (es. scambio): cerco per nome/categoria/area e se non esiste lo creo.
+                    existing = cur.execute(
+                        f"SELECT id, unit FROM products WHERE store={ph} AND category={ph} AND name={ph} AND area={ph}",
+                        (real_store, cat, nm, line_area),
+                    ).fetchone()
+                    if existing:
+                        cur.execute(
+                            f"UPDATE products SET qty=qty+{ph}, unit=COALESCE(NULLIF(unit,''), {ph}), updated_at={now} WHERE id={ph} AND store={ph}",
+                            (float(received_qty), line_unit, int(existing["id"]), real_store),
+                        )
+                    else:
+                        cur.execute(
+                            f"INSERT INTO products(store, category, name, area, location, unit, qty, min_qty, updated_at) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})",
+                            (real_store, cat, nm, line_area, line_unit, float(received_qty), 0.0),
+                        )
+                # --- SCAMBIO: aggiorno il mittente SOLO alla conferma del ricevente ---
+                if is_transfer and src_store and dst_store and src_store in STORES and dst_store in STORES:
+                    src_prod = cur.execute(
+                        f"SELECT id, qty FROM products WHERE store={ph} AND category={ph} AND name={ph} AND area={ph}",
+                        (src_store, cat, nm, line_area),
+                    ).fetchone()
+                    if src_prod:
+                        avail_src = float(src_prod.get("qty") or 0)
+                        new_qty = max(0.0, avail_src - float(received_qty))
+                        cur.execute(
+                            f"UPDATE products SET qty={ph}, updated_at={now} WHERE id={ph} AND store={ph}",
+                            (new_qty, int(src_prod["id"]), src_store),
+                        )
+                        _log(
+                            cur,
+                            store=src_store,
+                            username=user["username"],
+                            action="TRANSFER_OUT_CONFERMATO",
+                            category=cat,
+                            name=f"{nm} → {STORES.get(dst_store, dst_store)} (confermato)",
+                            delta=-float(received_qty),
+                        )
+                        if avail_src < float(received_qty):
+                            _log(
+                                cur,
+                                store=src_store,
+                                username=user["username"],
+                                action="TRANSFER_WARNING",
+                                category=cat,
+                                name=f"{nm}: richiesto/scaricato {received_qty} ma disponibili {avail_src}",
+                                delta=0.0,
+                            )
+                    else:
+                        _log(
+                            cur,
+                            store=src_store,
+                            username=user["username"],
+                            action="TRANSFER_WARNING",
+                            category=cat,
+                            name=f"{nm}: prodotto non trovato nel negozio sorgente (scambio confermato)",
+                            delta=0.0,
+                        )
+
+
+
+                _log(
+                    cur,
+                    store=real_store,
+                    username=user["username"],
+                    action=("TRANSFER_CARICATO_INVENTARIO" if is_transfer else "ORDER_CARICATO_INVENTARIO"),
+                    category=cat,
+                    name=nm,
+                    delta=float(received_qty),
+                )
+
+
+        # chiudo ordine (NON cancellare: serve lo storico)
+        cur.execute(
+            f"UPDATE orders SET status='chiuso', closed_at={now} WHERE id={ph}",
+            (int(order_id),),
+        )
+
+        _log(
+            cur,
+            store=real_store,
+            username=user["username"],
+            action=("TRANSFER_ARRIVATO" if is_transfer else "ORDER_ARRIVATO"),
+            category=supplier,
+            name=(f"Scambio #{int(order_id)} ricevuto ({delivered_date})" if is_transfer else f"Ordine #{int(order_id)} arrivato ({delivered_date})"),
+            delta=0.0,
+        )
+
+    return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get("/storico-ordini", response_class=HTMLResponse)
+def orders_history_page(request: Request, kind: str = ""):
+    """Storico (archivio) di ordini e scambi."""
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    brand = "ALL" if store == "ALL" else store
+    kind = (kind or "").strip().lower()
+    if kind not in ("", "ordine", "transfer"):
+        kind = ""
+
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+
+        params = []
+        where = "status != 'in_corso'"
+
+        if store == "ALL":
+            pass
+        else:
+            # includi anche scambi in uscita
+            where += f" AND (store={ph} OR (kind='transfer' AND from_store={ph}))"
+            params.extend([store, store])
+
+        if kind:
+            where += f" AND kind={ph}"
+            params.append(kind)
+
+        rows = cur.execute(
+            f"""
+            SELECT id, store, supplier, status, created_by, ts, kind, from_store, to_store, transfer_id, closed_at
+            FROM orders
+            WHERE {where}
+            ORDER BY COALESCE(closed_at, ts) DESC, id DESC
+            """,
+            tuple(params),
+        ).fetchall()
+
+        orders = []
+        for o in rows:
+            lines = cur.execute(
+                f"SELECT id, category, name, qty, area, unit, received_qty, is_missing FROM order_lines WHERE order_id={ph} ORDER BY category, name",
+                (int(o["id"]),),
+            ).fetchall()
+            od = dict(o)
+            # direzione per la vista corrente
+            if store != "ALL" and (od.get("kind") or "ordine") == "transfer":
+                od["direction"] = "uscita" if od.get("from_store") == store else "entrata"
+            else:
+                od["direction"] = "entrata"
+            od["lines"] = lines
+            orders.append(od)
+
+    active_store = request.session.get("active_store") if is_admin(request) else None
+    return render(
+        "order_history.html",
+        user=user,
+        orders=orders,
+        kind=kind,
+        stores=STORES,
+        areas=AREAS,
+        brand=brand,
+        active_store=active_store,
+    )
+
+
+# =========================
+# SCAMBI TRA NEGOZI
+# =========================
+@app.get("/scambi", response_class=HTMLResponse)
+def transfers_page(request: Request, from_store: str = "", to_store: str = ""):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    area = get_selected_area(request) or "prodotti"
+    if area not in AREAS:
+        area = "prodotti"
+
+    # default: sorgente = negozio utente (o active_store per admin), destinazione = altro negozio
+    admin = is_admin(request)
+    default_from = (request.session.get("active_store") if admin else user.get("store")) or "spinza"
+    if default_from == "ALL":
+        default_from = "spinza"
+
+    from_store = (from_store or default_from).strip() or default_from
+    if from_store not in STORES:
+        from_store = default_from
+
+    if not to_store:
+        # scegli il primo negozio diverso
+        to_store = next((k for k in STORES.keys() if k != from_store), from_store)
+    to_store = to_store.strip()
+    if to_store not in STORES:
+        to_store = next((k for k in STORES.keys() if k != from_store), from_store)
+
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        products = cur.execute(
+            f"SELECT id, category, name, qty, unit FROM products WHERE store={ph} AND area={ph} ORDER BY category, name",
+            (from_store, area),
+        ).fetchall()
+
+    return render(
+        "transfers.html",
+        user=user,
+        stores=STORES,
+        from_store=from_store,
+        to_store=to_store,
+        products=products,
+        area=area,
+        areas=AREAS,
+        brand=(from_store if from_store else "spinza"),
+        active_store=request.session.get("active_store") if admin else None,
+    )
+
+
+@app.get("/scambi/modifica/{order_id}", response_class=HTMLResponse)
+def transfers_edit_page(request: Request, order_id: int):
+    """Permette al mittente di modificare uno scambio in uscita (finché non viene confermato dal destinatario)."""
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -1899,50 +3067,282 @@ def orders_mark_arrived(request: Request, order_id: int = Form(...)):
 
     with connect() as conn:
         cur = conn.cursor()
+        o = cur.execute(
+            f"SELECT id, store, kind, status, from_store, to_store, transfer_id FROM orders WHERE id={ph}",
+            (int(order_id),),
+        ).fetchone()
+        if not o:
+            return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
 
-        if store == "ALL" and is_admin(request):
-            info = cur.execute(
-                f"SELECT store, supplier FROM orders WHERE id={ph} AND status='in_corso'",
-                (int(order_id),),
+        kind = (o.get("kind") or "ordine")
+        if kind != "transfer" or o.get("status") != "in_corso":
+            return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+        from_store = o.get("from_store")
+        to_store = o.get("to_store")
+        transfer_id = o.get("transfer_id")
+
+        # Permessi: mittente o admin
+        if not is_admin(request) and store != from_store:
+            return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+        # Carico tutti i prodotti del negozio sorgente (tutte le aree) per poter aggiungere righe liberamente
+        products = cur.execute(
+            f"SELECT id, category, name, area, qty, unit FROM products WHERE store={ph} ORDER BY area, category, name",
+            (from_store,),
+        ).fetchall()
+
+        selected = {}
+        if transfer_id:
+            tls = cur.execute(
+                f"SELECT category, name, area, qty FROM transfer_lines WHERE transfer_id={ph}",
+                (int(transfer_id),),
+            ).fetchall()
+            for tl in tls:
+                k = f"{tl['category']}||{tl['name']}||{(tl.get('area') or 'prodotti')}"
+                selected[k] = float(tl.get("qty") or 0)
+
+    return render(
+        "transfers_edit.html",
+        user=user,
+        order_id=int(order_id),
+        from_store=from_store,
+        to_store=to_store,
+        products=products,
+        selected=selected,
+        stores=STORES,
+        areas=AREAS,
+        brand=from_store,
+        active_store=request.session.get("active_store") if is_admin(request) else None,
+    )
+
+
+@app.post("/scambi/modifica/submit")
+async def transfers_edit_submit(request: Request, order_id: int = Form(...)):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    ph = _ph()
+    now = _now()
+
+    form = await request.form()
+
+    with connect() as conn:
+        cur = conn.cursor()
+        o = cur.execute(
+            f"SELECT id, store, kind, status, from_store, to_store, transfer_id FROM orders WHERE id={ph}",
+            (int(order_id),),
+        ).fetchone()
+        if not o:
+            return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+        if (o.get("kind") or "ordine") != "transfer" or o.get("status") != "in_corso":
+            return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+        from_store = o.get("from_store")
+        to_store = o.get("to_store")
+        transfer_id = o.get("transfer_id")
+
+        if not is_admin(request) and store != from_store:
+            return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+        # raccolgo righe selezionate
+        move_requests = []
+        for key in form.keys():
+            if not key.startswith("qty_"):
+                continue
+            try:
+                pid = int(key.split("_", 1)[1])
+            except Exception:
+                continue
+            raw = form.get(key)
+            try:
+                q = float(raw)
+            except Exception:
+                q = 0.0
+            if q and q > 0:
+                move_requests.append((pid, q))
+
+        # reset righe (storico trasferimento + righe ordine)
+        if transfer_id:
+            cur.execute(f"DELETE FROM transfer_lines WHERE transfer_id={ph}", (int(transfer_id),))
+        cur.execute(f"DELETE FROM order_lines WHERE order_id={ph}", (int(order_id),))
+
+        for pid, q in move_requests:
+            src = cur.execute(
+                f"SELECT id, category, name, qty, unit, area FROM products WHERE id={ph} AND store={ph}",
+                (int(pid), from_store),
             ).fetchone()
-            if not info:
-                return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+            if not src:
+                continue
 
-            cur.execute(f"DELETE FROM order_lines WHERE order_id={ph}", (int(order_id),))
-            cur.execute(f"DELETE FROM orders WHERE id={ph}", (int(order_id),))
+            available = float(src.get("qty") or 0)
+            qty_move = min(float(q), available)
+            if qty_move <= 0:
+                continue
 
-            _log(
-                cur,
-                store=info["store"],
-                username=user["username"],
-                action="ORDER_ARRIVATO",
-                category=info["supplier"],
-                name=f"Ordine #{int(order_id)} arrivato",
-                delta=0.0,
+            # righe trasferimento (storico)
+            if transfer_id:
+                cur.execute(
+                    f"INSERT INTO transfer_lines(transfer_id, from_store, to_store, category, name, area, qty, unit) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                    (int(transfer_id), from_store, to_store, src["category"], src["name"], (src.get("area") or "prodotti"), float(qty_move), (src.get("unit") or "")),
+                )
+
+            # righe ordine (per negozio ricevente)
+            cur.execute(
+                f"INSERT INTO order_lines(order_id, product_id, category, name, qty, area, unit) VALUES({ph},NULL,{ph},{ph},{ph},{ph},{ph})",
+                (int(order_id), src["category"], src["name"], float(qty_move), (src.get("area") or "prodotti"), (src.get("unit") or "")),
             )
-        else:
-            info = cur.execute(
-                f"SELECT supplier FROM orders WHERE id={ph} AND status='in_corso' AND store={ph}",
-                (int(order_id), store),
-            ).fetchone()
-            if not info:
-                return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
 
-            cur.execute(f"DELETE FROM order_lines WHERE order_id={ph}", (int(order_id),))
-            cur.execute(f"DELETE FROM orders WHERE id={ph} AND store={ph}", (int(order_id), store))
+        # aggiorno timestamp ordine (così sale in cima)
+        try:
+            cur.execute(f"UPDATE orders SET ts={now} WHERE id={ph}", (int(order_id),))
+        except Exception:
+            pass
 
-            _log(
-                cur,
-                store=store,
-                username=user["username"],
-                action="ORDER_ARRIVATO",
-                category=info["supplier"],
-                name=f"Ordine #{int(order_id)} arrivato",
-                delta=0.0,
-            )
+        _log(
+            cur,
+            store=from_store,
+            username=user["username"],
+            action="TRANSFER_MODIFICATO",
+            category="SCAMBI",
+            name=f"Scambio #{int(order_id)} modificato",
+            delta=float(len(move_requests)),
+        )
+        _log(
+            cur,
+            store=to_store,
+            username=user["username"],
+            action="TRANSFER_MODIFICATO",
+            category="SCAMBI",
+            name=f"Scambio #{int(order_id)} aggiornato dal mittente",
+            delta=float(len(move_requests)),
+        )
 
     return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
 
+
+@app.post("/scambi/submit")
+async def transfers_submit(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    from_store = (form.get("from_store") or "").strip()
+    to_store = (form.get("to_store") or "").strip()
+
+    if from_store not in STORES or to_store not in STORES or from_store == to_store:
+        return RedirectResponse("/scambi", status_code=HTTP_303_SEE_OTHER)
+
+    area = get_selected_area(request) or "prodotti"
+    if area not in AREAS:
+        area = "prodotti"
+
+    ph = _ph()
+    now = _now()
+
+    with connect() as conn:
+        cur = conn.cursor()
+        # raccolgo righe richieste
+        move_requests = []
+        for key in form.keys():
+            if not key.startswith("qty_"):
+                continue
+            try:
+                pid = int(key.split("_", 1)[1])
+            except Exception:
+                continue
+            raw = form.get(key)
+            try:
+                q = float(raw)
+            except Exception:
+                q = 0.0
+            if q > 0:
+                move_requests.append((pid, q))
+
+        if not move_requests:
+            return RedirectResponse(f"/scambi?from_store={from_store}&to_store={to_store}", status_code=HTTP_303_SEE_OTHER)
+
+        # crea testata trasferimento (storico)
+        cur.execute(
+            f"INSERT INTO transfers(from_store, to_store, created_by, ts) VALUES({ph},{ph},{ph},{now}) RETURNING id" if using_postgres() else
+            f"INSERT INTO transfers(from_store, to_store, created_by, ts) VALUES({ph},{ph},{ph},{now})",
+            (from_store, to_store, user["username"]),
+        )
+        if using_postgres():
+            transfer_id = int(cur.fetchone()["id"])
+        else:
+            transfer_id = int(cur.lastrowid)
+
+        # crea "ordine" di tipo SCAMBIO per il negozio ricevente (apparirà in Ordini in corso)
+        supplier_label = f"SCAMBIO da {STORES.get(from_store, from_store)}"
+        cur.execute(
+            f"INSERT INTO orders(store, supplier, status, created_by, ts, kind, from_store, to_store, transfer_id) VALUES({ph},{ph},{ph},{ph},{now},{ph},{ph},{ph},{ph}) RETURNING id" if using_postgres() else
+            f"INSERT INTO orders(store, supplier, status, created_by, ts, kind, from_store, to_store, transfer_id) VALUES({ph},{ph},{ph},{ph},{now},{ph},{ph},{ph},{ph})",
+            (to_store, supplier_label, "in_corso", user["username"], "transfer", from_store, to_store, int(transfer_id)),
+        )
+        if using_postgres():
+            order_id = int(cur.fetchone()["id"])
+        else:
+            order_id = int(cur.lastrowid)
+
+        _log(
+            cur,
+            store=to_store,
+            username=user["username"],
+            action="TRANSFER_CREATO",
+            category=supplier_label,
+            name=f"Scambio #{order_id} in attesa",
+            delta=0.0,
+        )
+
+        for pid, q in move_requests:
+            src = cur.execute(
+                f"SELECT id, category, name, qty, min_qty, unit, area FROM products WHERE id={ph} AND store={ph}",
+                (pid, from_store),
+            ).fetchone()
+            if not src:
+                continue
+
+            # clamp: non andare sotto zero
+            available = float(src.get("qty") or 0)
+            qty_move = min(float(q), available)
+            if qty_move <= 0:
+                continue
+            # righe trasferimento (storico)
+            cur.execute(
+                f"INSERT INTO transfer_lines(transfer_id, from_store, to_store, category, name, area, qty, unit) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (transfer_id, from_store, to_store, src["category"], src["name"], src.get("area") or area, float(qty_move), (src.get("unit") or "")),
+            )
+
+            # righe "ordine" per ricevente
+            cur.execute(
+                f"INSERT INTO order_lines(order_id, product_id, category, name, qty, area, unit) VALUES({ph},NULL,{ph},{ph},{ph},{ph},{ph})",
+                (int(order_id), src["category"], src["name"], float(qty_move), (src.get("area") or area), (src.get("unit") or "")),
+            )
+
+            _log(
+                cur,
+                store=from_store,
+                username=user["username"],
+                action="TRANSFER_RICHIESTO",
+                category=src["category"],
+                name=f"{src['name']} → {STORES.get(to_store, to_store)}",
+                delta=0.0,
+            )
+            _log(
+                cur,
+                store=to_store,
+                username=user["username"],
+                action="TRANSFER_IN_ATTESA",
+                category=src["category"],
+                name=f"{src['name']} ← {STORES.get(from_store, from_store)}",
+                delta=0.0,
+            )
+    return RedirectResponse(f"/scambi?from_store={from_store}&to_store={to_store}", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/fatture", response_class=HTMLResponse)
@@ -2379,5 +3779,4 @@ def invoices_delete(request: Request, doc_id: int):
             )
 
     return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
-
 

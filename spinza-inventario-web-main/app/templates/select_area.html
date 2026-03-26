@@ -1,21 +1,33 @@
 {% extends "base.html" %}
-{% set title = "Scegli sezione" %}
+{% set title = "Scegli area" %}
 {% block content %}
   <div class="card">
-    <h2 style="margin-top:0">Scegli sezione</h2>
-    <div class="muted">Separa rapidamente <strong>sala</strong> e <strong>cucina</strong>: scegli dove vuoi lavorare adesso.</div>
+    <h2 style="margin-top:0">Benvenuto nel gestionale</h2>
+    <div class="muted">Da qui separi in modo chiaro il <strong>gestionale</strong> dall'<strong>inventario</strong>. Così il sito non è più solo un inventario con cose aggiunte, ma una struttura professionale.</div>
 
-    <div class="row" style="margin-top:16px;gap:14px;">
-      <a href="/select-area?area=bibite" style="text-decoration:none;color:#111;flex:1;min-width:240px;">
-        <div class="card" style="margin:0;">
-          <h3 style="margin:0 0 6px 0">🥤 Bibite</h3>
-          <div class="muted">Sezione Sala / Bar</div>
+    <div class="row" style="margin-top:18px;gap:14px;align-items:stretch;">
+      <a href="/select-area?module=gestionale" style="text-decoration:none;color:#111;flex:1;min-width:260px;">
+        <div class="card" style="margin:0;height:100%;">
+          <h3 style="margin:0 0 8px 0">📊 Gestionale</h3>
+          <div class="muted">Entrate, uscite, cassa, report, KPI, numero ordini e scontrino medio.</div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+            <span class="pill">Incassi per canale</span>
+            <span class="pill">Ordini</span>
+            <span class="pill">Media scontrino</span>
+            <span class="pill">Report</span>
+          </div>
         </div>
       </a>
-      <a href="/select-area?area=prodotti" style="text-decoration:none;color:#111;flex:1;min-width:240px;">
-        <div class="card" style="margin:0;">
-          <h3 style="margin:0 0 6px 0">🍽️ Prodotti</h3>
-          <div class="muted">Sezione Cucina</div>
+      <a href="/select-area?module=inventario" style="text-decoration:none;color:#111;flex:1;min-width:260px;">
+        <div class="card" style="margin:0;height:100%;">
+          <h3 style="margin:0 0 8px 0">📦 Inventario</h3>
+          <div class="muted">Giacenze, bibite, prodotti, posizioni, ordini da fare, ordini in corso e scambi.</div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+            <span class="pill">Giacenze</span>
+            <span class="pill">Ordini</span>
+            <span class="pill">Posizioni</span>
+            <span class="pill">Scambi</span>
+          </div>
         </div>
       </a>
     </div>

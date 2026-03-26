@@ -211,7 +211,7 @@
       <div class="user-line pill" style="width:max-content;max-width:100%;">
         👤 {{ user.username }}
         {% if user.store_label %} • {{ user.store_label }}{% endif %}
-        {% if user.role == 'admin' %} • admin{% endif %}
+         • {% if user.role == 'super_admin' %}super admin{% elif user.role == 'manager' %}manager{% else %}dipendente{% endif %}
       </div>
     {% endif %}
   </div>
@@ -220,13 +220,20 @@
     <button class="menu-btn" type="button" onclick="openMobileMenu()">☰ Menu</button>
 
     <nav class="top-menu" aria-label="Menu">
-      <a href="/select-area" class="pill" style="text-decoration:none;color:#111">🧭 Sezione</a>
+      {% if user.role in ['super_admin','manager'] %}
+        <a href="/gestionale/dashboard" class="pill" style="text-decoration:none;color:#111">📊 Dashboard</a>
+        <a href="/gestionale/entrate" class="pill" style="text-decoration:none;color:#111">💶 Entrate</a>
+        <a href="/gestionale/uscite" class="pill" style="text-decoration:none;color:#111">💸 Uscite</a>
+        <a href="/gestionale/cassa" class="pill" style="text-decoration:none;color:#111">💼 Cassa</a>
+        <a href="/gestionale/report" class="pill" style="text-decoration:none;color:#111">📈 Report</a>
+      {% endif %}
+      <a href="/inventario" class="pill" style="text-decoration:none;color:#111">📦 Inventario</a>
       <a href="/chiusure" class="pill" style="text-decoration:none;color:#111">📸 Chiusure</a>
       <a href="/fatture" class="pill" style="text-decoration:none;color:#111">🧾 Fatture</a>
-      <a href="/updates" class="pill" style="text-decoration:none;color:#111">🆕 Novità</a>
       <a href="/spese-secondarie" class="pill" style="text-decoration:none;color:#111">💸 Spese secondarie</a>
+      <a href="/updates" class="pill" style="text-decoration:none;color:#111">🆕 Novità</a>
       <details class="nav-dd" id="navLogistica">
-        <summary class="pill" style="text-decoration:none;color:#111">🚚 Logistica</summary>
+        <summary class="pill" style="text-decoration:none;color:#111">🚚 Ordini</summary>
         <div class="nav-dd-panel">
           <a href="/ordini">🚚 Ordini da fare</a>
           <a href="/ordinati">📦 Ordini in corso</a>
@@ -235,10 +242,8 @@
         </div>
       </details>
       <a href="/profile" class="pill" style="text-decoration:none;color:#111">⚙️ Profilo</a>
-
-      {% if user.role == 'admin' %}
-        <a href="/admin" class="pill" style="text-decoration:none;color:#111">🛠️ Admin</a>
-
+      {% if user.role == 'super_admin' %}
+        <a href="/admin" class="pill" style="text-decoration:none;color:#111">🛠️ Utenti</a>
         <form method="post" action="/set-active-store" style="display:inline;">
           <input type="hidden" name="next_url" value="" />
           <select name="store" class="pill" style="cursor:pointer" onchange="
@@ -253,7 +258,6 @@
           </select>
         </form>
       {% endif %}
-
       <a href="/logout" class="pill" style="text-decoration:none;color:#111">Esci</a>
     </nav>
   {% endif %}
@@ -267,7 +271,13 @@
     </div>
     <div class="menu-body">
       <div class="section">Sezioni</div>
-      <a href="/select-area" onclick="closeMobileMenu()">🧭 Sezione</a>
+      <a href="/select-area" onclick="closeMobileMenu()">🏠 Home</a>
+      <a href="/select-inventory-area" onclick="closeMobileMenu()">📦 Inventario</a>
+      <a href="/gestionale/dashboard" onclick="closeMobileMenu()">📊 Gestionale</a>
+      <a href="/gestionale/entrate" onclick="closeMobileMenu()">💶 Entrate</a>
+      <a href="/gestionale/uscite" onclick="closeMobileMenu()">💸 Uscite</a>
+      <a href="/gestionale/cassa" onclick="closeMobileMenu()">💼 Cassa</a>
+      <a href="/gestionale/report" onclick="closeMobileMenu()">📈 Report</a>
       <a href="/chiusure" onclick="closeMobileMenu()">📸 Chiusure</a>
       <a href="/fatture" onclick="closeMobileMenu()">🧾 Fatture</a>
       <a href="/updates" onclick="closeMobileMenu()">🆕 Novità</a>
@@ -284,7 +294,7 @@
       <div class="section">Account</div>
       <a href="/profile" onclick="closeMobileMenu()">⚙️ Profilo</a>
 
-      {% if user.role == 'admin' %}
+      {% if user.role == 'super_admin' %}
         <a href="/admin" onclick="closeMobileMenu()">🛠️ Admin</a>
         <form method="post" action="/set-active-store" style="margin-top:10px;">
           <input type="hidden" name="next_url" value="" />
