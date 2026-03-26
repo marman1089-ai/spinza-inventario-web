@@ -43,16 +43,12 @@
     <form method="post" action="/admin/users/add">
       <div class="row">
         <input name="username" placeholder="Username" required />
-        <select name="role">
-          <option value="employee">Dipendente</option>
-          <option value="manager">Manager / capo</option>
-        </select>
         <input name="password" placeholder="Password" type="password" required />
         <input name="confirm_password" placeholder="Conferma password" type="password" required />
         <button class="btn" type="submit">Crea</button>
       </div>
     </form>
-    <p class="muted" style="margin:10px 0 0 0;font-size:13px;">Qui puoi creare dipendenti e manager. Solo il super admin può vedere e gestire gli utenti.</p>
+    <p class="muted" style="margin:10px 0 0 0;font-size:13px;">Gli account creati qui sono “staff” (dipendenti).</p>
   </div>
 
   <div class="card">
@@ -82,7 +78,7 @@
                 {% endif %}
               </td>
               <td style="text-align:right;">
-                {% if u.role != 'super_admin' %}
+                {% if u.role != 'admin' %}
                   <details style="display:inline-block;text-align:left;">
                     <summary class="pill" style="cursor:pointer;">✏️ Cambia username</summary>
                     <div style="margin-top:10px;">
@@ -112,7 +108,7 @@
                     <button class="mini" type="submit" title="Elimina utente">🗑</button>
                   </form>
                 {% else %}
-                  <span class="pill">Super admin</span>
+                  <span class="pill">Admin</span>
                 {% endif %}
               </td>
             </tr>

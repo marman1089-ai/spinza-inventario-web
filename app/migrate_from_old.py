@@ -57,7 +57,7 @@ def run_migration(data_dir: str):
         cur.execute(
             """INSERT OR IGNORE INTO users(store, username, role, legacy_sha256)
                VALUES(?,?,?,?)""",
-            (store, username, "employee", legacy),
+            (store, username, "staff", legacy),
         )
 
     admin_user = os.environ.get("ADMIN_USERNAME", "marco06")
@@ -66,8 +66,8 @@ def run_migration(data_dir: str):
     cur.execute(
         """INSERT INTO users(username, role, pw_salt, pw_hash)
            VALUES(?,?,?,?)
-           ON CONFLICT(username) DO UPDATE SET role='super_admin', pw_salt=excluded.pw_salt, pw_hash=excluded.pw_hash, legacy_sha256=NULL""",
-        (store, admin_user, "super_admin", salt, h),
+           ON CONFLICT(username) DO UPDATE SET role='admin', pw_salt=excluded.pw_salt, pw_hash=excluded.pw_hash, legacy_sha256=NULL""",
+        (store, admin_user, "admin", salt, h),
     )
 
     for row in logs:

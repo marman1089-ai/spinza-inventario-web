@@ -1,0 +1,66 @@
+
+{% extends "base.html" %}
+{% set title = "Gestionale" %}
+{% block content %}
+  <div class="card" style="margin-bottom:14px;">
+    <h2 style="margin:0 0 6px 0;">Gestionale</h2>
+    <div class="muted">Questa area è dedicata a <strong>contabilità, documenti e controllo attività</strong>. Le giacenze e la logistica sono separate dentro Inventario.</div>
+  </div>
+
+  <div class="row" style="margin-bottom:14px;">
+    <div class="card" style="flex:1;min-width:170px;"><div class="muted">Fatture archiviate</div><div style="font-size:30px;font-weight:800;">{{ stats.fatture }}</div></div>
+    <div class="card" style="flex:1;min-width:170px;"><div class="muted">Chiusure archiviate</div><div style="font-size:30px;font-weight:800;">{{ stats.chiusure }}</div></div>
+    <div class="card" style="flex:1;min-width:170px;"><div class="muted">Spese secondarie</div><div style="font-size:30px;font-weight:800;">{{ stats.spese }}</div></div>
+    <div class="card" style="flex:1;min-width:170px;"><div class="muted">Ordini aperti</div><div style="font-size:30px;font-weight:800;">{{ stats.ordini_aperti }}</div></div>
+  </div>
+
+  <div class="row" style="gap:14px;align-items:stretch;">
+    <div class="card" style="flex:1;min-width:290px;">
+      <h3 style="margin-top:0;">Documenti contabili</h3>
+      <div class="muted" style="margin-bottom:12px;">Archivio operativo già pronto per il tuo team.</div>
+      <div class="row" style="gap:10px;">
+        <a href="/fatture" class="pill" style="text-decoration:none;color:#111;">🧾 Fatture</a>
+        <a href="/chiusure" class="pill" style="text-decoration:none;color:#111;">📸 Chiusure</a>
+        <a href="/spese-secondarie" class="pill" style="text-decoration:none;color:#111;">💸 Spese secondarie</a>
+      </div>
+    </div>
+
+    <div class="card" style="flex:1;min-width:290px;">
+      <h3 style="margin-top:0;">Struttura contabilità</h3>
+      <div class="muted">La base del gestionale ora è separata dall'inventario:</div>
+      <ul style="margin:12px 0 0 18px;line-height:1.7;">
+        <li><strong>Gestionale</strong>: documenti, controllo e numeri</li>
+        <li><strong>Inventario</strong>: giacenze, ordini, magazzino e scambi</li>
+        <li><strong>Home unica</strong>: entri e scegli subito l'area corretta</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px;">
+    <h3 style="margin-top:0;">Ultimi documenti caricati</h3>
+    {% if recent_docs %}
+      <table>
+        <thead>
+          <tr>
+            <th>Tipo</th>
+            <th>Dettaglio</th>
+            <th>Data doc.</th>
+            <th>Caricato da</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in recent_docs %}
+            <tr>
+              <td>{{ r.tipo }}</td>
+              <td>{{ r.descrizione or '-' }}</td>
+              <td>{{ r.data_doc }}</td>
+              <td>{{ r.uploaded_by }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="muted">Ancora nessun documento caricato.</div>
+    {% endif %}
+  </div>
+{% endblock %}

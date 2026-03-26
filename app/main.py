@@ -182,51 +182,9 @@ def get_selected_area(request: Request) -> str | None:
 def set_selected_area(request: Request, area: str):
     request.session["selected_area"] = area
 
-def get_selected_module(request: Request) -> str | None:
-    return request.session.get("selected_module")
-
-def set_selected_module(request: Request, module: str):
-    request.session["selected_module"] = module
-
-ROLE_SUPER_ADMIN = "super_admin"
-ROLE_MANAGER = "manager"
-ROLE_EMPLOYEE = "employee"
-
-
-def _normalize_role(role: str | None) -> str:
-    r = (role or "").strip().lower()
-    if r == "admin":
-        return ROLE_SUPER_ADMIN
-    if r == "staff":
-        return ROLE_EMPLOYEE
-    if r in (ROLE_SUPER_ADMIN, ROLE_MANAGER, ROLE_EMPLOYEE):
-        return r
-    return ROLE_EMPLOYEE
-
-
 def is_admin(request: Request) -> bool:
     u = request.session.get("user")
-    return bool(u and _normalize_role(u.get("role")) == ROLE_SUPER_ADMIN)
-
-
-def can_view_management(request: Request) -> bool:
-    u = request.session.get("user")
-    return bool(u and _normalize_role(u.get("role")) in (ROLE_SUPER_ADMIN, ROLE_MANAGER))
-
-
-def can_edit_management(request: Request) -> bool:
-    u = request.session.get("user")
-    return bool(u and _normalize_role(u.get("role")) == ROLE_SUPER_ADMIN)
-
-
-def can_manage_inventory(request: Request) -> bool:
-    u = request.session.get("user")
-    return bool(u and _normalize_role(u.get("role")) in (ROLE_SUPER_ADMIN, ROLE_MANAGER, ROLE_EMPLOYEE))
-
-
-def role_label(role: str | None) -> str:
-    r = _normalize_role(role)
-    return {ROLE_SUPER_ADMIN: "super admin", ROLE_MANAGER: "manager", ROLE_EMPLOYEE: "dipendente"}.get(r, r)
+    return bool(u and u.get("role") == "admin")
 
 def _admin_store(request: Request) -> str:
     s = (request.session.get("admin_store") or "spinza")
@@ -321,19 +279,19 @@ def ensure_admin_user():
     with connect() as conn:
         cur = conn.cursor()
         row = cur.execute(
-            f"SELECT id FROM users WHERE username={ph} AND role IN ('admin','super_admin')",
+            f"SELECT id FROM users WHERE username={ph} AND role='admin'",
             (admin_user,),
         ).fetchone()
 
         if row:
             if reset:
                 cur.execute(
-                    f"UPDATE users SET pw_salt={ph}, pw_hash={ph}, legacy_sha256=NULL, store={ph}, role='super_admin' WHERE id={ph}",
+                    f"UPDATE users SET pw_salt={ph}, pw_hash={ph}, legacy_sha256=NULL, store={ph}, role='admin' WHERE id={ph}",
                     (salt, h, "spinza", row["id"]),
                 )
         else:
             cur.execute(
-                f"INSERT INTO users(store, username, role, pw_salt, pw_hash, legacy_sha256) VALUES({ph},{ph},'super_admin',{ph},{ph},NULL)",
+                f"INSERT INTO users(store, username, role, pw_salt, pw_hash, legacy_sha256) VALUES({ph},{ph},'admin',{ph},{ph},NULL)",
                 ("spinza", admin_user, salt, h),
             )
 
@@ -370,14 +328,7 @@ def _startup():
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     if require_login(request):
-        module = get_selected_module(request)
-        if module == "inventario":
-            if not get_selected_area(request):
-                return RedirectResponse("/after-login", status_code=HTTP_303_SEE_OTHER)
-            return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
-        if module == "gestionale":
-            return RedirectResponse("/gestionale/dashboard", status_code=HTTP_303_SEE_OTHER)
-        return RedirectResponse("/after-login", status_code=HTTP_303_SEE_OTHER)
+        return RedirectResponse("/workspace", status_code=HTTP_303_SEE_OTHER)
     return RedirectResponse("/select-store", status_code=HTTP_303_SEE_OTHER)
 
 @app.get("/select-store", response_class=HTMLResponse)
@@ -405,11 +356,6 @@ def login_post(request: Request, username: str = Form(...), password: str = Form
     ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
-        try:
-            cur.execute("UPDATE users SET role='super_admin' WHERE role IN ('admin','super_admin')")
-            cur.execute("UPDATE users SET role='employee' WHERE role='staff'")
-        except Exception:
-            pass
         row = cur.execute(
             f"SELECT * FROM users WHERE username={ph} AND store={ph}",
             (username, store),
@@ -436,21 +382,141 @@ def login_post(request: Request, username: str = Form(...), password: str = Form
         request.session["user"] = {
             "id": row["id"],
             "username": row["username"],
-            "role": _normalize_role(row["role"]),
+            "role": row["role"],
             "store": row["store"],
             "store_label": STORES.get(row["store"], row["store"]),
         }
 
-    # reset selezioni ad ogni login per mostrare la home del sistema
+    # reset area ad ogni login; l'inventario ora ha una home separata
     request.session.pop("selected_area", None)
-    request.session.pop("selected_module", None)
-    return RedirectResponse("/after-login", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse("/workspace", status_code=HTTP_303_SEE_OTHER)
 
 
 ## NOTE:
 ## Route /select-area definita più sotto (con AREAS e UI completa).
 ## Questa vecchia versione è stata rimossa per evitare doppia registrazione.
 
+
+
+# =========================
+# WORKSPACE HOME (GESTIONALE / INVENTARIO)
+# =========================
+def _current_store_scope(request: Request, user: dict):
+    store = (request.session.get("active_store") if is_admin(request) else user.get("store")) or "spinza"
+    if store not in STORES and store != "ALL":
+        store = "spinza"
+    return store
+
+
+def _fetch_one_int(cur, sql: str, params: tuple):
+    row = cur.execute(sql, params).fetchone()
+    if not row:
+        return 0
+    try:
+        if isinstance(row, dict):
+            return int(list(row.values())[0] or 0)
+        return int(row[0] or 0)
+    except Exception:
+        try:
+            return int(next(iter(dict(row).values())) or 0)
+        except Exception:
+            return 0
+
+
+@app.get("/workspace", response_class=HTMLResponse)
+def workspace_home(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    brand = _current_store_scope(request, user)
+    active_store = request.session.get("active_store") if is_admin(request) else None
+    return render("workspace.html", user=user, brand=brand, active_store=active_store)
+
+
+@app.get("/gestionale", response_class=HTMLResponse)
+def gestionale_home(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    brand = _current_store_scope(request, user)
+    active_store = request.session.get("active_store") if is_admin(request) else None
+    store = brand
+    ph = _ph()
+    stats = {
+        "fatture": 0,
+        "chiusure": 0,
+        "spese": 0,
+        "ordini_aperti": 0,
+        "coda_ordini": 0,
+    }
+    recent_docs = []
+
+    with connect() as conn:
+        cur = conn.cursor()
+        if store == "ALL":
+            stats["fatture"] = _fetch_one_int(cur, "SELECT COUNT(*) FROM invoices_docs", ())
+            stats["chiusure"] = _fetch_one_int(cur, "SELECT COUNT(*) FROM closures", ())
+            stats["spese"] = _fetch_one_int(cur, "SELECT COUNT(*) FROM secondary_expenses", ())
+            stats["ordini_aperti"] = _fetch_one_int(cur, "SELECT COUNT(*) FROM orders WHERE status='in_corso'", ())
+            stats["coda_ordini"] = _fetch_one_int(cur, "SELECT COUNT(*) FROM order_queue", ())
+
+            sql = """
+                SELECT 'Fattura' AS tipo, supplier AS descrizione, doc_date AS data_doc, uploaded_by, ts
+                FROM invoices_docs
+                UNION ALL
+                SELECT 'Chiusura' AS tipo, '' AS descrizione, closure_date AS data_doc, uploaded_by, ts
+                FROM closures
+                UNION ALL
+                SELECT 'Spesa secondaria' AS tipo, '' AS descrizione, expense_date AS data_doc, uploaded_by, ts
+                FROM secondary_expenses
+                ORDER BY ts DESC
+                LIMIT 8
+            """
+            recent_docs = [dict(r) for r in cur.execute(sql).fetchall()]
+        else:
+            stats["fatture"] = _fetch_one_int(cur, f"SELECT COUNT(*) FROM invoices_docs WHERE store={ph}", (store,))
+            stats["chiusure"] = _fetch_one_int(cur, f"SELECT COUNT(*) FROM closures WHERE store={ph}", (store,))
+            stats["spese"] = _fetch_one_int(cur, f"SELECT COUNT(*) FROM secondary_expenses WHERE store={ph}", (store,))
+            stats["ordini_aperti"] = _fetch_one_int(cur, f"SELECT COUNT(*) FROM orders WHERE store={ph} AND status='in_corso'", (store,))
+            stats["coda_ordini"] = _fetch_one_int(cur, f"SELECT COUNT(*) FROM order_queue WHERE store={ph}", (store,))
+
+            sql = f"""
+                SELECT * FROM (
+                    SELECT 'Fattura' AS tipo, supplier AS descrizione, doc_date AS data_doc, uploaded_by, ts
+                    FROM invoices_docs WHERE store={ph}
+                    UNION ALL
+                    SELECT 'Chiusura' AS tipo, '' AS descrizione, closure_date AS data_doc, uploaded_by, ts
+                    FROM closures WHERE store={ph}
+                    UNION ALL
+                    SELECT 'Spesa secondaria' AS tipo, '' AS descrizione, expense_date AS data_doc, uploaded_by, ts
+                    FROM secondary_expenses WHERE store={ph}
+                ) t
+                ORDER BY ts DESC
+                LIMIT 8
+            """
+            recent_docs = [dict(r) for r in cur.execute(sql, (store, store, store)).fetchall()]
+
+    return render(
+        "gestionale_home.html",
+        user=user,
+        brand=brand,
+        active_store=active_store,
+        stats=stats,
+        recent_docs=recent_docs,
+    )
+
+
+@app.get("/inventario-home", response_class=HTMLResponse)
+def inventario_home(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    brand = _current_store_scope(request, user)
+    active_store = request.session.get("active_store") if is_admin(request) else None
+    return render("inventario_home.html", user=user, areas=AREAS, brand=brand, active_store=active_store)
 
 @app.get("/register", response_class=HTMLResponse)
 def register_get(request: Request):
@@ -465,7 +531,6 @@ def register_post(
     username: str = Form(...),
     password: str = Form(...),
     confirm_password: str = Form(...),
-    role: str = Form('employee'),
 ):
     username = username.strip()
     store = get_selected_store(request)
@@ -492,7 +557,7 @@ def register_post(
             return render("register.html", error="Username già esistente.", ok=False, user=None, store=store, store_label=STORES[store], brand=store)
 
         cur.execute(
-            f"INSERT INTO users(store, username, role, pw_salt, pw_hash, legacy_sha256) VALUES({ph},{ph},'employee',{ph},{ph},NULL)",
+            f"INSERT INTO users(store, username, role, pw_salt, pw_hash, legacy_sha256) VALUES({ph},{ph},'staff',{ph},{ph},NULL)",
             (store, username, salt, h),
         )
 
@@ -514,7 +579,7 @@ def admin_login_post(request: Request, username: str = Form(...), password: str 
     with connect() as conn:
         cur = conn.cursor()
         row = cur.execute(
-            f"SELECT * FROM users WHERE username={ph} AND role IN ('admin','super_admin')",
+            f"SELECT * FROM users WHERE username={ph} AND role='admin'",
             (username,),
         ).fetchone()
 
@@ -536,7 +601,7 @@ def admin_login_post(request: Request, username: str = Form(...), password: str 
         if not ok:
             return render("admin_login.html", error="Credenziali admin non valide.", user=None)
 
-        request.session["user"] = {"id": row["id"], "username": row["username"], "role": _normalize_role(row["role"]), "store": row.get("store") or "spinza", "store_label": STORES.get(row.get("store") or "spinza", row.get("store") or "spinza")}
+        request.session["user"] = {"id": row["id"], "username": row["username"], "role": row["role"]}
 
     return RedirectResponse("/admin", status_code=HTTP_303_SEE_OTHER)
 
@@ -598,12 +663,9 @@ def admin_add_user(
             users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
             return _render_admin(request, user=user, users=users, error="Username già esistente.")
 
-        role = _normalize_role(role)
-        if role == ROLE_SUPER_ADMIN:
-            role = ROLE_MANAGER
         cur.execute(
-            f"INSERT INTO users(store, username, role, pw_salt, pw_hash, legacy_sha256) VALUES({ph},{ph},{ph},{ph},{ph},NULL)",
-            (store, username, role, salt, h),
+            f"INSERT INTO users(store, username, role, pw_salt, pw_hash, legacy_sha256) VALUES({ph},{ph},'staff',{ph},{ph},NULL)",
+            (store, username, salt, h),
         )
         users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
 
@@ -634,7 +696,7 @@ def admin_change_username(
         ).fetchone()
         if not target:
             return _admin_users_render_error(request, user, "Utente non trovato.")
-        if _normalize_role(target["role"]) == ROLE_SUPER_ADMIN:
+        if target["role"] == "admin":
             return _admin_users_render_error(request, user, "Lo username admin si cambia dal Profilo.")
 
         exists = cur.execute(
@@ -715,25 +777,12 @@ def admin_delete_user(request: Request, user_id: int):
             f"SELECT id, store, username, role FROM users WHERE id={ph}",
             (int(user_id),),
         ).fetchone()
-        if target and _normalize_role(target["role"]) != ROLE_SUPER_ADMIN:
+        if target and target["role"] != "admin":
             cur.execute(f"DELETE FROM users WHERE id={ph}", (int(user_id),))
             msg = f"Utente '{target['username']}' eliminato."
         users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
 
     return _render_admin(request, user=user, users=users, msg=msg)
-
-
-@app.get("/after-login")
-def after_login(request: Request):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    role = _normalize_role(user.get("role"))
-    request.session["selected_module"] = "gestionale"
-    if role in (ROLE_SUPER_ADMIN, ROLE_MANAGER):
-        return RedirectResponse("/gestionale/dashboard", status_code=HTTP_303_SEE_OTHER)
-    request.session["selected_area"] = request.session.get("selected_area") or "prodotti"
-    return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/logout")
@@ -762,7 +811,7 @@ def set_active_store(request: Request, store: str = Form(...), next_url: str = F
 
 
 # =========================
-# MAIN MODULE SELECTION + INVENTORY AREA SELECTION
+# AREA SELECTION (BIBITE / PRODOTTI)
 # =========================
 AREAS = {
     "bibite": "Bibite (Sala)",
@@ -770,40 +819,22 @@ AREAS = {
 }
 
 @app.get("/select-area", response_class=HTMLResponse)
-def select_area_get(request: Request, module: str = ""):
+def select_area_get(request: Request, area: str = ""):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
-    module = (module or "").strip().lower()
-    if module in ("inventario", "gestionale"):
-        set_selected_module(request, module)
-        if module == "inventario":
-            request.session.pop("selected_area", None)
-            return RedirectResponse("/select-inventory-area", status_code=HTTP_303_SEE_OTHER)
-        return RedirectResponse("/gestionale/dashboard", status_code=HTTP_303_SEE_OTHER)
-
-    brand = (request.session.get("active_store") if is_admin(request) else user.get("store")) or "spinza"
-    if brand not in STORES:
-        brand = "spinza"
-    return RedirectResponse("/after-login", status_code=HTTP_303_SEE_OTHER)
-
-@app.get("/select-inventory-area", response_class=HTMLResponse)
-def select_inventory_area_get(request: Request, area: str = ""):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-
-    set_selected_module(request, "inventario")
     area = (area or "").strip()
     if area in AREAS:
         set_selected_area(request, area)
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
+    # brand: store selezionato (admin usa active_store se presente)
     brand = (request.session.get("active_store") if is_admin(request) else user.get("store")) or "spinza"
     if brand not in STORES:
         brand = "spinza"
-    return render("select_inventory_area.html", user=user, areas=AREAS, brand=brand, active_store=request.session.get("active_store"), current_module="inventario")
+    return render("select_area.html", user=user, areas=AREAS, brand=brand)
+
 
 # =========================
 # PROFILE (admin can change own username/password)
@@ -843,7 +874,7 @@ def profile_change_password(
     ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
-        if _normalize_role(user.get("role")) == ROLE_SUPER_ADMIN and user.get("id"):
+        if user.get("role") == "admin" and user.get("id"):
             row = cur.execute(f"SELECT * FROM users WHERE id={ph}", (int(user["id"]),)).fetchone()
         else:
             row = cur.execute(
@@ -892,7 +923,7 @@ def profile_change_username(request: Request, new_username: str = Form(...)):
     with connect() as conn:
         cur = conn.cursor()
         exists = cur.execute(
-            f"SELECT 1 FROM users WHERE role IN ('admin','super_admin') AND username={ph} AND id<>{ph}",
+            f"SELECT 1 FROM users WHERE role='admin' AND username={ph} AND id<>{ph}",
             (new_username, int(user.get("id", -1))),
         ).fetchone()
         if exists:
@@ -1026,234 +1057,6 @@ async def updates_delete(request: Request, update_id: int):
 
     return RedirectResponse("/updates", status_code=HTTP_303_SEE_OTHER)
 
-def _current_store_for_scope(request: Request, user: dict):
-    admin = is_admin(request)
-    if admin:
-        active_store = (request.query_params.get("store") or request.session.get("active_store") or "spinza").strip()
-        if active_store not in STORES and active_store != "ALL":
-            active_store = "spinza"
-        request.session["active_store"] = active_store
-        return active_store
-    active_store = user.get("store") or get_selected_store(request) or "spinza"
-    set_selected_store(request, active_store)
-    return active_store
-
-
-def _sales_scope_clause(active_store: str):
-    ph = _ph()
-    if active_store == "ALL":
-        return "", []
-    return f" WHERE store={ph}", [active_store]
-
-
-def _sales_dashboard_data(cur, active_store: str):
-    ph = _ph()
-    where_sql, params = _sales_scope_clause(active_store)
-    today = _today_str()
-    month = today[:7] + "%"
-
-    def scalar(sql: str, args):
-        row = cur.execute(sql, tuple(args)).fetchone()
-        if not row:
-            return 0.0
-        val = list(dict(row).values())[0]
-        return float(val or 0)
-
-    today_net = scalar(f"SELECT COALESCE(SUM(net_amount),0) AS v FROM sales_entries{where_sql + (' AND' if where_sql else ' WHERE')} sale_date={ph}", params + [today])
-    today_orders = scalar(f"SELECT COALESCE(SUM(order_count),0) AS v FROM sales_entries{where_sql + (' AND' if where_sql else ' WHERE')} sale_date={ph}", params + [today])
-    month_net = scalar(f"SELECT COALESCE(SUM(net_amount),0) AS v FROM sales_entries{where_sql + (' AND' if where_sql else ' WHERE')} sale_date LIKE {ph}", params + [month])
-    month_orders = scalar(f"SELECT COALESCE(SUM(order_count),0) AS v FROM sales_entries{where_sql + (' AND' if where_sql else ' WHERE')} sale_date LIKE {ph}", params + [month])
-
-    by_channel = cur.execute(
-        f"""
-        SELECT sales_channel, COALESCE(SUM(net_amount),0) AS net_total, COALESCE(SUM(order_count),0) AS order_total
-        FROM sales_entries
-        {where_sql}
-        GROUP BY sales_channel
-        ORDER BY net_total DESC, sales_channel
-        """,
-        tuple(params),
-    ).fetchall()
-
-    recent = cur.execute(
-        f"""
-        SELECT * FROM sales_entries
-        {where_sql}
-        ORDER BY sale_date DESC, id DESC
-        LIMIT 12
-        """,
-        tuple(params),
-    ).fetchall()
-
-    total_all = sum(float(r.get("net_total") or 0) for r in by_channel)
-    channels = []
-    for row in by_channel:
-        net_total = float(row.get("net_total") or 0)
-        order_total = int(row.get("order_total") or 0)
-        channels.append({
-            "sales_channel": row.get("sales_channel") or "-",
-            "net_total": net_total,
-            "order_total": order_total,
-            "avg_ticket": (net_total / order_total) if order_total else 0,
-            "weight": (net_total / total_all * 100.0) if total_all else 0,
-        })
-
-    return {
-        "today_net": today_net,
-        "today_orders": int(today_orders),
-        "today_avg": (today_net / today_orders) if today_orders else 0,
-        "month_net": month_net,
-        "month_orders": int(month_orders),
-        "month_avg": (month_net / month_orders) if month_orders else 0,
-        "channels": channels,
-        "recent": recent,
-    }
-
-
-@app.get("/gestionale", response_class=HTMLResponse)
-def gestionale_home(request: Request):
-    return RedirectResponse("/gestionale/dashboard", status_code=HTTP_303_SEE_OTHER)
-
-
-@app.get("/gestionale/dashboard", response_class=HTMLResponse)
-def gestionale_dashboard(request: Request):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    if not can_view_management(request):
-        return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
-    if not can_edit_management(request):
-        return RedirectResponse("/gestionale/entrate", status_code=HTTP_303_SEE_OTHER)
-    set_selected_module(request, "gestionale")
-    active_store = _current_store_for_scope(request, user)
-    brand = active_store if active_store in STORES else (user.get("store") or "spinza")
-    with connect() as conn:
-        cur = conn.cursor()
-        data = _sales_dashboard_data(cur, active_store)
-    return render("gestionale_dashboard.html", user=user, brand=brand, active_store=active_store, current_module="gestionale", stores=STORES, can_edit_management=can_edit_management(request), **data)
-
-
-@app.get("/gestionale/entrate", response_class=HTMLResponse)
-def gestionale_entrate_get(request: Request, sale_date: str = "", sales_channel: str = "ALL"):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    if not can_view_management(request):
-        return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
-    set_selected_module(request, "gestionale")
-    active_store = _current_store_for_scope(request, user)
-    brand = active_store if active_store in STORES else (user.get("store") or "spinza")
-    sale_date = (sale_date or "").strip()
-    sales_channel = (sales_channel or "ALL").strip()
-    ph = _ph()
-    where = []
-    params = []
-    if active_store != "ALL":
-        where.append(f"store={ph}")
-        params.append(active_store)
-    if sale_date:
-        where.append(f"sale_date={ph}")
-        params.append(sale_date)
-    if sales_channel != "ALL":
-        where.append(f"sales_channel={ph}")
-        params.append(sales_channel)
-    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
-    with connect() as conn:
-        cur = conn.cursor()
-        rows = cur.execute(f"SELECT * FROM sales_entries{where_sql} ORDER BY sale_date DESC, id DESC LIMIT 100", tuple(params)).fetchall()
-        channel_rows = cur.execute(f"SELECT DISTINCT sales_channel FROM sales_entries" + (f" WHERE store={ph}" if active_store != "ALL" else "") + " ORDER BY sales_channel", tuple([active_store] if active_store != "ALL" else [])).fetchall()
-    channels = [r.get("sales_channel") for r in channel_rows if (r.get("sales_channel") or '').strip()]
-    return render("gestionale_entrate.html", user=user, brand=brand, active_store=active_store, current_module="gestionale", rows=rows, channels=channels, sale_date=sale_date, selected_channel=sales_channel, today=_today_str(), can_edit_management=can_edit_management(request))
-
-
-@app.post("/gestionale/entrate", response_class=HTMLResponse)
-def gestionale_entrate_post(
-    request: Request,
-    sale_date: str = Form(...),
-    store: str = Form(""),
-    sales_channel: str = Form(...),
-    sales_location: str = Form(""),
-    order_type: str = Form(""),
-    payment_method: str = Form(""),
-    order_count: int = Form(0),
-    gross_amount: float = Form(0),
-    discounts_amount: float = Form(0),
-    commissions_amount: float = Form(0),
-    net_amount: str = Form(""),
-    notes: str = Form(""),
-):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    set_selected_module(request, "gestionale")
-    active_store = _current_store_for_scope(request, user)
-    store = (store or "").strip() or (active_store if active_store != "ALL" else user.get("store") or "spinza")
-    if store not in STORES:
-        store = user.get("store") or "spinza"
-    try:
-        net = float(str(net_amount).replace(",", ".")) if str(net_amount).strip() else float(gross_amount or 0) - float(discounts_amount or 0) - float(commissions_amount or 0)
-    except Exception:
-        net = float(gross_amount or 0) - float(discounts_amount or 0) - float(commissions_amount or 0)
-    ph = _ph()
-    with connect() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            f"""
-            INSERT INTO sales_entries(
-                sale_date, store, sales_channel, sales_location, order_type, payment_method,
-                order_count, gross_amount, discounts_amount, commissions_amount, net_amount,
-                notes, created_by
-            ) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})
-            """,
-            (
-                sale_date or _today_str(), store, (sales_channel or "").strip(), (sales_location or "").strip(),
-                (order_type or "").strip(), (payment_method or "").strip(), int(order_count or 0),
-                float(gross_amount or 0), float(discounts_amount or 0), float(commissions_amount or 0),
-                float(net), (notes or "").strip(), user.get("username") or "",
-            ),
-        )
-    return RedirectResponse("/gestionale/entrate", status_code=HTTP_303_SEE_OTHER)
-
-
-@app.get("/gestionale/uscite", response_class=HTMLResponse)
-def gestionale_uscite(request: Request):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    if not can_view_management(request):
-        return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
-    set_selected_module(request, "gestionale")
-    active_store = _current_store_for_scope(request, user)
-    brand = active_store if active_store in STORES else (user.get("store") or "spinza")
-    return render("gestionale_placeholder.html", user=user, brand=brand, active_store=active_store, current_module="gestionale", section_title="Uscite", section_desc="Qui andremo a gestire costi, fornitori, reparti, categorie, metodi di pagamento e allegati documento.")
-
-
-@app.get("/gestionale/cassa", response_class=HTMLResponse)
-def gestionale_cassa(request: Request):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    if not can_view_management(request):
-        return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
-    set_selected_module(request, "gestionale")
-    active_store = _current_store_for_scope(request, user)
-    brand = active_store if active_store in STORES else (user.get("store") or "spinza")
-    return render("gestionale_placeholder.html", user=user, brand=brand, active_store=active_store, current_module="gestionale", section_title="Cassa / Prima nota", section_desc="Qui andremo a gestire fondo cassa, prelievi, versamenti, spese cash e quadratura giornaliera.")
-
-
-@app.get("/gestionale/report", response_class=HTMLResponse)
-def gestionale_report(request: Request):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    if not can_view_management(request):
-        return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
-    set_selected_module(request, "gestionale")
-    active_store = _current_store_for_scope(request, user)
-    brand = active_store if active_store in STORES else (user.get("store") or "spinza")
-    return render("gestionale_placeholder.html", user=user, brand=brand, active_store=active_store, current_module="gestionale", section_title="Report", section_desc="Qui andremo a leggere entrate, uscite, scontrino medio, peso dei canali e andamento per sede e periodo.")
-
-
 # =========================
 # INVENTORY
 # =========================
@@ -1263,10 +1066,12 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
-    set_selected_module(request, "inventario")
     area = get_selected_area(request)
+    # UX: se non è stata ancora scelta la sezione, imposta un default.
+    # Questo evita che l'admin (o un utente con sessione nuova) resti bloccato su redirect continui.
     if not area or area not in AREAS:
-        return RedirectResponse("/select-inventory-area", status_code=HTTP_303_SEE_OTHER)
+        area = "prodotti"
+        set_selected_area(request, area)
 
     admin = is_admin(request)
     if admin:
@@ -2058,12 +1863,6 @@ def closures_page(request: Request, q: str = ""):
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
-    if not is_admin(request):
-        return RedirectResponse("/chiusure", status_code=HTTP_303_SEE_OTHER)
-
-    if not is_admin(request):
-        return RedirectResponse("/spese-secondarie", status_code=HTTP_303_SEE_OTHER)
-
     store = _effective_store(request, user)
     brand = "ALL" if store == "ALL" else store
 
@@ -2149,9 +1948,9 @@ def closures_download(request: Request, doc_id: int):
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
-    # Tutti gli utenti loggati possono aprire i documenti del proprio negozio
-    if not can_manage_inventory(request):
-        return PlainTextResponse("Accesso negato", status_code=403)
+    # Solo admin può aprire/visualizzare il file
+    if not is_admin(request):
+        return PlainTextResponse("Solo admin", status_code=403)
 
     store = _effective_store(request, user)
     ph = _ph()
@@ -2181,8 +1980,6 @@ def closures_delete(request: Request, doc_id: int):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    if not is_admin(request):
-        return RedirectResponse("/chiusure", status_code=HTTP_303_SEE_OTHER)
 
     store = _effective_store(request, user)
     ph = _ph()
@@ -2313,8 +2110,8 @@ def secondary_expenses_download(request: Request, doc_id: int):
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
-    if not can_manage_inventory(request):
-        return PlainTextResponse("Accesso negato", status_code=403)
+    if not is_admin(request):
+        return PlainTextResponse("Solo admin", status_code=403)
 
     store = _effective_store(request, user)
     ph = _ph()
@@ -2345,8 +2142,6 @@ def secondary_expenses_delete(request: Request, doc_id: int):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    if not is_admin(request):
-        return RedirectResponse("/spese-secondarie", status_code=HTTP_303_SEE_OTHER)
 
     store = _effective_store(request, user)
     ph = _ph()
@@ -3792,8 +3587,9 @@ def invoices_download(request: Request, doc_id: int):
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
-    if not can_manage_inventory(request):
-        return PlainTextResponse("Accesso negato", status_code=403)
+    # Solo admin può aprire/visualizzare il file
+    if not is_admin(request):
+        return PlainTextResponse("Solo admin", status_code=403)
 
     store = _effective_store(request, user)
     ph = _ph()
@@ -3823,8 +3619,6 @@ def invoices_delete(request: Request, doc_id: int):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    if not is_admin(request):
-        return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
 
     store = _effective_store(request, user)
     ph = _ph()
