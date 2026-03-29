@@ -274,6 +274,38 @@ def init_db():
         )
         """)
 
+
+
+        # CASH FLOW: incassi manuali giornalieri
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS cash_entries (
+            id {id_col},
+            store TEXT NOT NULL,
+            flow_date {date_col} NOT NULL,
+            payment_method TEXT NOT NULL DEFAULT '',
+            amount {qty_col} NOT NULL DEFAULT 0,
+            orders_count INTEGER NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            created_by TEXT NOT NULL,
+            ts {ts_default}
+        )
+        """)
+
+        # CASH FLOW: uscite manuali giornaliere
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS cash_expenses (
+            id {id_col},
+            store TEXT NOT NULL,
+            flow_date {date_col} NOT NULL,
+            category TEXT NOT NULL DEFAULT '',
+            supplier TEXT NOT NULL DEFAULT '',
+            payment_method TEXT NOT NULL DEFAULT '',
+            amount {qty_col} NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            created_by TEXT NOT NULL,
+            ts {ts_default}
+        )
+        """)
         # LOGISTICS: order queue + orders
         _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS order_queue (

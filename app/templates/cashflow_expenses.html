@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% set title = "Uscite" %}
+{% block content %}
+<style>
+  .chart-wrap{display:flex;align-items:flex-end;gap:12px;height:210px;padding-top:8px}
+  .day-box{display:flex;flex-direction:column;align-items:center;gap:8px;flex:1;min-width:54px}
+  .triple{display:flex;align-items:flex-end;gap:6px;height:160px}
+  .cbar{width:14px;border-radius:8px 8px 4px 4px}
+  .income{background:#111}.expense{background:#bbb}.net{background:#666}
+</style>
+<div class="card">
+  <div class="row" style="justify-content:space-between;align-items:center;">
+    <div>
+      <h2 style="margin:0 0 6px 0;">💸 Uscite</h2>
+      <div class="muted">Inserisci ogni uscita una per una, con categoria, fornitore e metodo di pagamento.</div>
+    </div>
+    <div class="row">
+      <a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Dashboard</a>
+      <a href="/gestionale/incassi" class="btn2" style="text-decoration:none;display:inline-block;">Vai agli incassi</a>
+    </div>
+  </div>
+</div>
+
+{% if can_edit_management %}
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Nuova uscita</h3>
+  <form method="post" action="/gestionale/uscite">
+    <div class="row">
+      <input type="date" name="flow_date" value="{{ today }}" required>
+      <select name="store">
+        {% for key, label in stores.items() %}
+          {% if brand == 'ALL' or brand == key %}
+          <option value="{{ key }}" {% if active_store==key or (brand==key and brand!='ALL') %}selected{% endif %}>{{ label }}</option>
+          {% endif %}
+        {% endfor %}
+      </select>
+      <input name="category" placeholder="Categoria: fornitori, stipendi, affitto..." required>
+      <input name="supplier" placeholder="Fornitore / destinatario">
+      <input name="payment_method" placeholder="Metodo: contanti, bonifico, carta...">
+      <input type="number" step="0.01" min="0" name="amount" placeholder="Importo €" required>
+      <input name="notes" placeholder="Note" style="min-width:260px;flex:1;">
+      <button class="btn" type="submit">Salva uscita</button>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+<div class="row" style="margin-top:14px;">
+  <div class="card" style="flex:1;min-width:220px;"><div class="muted">Totale filtrato</div><div style="font-size:30px;font-weight:800;">€ {{ '%.2f'|format(total_amount) }}</div></div>
+  <div class="card" style="flex:1;min-width:220px;"><div class="muted">Negozio grafico</div><div style="font-size:22px;font-weight:800;">{{ stores[chart_store] }}</div></div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Filtri</h3>
+  <form method="get" action="/gestionale/uscite" class="row">
+    <input type="date" name="flow_date" value="{{ selected_date }}">
+    <select name="category">
+      <option value="ALL">Tutte le categorie</option>
+      {% for c in categories %}<option value="{{ c }}" {% if selected_category==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+    </select>
+    <button class="btn2" type="submit">Filtra</button>
+    <a class="btn2" href="/gestionale/uscite" style="text-decoration:none;display:inline-block;">Reset</a>
+  </form>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Grafico settimanale {{ stores[chart_store] }}</h3>
+  <div class="muted">Stesso grafico della cassa: incassi, uscite e saldo della settimana del negozio selezionato.</div>
+  <div class="chart-wrap">
+    {% for d in chart_rows %}
+    <div class="day-box">
+      <div class="triple">
+        <div class="cbar income" style="height:{{ d.income_h }}px" title="Incassi € {{ '%.2f'|format(d.income) }}"></div>
+        <div class="cbar expense" style="height:{{ d.expense_h }}px" title="Uscite € {{ '%.2f'|format(d.expense) }}"></div>
+        <div class="cbar net" style="height:{{ d.net_h }}px" title="Saldo € {{ '%.2f'|format(d.net) }}"></div>
+      </div>
+      <div style="font-size:12px;color:#666;">{{ d.label }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Storico uscite</h3>
+  <table>
+    <thead><tr><th>Data</th><th>Sede</th><th>Categoria</th><th>Fornitore</th><th>Metodo</th><th>Importo</th><th>Note</th><th>Creata da</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.flow_date }}</td>
+        <td>{{ stores[r.store] if r.store in stores else r.store }}</td>
+        <td>{{ r.category }}</td>
+        <td>{{ r.supplier or '-' }}</td>
+        <td>{{ r.payment_method or '-' }}</td>
+        <td><strong>€ {{ '%.2f'|format(r.amount or 0) }}</strong></td>
+        <td>{{ r.notes or '-' }}</td>
+        <td>{{ r.created_by }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="muted">Ancora nessuna uscita registrata.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

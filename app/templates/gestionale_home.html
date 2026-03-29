@@ -1,66 +1,140 @@
-
 {% extends "base.html" %}
 {% set title = "Gestionale" %}
 {% block content %}
-  <div class="card" style="margin-bottom:14px;">
-    <h2 style="margin:0 0 6px 0;">Gestionale</h2>
-    <div class="muted">Questa area è dedicata a <strong>contabilità, documenti e controllo attività</strong>. Le giacenze e la logistica sono separate dentro Inventario.</div>
-  </div>
+<style>
+  .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+  .mini-stat{background:#fff;border-radius:14px;padding:14px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+  .bars{display:flex;align-items:flex-end;gap:10px;height:170px;padding-top:10px}
+  .bar-col{display:flex;flex-direction:column;align-items:center;gap:8px;min-width:46px;flex:1}
+  .bar{width:24px;border-radius:10px 10px 4px 4px;background:#111}
+  .bar.neg{background:#888}
+  .bar.income{background:#1f2937}
+  .bar.expense{background:#cfcfcf}
+  .bar-label{font-size:12px;color:#666}
+  .store-box{border:1px solid #eee;border-radius:16px;padding:12px}
+  .two-col{display:grid;grid-template-columns:1.2fr .8fr;gap:14px}
+  @media(max-width:900px){.two-col{grid-template-columns:1fr}}
+</style>
 
-  <div class="row" style="margin-bottom:14px;">
-    <div class="card" style="flex:1;min-width:170px;"><div class="muted">Fatture archiviate</div><div style="font-size:30px;font-weight:800;">{{ stats.fatture }}</div></div>
-    <div class="card" style="flex:1;min-width:170px;"><div class="muted">Chiusure archiviate</div><div style="font-size:30px;font-weight:800;">{{ stats.chiusure }}</div></div>
-    <div class="card" style="flex:1;min-width:170px;"><div class="muted">Spese secondarie</div><div style="font-size:30px;font-weight:800;">{{ stats.spese }}</div></div>
-    <div class="card" style="flex:1;min-width:170px;"><div class="muted">Ordini aperti</div><div style="font-size:30px;font-weight:800;">{{ stats.ordini_aperti }}</div></div>
+<div class="card" style="margin-bottom:14px;">
+  <div class="row" style="justify-content:space-between;align-items:center;">
+    <div>
+      <h2 style="margin:0 0 6px 0;">📊 Gestionale cassa</h2>
+      <div class="muted">Da qui inserisci incassi e uscite in modo ordinato per negozio. Dashboard settimanale dal {{ week_start }} al {{ week_end }}.</div>
+    </div>
+    <div class="row">
+      <a href="/gestionale/incassi" class="btn" style="text-decoration:none;display:inline-block;">+ Incasso</a>
+      <a href="/gestionale/uscite" class="btn2" style="text-decoration:none;display:inline-block;">+ Uscita</a>
+    </div>
   </div>
+</div>
 
+<div class="stat-grid" style="margin-bottom:14px;">
+  <div class="mini-stat"><div class="muted">Incassi oggi</div><div style="font-size:28px;font-weight:800;">€ {{ '%.2f'|format(totals.income_today) }}</div></div>
+  <div class="mini-stat"><div class="muted">Uscite oggi</div><div style="font-size:28px;font-weight:800;">€ {{ '%.2f'|format(totals.expense_today) }}</div></div>
+  <div class="mini-stat"><div class="muted">Saldo oggi</div><div style="font-size:28px;font-weight:800;">€ {{ '%.2f'|format(totals.net_today) }}</div></div>
+  <div class="mini-stat"><div class="muted">Saldo settimana</div><div style="font-size:28px;font-weight:800;">€ {{ '%.2f'|format(totals.net_week) }}</div></div>
+  <div class="mini-stat"><div class="muted">Righe incassi</div><div style="font-size:28px;font-weight:800;">{{ totals.entries_count }}</div></div>
+  <div class="mini-stat"><div class="muted">Righe uscite</div><div style="font-size:28px;font-weight:800;">{{ totals.expenses_count }}</div></div>
+</div>
+
+<div class="card" style="margin-bottom:14px;">
+  <h3 style="margin-top:0;">Confronto settimanale dei 3 negozi</h3>
+  <div class="muted" style="margin-bottom:12px;">Ogni colonna rappresenta il saldo giornaliero della settimana: incassi meno uscite.</div>
   <div class="row" style="gap:14px;align-items:stretch;">
-    <div class="card" style="flex:1;min-width:290px;">
-      <h3 style="margin-top:0;">Documenti contabili</h3>
-      <div class="muted" style="margin-bottom:12px;">Archivio operativo già pronto per il tuo team.</div>
-      <div class="row" style="gap:10px;">
+    {% for s in compare %}
+    <div class="store-box" style="flex:1;min-width:260px;">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+        <div>
+          <div style="font-weight:800;font-size:18px;">{{ s.label }}</div>
+          <div class="muted">Incassi € {{ '%.2f'|format(s.income_total) }} · Uscite € {{ '%.2f'|format(s.expense_total) }}</div>
+        </div>
+        <div class="pill">Saldo € {{ '%.2f'|format(s.net_total) }}</div>
+      </div>
+      <div class="bars">
+        {% for d in s.days %}
+        <div class="bar-col">
+          <div class="bar {% if not d.positive %}neg{% endif %}" style="height:{{ d.height }}px" title="{{ d.label }} | Incassi € {{ '%.2f'|format(d.income) }} | Uscite € {{ '%.2f'|format(d.expense) }} | Saldo € {{ '%.2f'|format(d.net) }}"></div>
+          <div class="bar-label">{{ d.label }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="two-col">
+  <div>
+    <div class="card" style="margin-bottom:14px;">
+      <h3 style="margin-top:0;">Documenti e archivio</h3>
+      <div class="row" style="margin-bottom:10px;">
         <a href="/fatture" class="pill" style="text-decoration:none;color:#111;">🧾 Fatture</a>
         <a href="/chiusure" class="pill" style="text-decoration:none;color:#111;">📸 Chiusure</a>
         <a href="/spese-secondarie" class="pill" style="text-decoration:none;color:#111;">💸 Spese secondarie</a>
       </div>
+      <div class="stat-grid">
+        <div class="mini-stat"><div class="muted">Fatture archiviate</div><div style="font-size:24px;font-weight:800;">{{ stats.fatture }}</div></div>
+        <div class="mini-stat"><div class="muted">Chiusure archiviate</div><div style="font-size:24px;font-weight:800;">{{ stats.chiusure }}</div></div>
+        <div class="mini-stat"><div class="muted">Spese secondarie</div><div style="font-size:24px;font-weight:800;">{{ stats.spese }}</div></div>
+        <div class="mini-stat"><div class="muted">Ordini aperti</div><div style="font-size:24px;font-weight:800;">{{ stats.ordini_aperti }}</div></div>
+      </div>
     </div>
 
-    <div class="card" style="flex:1;min-width:290px;">
-      <h3 style="margin-top:0;">Struttura contabilità</h3>
-      <div class="muted">La base del gestionale ora è separata dall'inventario:</div>
-      <ul style="margin:12px 0 0 18px;line-height:1.7;">
-        <li><strong>Gestionale</strong>: documenti, controllo e numeri</li>
-        <li><strong>Inventario</strong>: giacenze, ordini, magazzino e scambi</li>
-        <li><strong>Home unica</strong>: entri e scegli subito l'area corretta</li>
-      </ul>
-    </div>
-  </div>
-
-  <div class="card" style="margin-top:14px;">
-    <h3 style="margin-top:0;">Ultimi documenti caricati</h3>
-    {% if recent_docs %}
+    <div class="card">
+      <h3 style="margin-top:0;">Ultimi documenti caricati</h3>
+      {% if recent_docs %}
       <table>
-        <thead>
-          <tr>
-            <th>Tipo</th>
-            <th>Dettaglio</th>
-            <th>Data doc.</th>
-            <th>Caricato da</th>
-          </tr>
-        </thead>
+        <thead><tr><th>Tipo</th><th>Dettaglio</th><th>Data</th><th>Caricato da</th></tr></thead>
         <tbody>
           {% for r in recent_docs %}
-            <tr>
-              <td>{{ r.tipo }}</td>
-              <td>{{ r.descrizione or '-' }}</td>
-              <td>{{ r.data_doc }}</td>
-              <td>{{ r.uploaded_by }}</td>
-            </tr>
+          <tr>
+            <td>{{ r.tipo }}</td>
+            <td>{{ r.descrizione or '-' }}</td>
+            <td>{{ r.data_doc }}</td>
+            <td>{{ r.uploaded_by }}</td>
+          </tr>
           {% endfor %}
         </tbody>
       </table>
-    {% else %}
+      {% else %}
       <div class="muted">Ancora nessun documento caricato.</div>
-    {% endif %}
+      {% endif %}
+    </div>
   </div>
+
+  <div>
+    <div class="card" style="margin-bottom:14px;">
+      <h3 style="margin-top:0;">Ultimi incassi inseriti</h3>
+      {% if recent_entries %}
+      <table>
+        <thead><tr><th>Data</th><th>Sede</th><th>Metodo</th><th>Importo</th></tr></thead>
+        <tbody>
+          {% for r in recent_entries %}
+          <tr><td>{{ r.flow_date }}</td><td>{{ r.store }}</td><td>{{ r.payment_method }}</td><td>€ {{ '%.2f'|format(r.amount or 0) }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="muted">Non hai ancora inserito incassi.</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">Ultime uscite inserite</h3>
+      {% if recent_expenses %}
+      <table>
+        <thead><tr><th>Data</th><th>Sede</th><th>Categoria</th><th>Importo</th></tr></thead>
+        <tbody>
+          {% for r in recent_expenses %}
+          <tr><td>{{ r.flow_date }}</td><td>{{ r.store }}</td><td>{{ r.category }}</td><td>€ {{ '%.2f'|format(r.amount or 0) }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="muted">Non hai ancora inserito uscite.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
 {% endblock %}
