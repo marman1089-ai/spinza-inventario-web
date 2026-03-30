@@ -186,6 +186,11 @@ def is_admin(request: Request) -> bool:
     u = request.session.get("user")
     return bool(u and u.get("role") == "admin")
 
+
+def can_view_management_finance(request: Request, user: dict | None = None) -> bool:
+    user = user or request.session.get("user")
+    return bool(user and user.get("role") == "admin")
+
 def _admin_store(request: Request) -> str:
     s = (request.session.get("admin_store") or "spinza")
     return s if s in STORES else "spinza"
@@ -353,9 +358,6 @@ def login_post(request: Request, username: str = Form(...), password: str = Form
     if not store or store not in STORES:
         return RedirectResponse("/select-store", status_code=HTTP_303_SEE_OTHER)
 
-    amount_value = _safe_amount(amount)
-    if amount_value <= 0:
-        return RedirectResponse('/gestionale/uscite', status_code=HTTP_303_SEE_OTHER)
     ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
@@ -879,6 +881,7 @@ def gestionale_home(request: Request, period_type: str = 'week', anchor_date: st
 
     brand = _current_store_scope(request, user)
     active_store = request.session.get("active_store") if is_admin(request) else None
+    can_view_finance = can_view_management_finance(request, user)
     store = brand
     ph = _ph()
     stats = {
@@ -949,6 +952,7 @@ def gestionale_home(request: Request, period_type: str = 'week', anchor_date: st
         recent_entries=recent_entries,
         recent_expenses=recent_expenses,
         period_meta=period_meta,
+        can_view_finance=can_view_finance,
     )
 
 
@@ -959,6 +963,8 @@ def gestionale_dashboard(request: Request, period_type: str = 'week', anchor_dat
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
 
     brand = _current_store_scope(request, user)
     active_store = request.session.get("active_store") if is_admin(request) else None
@@ -984,6 +990,8 @@ def cash_entries_page(request: Request, flow_date: str = '', payment_method: str
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
     brand = _current_store_scope(request, user)
     active_store = request.session.get("active_store") if is_admin(request) else None
     can_edit_management = user.get('role') in ('admin', 'manager', 'staff')
@@ -1020,6 +1028,8 @@ async def cash_entries_create(request: Request):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
     form = await request.form()
     flow_date = str(form.get('flow_date') or '').strip() or date.today().isoformat()
     store = str(form.get('store') or '').strip()
@@ -1082,6 +1092,8 @@ def cash_expenses_page(request: Request, flow_date: str = "", category: str = "A
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
     brand = _current_store_scope(request, user)
     active_store = request.session.get("active_store") if is_admin(request) else None
     can_edit_management = user.get('role') in ('admin', 'manager', 'staff')
@@ -1125,6 +1137,8 @@ def cash_expenses_create(
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
     if store not in STORES:
         store = user.get('store') or 'spinza'
     if not is_admin(request):
@@ -1147,8 +1161,8 @@ def cash_entries_delete(request: Request, entry_id: int):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    if user.get('role') not in ('admin', 'manager', 'staff'):
-        return RedirectResponse('/gestionale/incassi', status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse('/gestionale', status_code=HTTP_303_SEE_OTHER)
 
     brand = _current_store_scope(request, user)
     where_sql, params = _cash_scope_where(brand)
@@ -1179,8 +1193,8 @@ def cash_expenses_delete(request: Request, expense_id: int):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    if user.get('role') not in ('admin', 'manager', 'staff'):
-        return RedirectResponse('/gestionale/uscite', status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse('/gestionale', status_code=HTTP_303_SEE_OTHER)
 
     brand = _current_store_scope(request, user)
     where_sql, params = _cash_scope_where(brand)

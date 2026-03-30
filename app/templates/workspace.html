@@ -11,14 +11,25 @@
     <a href="/gestionale" style="text-decoration:none;color:#111;flex:1;min-width:280px;">
       <div class="card" style="height:100%;padding:18px;">
         <div class="pill">📊 Gestionale</div>
-        <h3 style="margin:14px 0 8px 0;font-size:24px;">Contabilità, documenti e controllo</h3>
-        <div class="muted">Trovi la parte economica e amministrativa: fatture, chiusure, spese secondarie e quadro generale.</div>
-        <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          <div class="pill">🧾 Fatture</div>
-          <div class="pill">📸 Chiusure</div>
-          <div class="pill">💸 Spese secondarie</div>
-          <div class="pill">📈 Vista controllo</div>
-        </div>
+        {% if user.role == 'admin' %}
+          <h3 style="margin:14px 0 8px 0;font-size:24px;">Contabilità, documenti e controllo</h3>
+          <div class="muted">Trovi la parte economica e amministrativa: dashboard gestionale, incassi, uscite, fatture, chiusure e spese secondarie.</div>
+          <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <div class="pill">💶 Incassi</div>
+            <div class="pill">💸 Uscite</div>
+            <div class="pill">🧾 Fatture</div>
+            <div class="pill">📸 Chiusure</div>
+          </div>
+        {% else %}
+          <h3 style="margin:14px 0 8px 0;font-size:24px;">Documenti e archivio</h3>
+          <div class="muted">Per lo staff qui restano disponibili solo i documenti utili al lavoro: fatture, chiusure e spese secondarie. La parte contabile resta visibile solo all’admin.</div>
+          <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <div class="pill">🧾 Fatture</div>
+            <div class="pill">📸 Chiusure</div>
+            <div class="pill">💸 Spese secondarie</div>
+            <div class="pill">🔒 Contabilità admin</div>
+          </div>
+        {% endif %}
       </div>
     </a>
 

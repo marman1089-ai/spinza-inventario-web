@@ -224,9 +224,12 @@
       <details class="nav-dd" id="navGestionale">
         <summary class="pill" style="text-decoration:none;color:#111">📊 Gestionale</summary>
         <div class="nav-dd-panel">
-          <a href="/gestionale">📊 Dashboard gestionale</a>
-          <a href="/gestionale/incassi">💶 Incassi</a>
-          <a href="/gestionale/uscite">💸 Uscite</a>
+          <a href="/gestionale">📊 Home gestionale</a>
+          {% if user.role == 'admin' %}
+            <a href="/gestionale/dashboard">📊 Dashboard gestionale</a>
+            <a href="/gestionale/incassi">💶 Incassi</a>
+            <a href="/gestionale/uscite">💸 Uscite</a>
+          {% endif %}
           <a href="/fatture">🧾 Fatture</a>
           <a href="/chiusure">📸 Chiusure</a>
           <a href="/spese-secondarie">💸 Spese secondarie</a>
@@ -282,9 +285,12 @@
 
       <div class="section">Gestionale</div>
       <div class="sub">
-        <a href="/gestionale" onclick="closeMobileMenu()">📊 Dashboard gestionale</a>
-        <a href="/gestionale/incassi" onclick="closeMobileMenu()">💶 Incassi</a>
-        <a href="/gestionale/uscite" onclick="closeMobileMenu()">💸 Uscite</a>
+        <a href="/gestionale" onclick="closeMobileMenu()">📊 Home gestionale</a>
+        {% if user.role == 'admin' %}
+          <a href="/gestionale/dashboard" onclick="closeMobileMenu()">📊 Dashboard gestionale</a>
+          <a href="/gestionale/incassi" onclick="closeMobileMenu()">💶 Incassi</a>
+          <a href="/gestionale/uscite" onclick="closeMobileMenu()">💸 Uscite</a>
+        {% endif %}
         <a href="/fatture" onclick="closeMobileMenu()">🧾 Fatture</a>
         <a href="/chiusure" onclick="closeMobileMenu()">📸 Chiusure</a>
         <a href="/spese-secondarie" onclick="closeMobileMenu()">💸 Spese secondarie</a>
