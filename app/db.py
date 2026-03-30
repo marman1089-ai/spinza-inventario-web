@@ -488,3 +488,38 @@ def init_db():
                 _safe_exec(cur, stmt)
             except Exception:
                 pass
+
+        # Cashflow compatibility migrations: evita errori sui database già esistenti
+        if pg:
+            cash_alters = [
+                "ALTER TABLE cash_entries ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_entries ADD COLUMN IF NOT EXISTS amount DOUBLE PRECISION NOT NULL DEFAULT 0",
+                "ALTER TABLE cash_entries ADD COLUMN IF NOT EXISTS orders_count INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE cash_entries ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_entries ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT 'system'",
+                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS supplier TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS amount DOUBLE PRECISION NOT NULL DEFAULT 0",
+                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT 'system'",
+            ]
+        else:
+            cash_alters = [
+                "ALTER TABLE cash_entries ADD COLUMN payment_method TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_entries ADD COLUMN amount REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE cash_entries ADD COLUMN orders_count INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE cash_entries ADD COLUMN notes TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_entries ADD COLUMN created_by TEXT NOT NULL DEFAULT 'system'",
+                "ALTER TABLE cash_expenses ADD COLUMN category TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_expenses ADD COLUMN supplier TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_expenses ADD COLUMN payment_method TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_expenses ADD COLUMN amount REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE cash_expenses ADD COLUMN notes TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_expenses ADD COLUMN created_by TEXT NOT NULL DEFAULT 'system'",
+            ]
+        for stmt in cash_alters:
+            try:
+                _safe_exec(cur, stmt)
+            except Exception:
+                pass

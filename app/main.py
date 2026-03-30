@@ -542,6 +542,60 @@ def _safe_amount(value, default: float = 0.0) -> float:
     return amount if amount >= 0 else default
 
 
+def _existing_columns(cur, table_name: str):
+    """Return lowercase column names for a table on both SQLite and Postgres."""
+    table_name = (table_name or '').strip()
+    if not table_name:
+        return set()
+    try:
+        if using_postgres():
+            rows = cur.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=%s",
+                (table_name,),
+            ).fetchall()
+            names = []
+            for r in rows:
+                if isinstance(r, dict):
+                    names.append(r.get('column_name'))
+                else:
+                    names.append(r[0])
+            return {str(x).lower() for x in names if x}
+        rows = cur.execute(f"PRAGMA table_info({table_name})").fetchall()
+        names = []
+        for r in rows:
+            if isinstance(r, dict):
+                names.append(r.get('name'))
+            elif hasattr(r, 'keys') and 'name' in r.keys():
+                names.append(r['name'])
+            else:
+                names.append(r[1])
+        return {str(x).lower() for x in names if x}
+    except Exception:
+        return set()
+
+
+def _insert_cash_entry_compat(cur, store: str, flow_date: str, payment_method: str, amount: float, notes: str, created_by: str):
+    cols = _existing_columns(cur, 'cash_entries')
+    if not cols:
+        cols = {'store', 'flow_date', 'payment_method', 'amount', 'orders_count', 'notes', 'created_by'}
+    values = {
+        'store': store,
+        'flow_date': flow_date,
+        'payment_method': payment_method,
+        'amount': float(amount or 0),
+        'orders_count': 0,
+        'notes': notes or '',
+        'created_by': created_by or 'system',
+    }
+    ordered_cols = [c for c in ['store', 'flow_date', 'payment_method', 'amount', 'orders_count', 'notes', 'created_by'] if c in cols]
+    if not ordered_cols:
+        raise RuntimeError('cash_entries table not available')
+    placeholders = ','.join([_ph()] * len(ordered_cols))
+    sql = f"INSERT INTO cash_entries({', '.join(ordered_cols)}) VALUES({placeholders})"
+    params = tuple(values[c] for c in ordered_cols)
+    cur.execute(sql, params)
+
+
 def _parse_flexible_amount(text: str):
     s = (text or '').replace(" ", ' ').replace('€', ' € ')
     matches = re.findall(r"([0-9]+(?:[\.,][0-9]{1,2})?)\s*€", s)
@@ -964,20 +1018,30 @@ async def cash_entries_create(request: Request):
     base_names = list(form.getlist('method_name'))
     base_amounts = list(form.getlist('amount_value'))
     for idx, method_name in enumerate(base_names):
-        amount = _safe_amount(base_amounts[idx] if idx < len(base_amounts) else 0)
-        if amount > 0:
-            method_amounts.append((((method_name or '').strip()), amount))
+        clean_method = ((method_name or '').strip())
+        amount = _safe_amount(base_amounts[idx] if idx < len(base_amounts) else 0, 0.0)
+        if clean_method and amount > 0:
+            method_amounts.append((clean_method, amount))
 
     extra_names = list(form.getlist('custom_method_name'))
     extra_amounts = list(form.getlist('custom_method_amount'))
     for idx, name in enumerate(extra_names):
         name = (name or '').strip()
-        amount = _safe_amount(extra_amounts[idx] if idx < len(extra_amounts) else 0)
+        amount = _safe_amount(extra_amounts[idx] if idx < len(extra_amounts) else 0, 0.0)
         if name and amount > 0:
             method_amounts.append((name, amount))
 
+    # Campi vuoti = 0. Se non c'è nessun importo valido, torniamo alla pagina senza errore.
     if not method_amounts:
         return RedirectResponse('/gestionale/incassi', status_code=HTTP_303_SEE_OTHER)
+
+    with connect() as conn:
+        cur = conn.cursor()
+        for payment_method, amount in method_amounts:
+            _ensure_payment_method(cur, payment_method, user['username'])
+            _insert_cash_entry_compat(cur, store, flow_date, payment_method, amount, notes, user['username'])
+            _log(cur, store=store, username=user['username'], action='CREATE', category='CASSA', name=f"Incasso {flow_date} - {payment_method}", delta=float(amount or 0))
+    return RedirectResponse('/gestionale/incassi', status_code=HTTP_303_SEE_OTHER)
 
     ph = _ph()
     with connect() as conn:
