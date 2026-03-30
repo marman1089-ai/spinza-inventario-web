@@ -522,12 +522,27 @@ def _ensure_payment_method(cur, name: str, username: str = 'system'):
     name = (name or '').strip()
     if not name:
         return
+
     ph = _ph()
     try:
+        # IMPORTANT: on Postgres, swallowing a duplicate-key error without a
+        # rollback poisons the whole transaction and the next INSERT ends with
+        # `InFailedSqlTransaction`. So we avoid the error altogether.
+        existing = _fetch_one_int(cur, f"SELECT COUNT(*) FROM cash_payment_methods WHERE name={ph}", (name,))
+        if existing:
+            return
         max_order = _fetch_one_int(cur, "SELECT COALESCE(MAX(sort_order), 0) FROM cash_payment_methods", ())
-        cur.execute(f"INSERT INTO cash_payment_methods(name, sort_order, is_default, created_by) VALUES({ph},{ph},0,{ph})", (name, int(max_order) + 10, username or 'system'))
+        cur.execute(
+            f"INSERT INTO cash_payment_methods(name, sort_order, is_default, created_by) VALUES({ph},{ph},0,{ph})",
+            (name, int(max_order) + 10, username or 'system'),
+        )
     except Exception:
-        pass
+        # Best effort: if an unexpected DB error happens, clear the aborted
+        # transaction state on Postgres so saving the incasso can still work.
+        try:
+            cur.connection.rollback()
+        except Exception:
+            pass
 
 def _safe_amount(value, default: float = 0.0) -> float:
     raw = str(value or "").strip()
