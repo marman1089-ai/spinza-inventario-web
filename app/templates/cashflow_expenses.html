@@ -2,10 +2,14 @@
 {% set title = "Uscite" %}
 {% block content %}
 <style>
-  .chart-wrap{display:flex;align-items:flex-end;gap:12px;height:210px;padding-top:8px}
-  .day-box{display:flex;flex-direction:column;align-items:center;gap:8px;flex:1;min-width:54px}
-  .triple{display:flex;align-items:flex-end;gap:6px;height:160px}
-  .cbar{width:14px;border-radius:8px 8px 4px 4px}
+  .chart-scroll{overflow-x:auto;overflow-y:hidden;padding-bottom:8px;margin-top:12px;scrollbar-width:thin;scrollbar-color:#d1d5db transparent}
+  .chart-scroll::-webkit-scrollbar{height:8px}
+  .chart-scroll::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:999px}
+  .chart-wrap{display:flex;align-items:flex-end;gap:12px;height:214px;padding:8px 4px 0 4px;width:max-content;min-width:100%}
+  .day-box{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:8px;flex:0 0 56px;min-width:56px}
+  .triple{display:flex;align-items:flex-end;gap:6px;height:162px}
+  .cbar{width:14px;border-radius:8px 8px 4px 4px;box-shadow:0 6px 12px rgba(0,0,0,.08)}
+  @media(max-width:900px){.day-box{min-width:50px;flex-basis:50px}}
   .income{background:#111}.expense{background:#bbb}.net{background:#666}
 </style>
 <div class="card">
@@ -66,6 +70,7 @@
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Grafico settimanale {{ stores[chart_store] }}</h3>
   <div class="muted">Stesso grafico della cassa: incassi, uscite e saldo della settimana del negozio selezionato.</div>
+  <div class="chart-scroll">
   <div class="chart-wrap">
     {% for d in chart_rows %}
     <div class="day-box">
@@ -77,6 +82,7 @@
       <div style="font-size:12px;color:#666;">{{ d.label }}</div>
     </div>
     {% endfor %}
+  </div>
   </div>
 </div>
 

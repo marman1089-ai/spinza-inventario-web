@@ -8,15 +8,18 @@
   .kpi .v{font-size:30px;font-weight:800;line-height:1.1}
   .pos{color:#0f766e}.neg{color:#b91c1c}.neu{color:#374151}
   .store-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
-  .store-card{border:1px solid #ececec;border-radius:16px;padding:14px;background:#fff}
-  .bars{display:flex;align-items:flex-end;gap:8px;height:180px;padding-top:10px}
-  .bar-col{display:flex;flex-direction:column;align-items:center;gap:8px;min-width:42px;flex:1}
-  .bar{width:22px;border-radius:10px 10px 4px 4px;background:#111}
+  .store-card{border:1px solid #ececec;border-radius:18px;padding:16px;background:linear-gradient(180deg,#ffffff 0%,#fcfcfc 100%);box-shadow:0 8px 24px rgba(0,0,0,.04);overflow:hidden}
+  .chart-scroll{overflow-x:auto;overflow-y:hidden;padding-bottom:8px;margin-top:12px;scrollbar-width:thin;scrollbar-color:#d1d5db transparent}
+  .chart-scroll::-webkit-scrollbar{height:8px}
+  .chart-scroll::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:999px}
+  .bars{display:flex;align-items:flex-end;gap:8px;height:190px;padding:14px 4px 0 4px;width:max-content;min-width:100%}
+  .bar-col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:8px;min-width:44px;flex:0 0 44px}
+  .bar{width:22px;border-radius:10px 10px 4px 4px;background:#111;box-shadow:0 6px 14px rgba(0,0,0,.10)}
   .bar.neg{background:#999}
   .split{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   .line{height:10px;border-radius:999px;background:#f1f5f9;overflow:hidden}
   .line > div{height:100%;background:#111}
-  @media(max-width:980px){.hero,.kpi-grid,.split{grid-template-columns:1fr}}
+  @media(max-width:980px){.hero,.kpi-grid,.split{grid-template-columns:1fr}.store-grid{grid-template-columns:1fr}.bar-col{min-width:38px;flex-basis:38px}.bars{height:180px}}
 </style>
 
 <div class="hero">
@@ -91,6 +94,7 @@
           <div class="line"><div style="width:{{ '%.1f'|format((s.income_total/total_abs)*100) }}%"></div></div>
         </div>
       </div>
+      <div class="chart-scroll">
       <div class="bars">
         {% for d in s.days %}
         <div class="bar-col">
@@ -98,6 +102,7 @@
           <div style="font-size:12px;color:#666;">{{ d.label }}</div>
         </div>
         {% endfor %}
+      </div>
       </div>
     </div>
     {% endfor %}

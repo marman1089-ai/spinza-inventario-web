@@ -7,15 +7,18 @@
   .big-number{font-size:28px;font-weight:800}
   .growth{font-size:26px;font-weight:800}
   .growth.pos{color:#0f766e}.growth.neg{color:#b91c1c}.growth.neu{color:#374151}
-  .bars{display:flex;align-items:flex-end;gap:10px;height:170px;padding-top:10px}
-  .bar-col{display:flex;flex-direction:column;align-items:center;gap:8px;min-width:46px;flex:1}
-  .bar{width:24px;border-radius:10px 10px 4px 4px;background:#111}
+  .bars{display:flex;align-items:flex-end;gap:10px;height:184px;padding:14px 4px 0 4px;width:max-content;min-width:100%}
+  .bar-col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:8px;min-width:46px;flex:0 0 46px}
+  .bar{width:24px;border-radius:10px 10px 4px 4px;background:#111;box-shadow:0 6px 14px rgba(0,0,0,.10)}
   .bar.neg{background:#888}
   .bar-label{font-size:12px;color:#666}
-  .store-box{border:1px solid #eee;border-radius:16px;padding:12px}
+  .store-box{border:1px solid #eee;border-radius:18px;padding:14px;background:linear-gradient(180deg,#fff 0%,#fcfcfc 100%);box-shadow:0 8px 24px rgba(0,0,0,.04);overflow:hidden}
+  .chart-scroll{overflow-x:auto;overflow-y:hidden;padding-bottom:8px;margin-top:12px;scrollbar-width:thin;scrollbar-color:#d1d5db transparent}
+  .chart-scroll::-webkit-scrollbar{height:8px}
+  .chart-scroll::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:999px}
   .two-col{display:grid;grid-template-columns:1.2fr .8fr;gap:14px}
   .period-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
-  @media(max-width:900px){.two-col,.period-grid{grid-template-columns:1fr}}
+  @media(max-width:900px){.two-col,.period-grid{grid-template-columns:1fr}.bar-col{min-width:38px;flex-basis:38px}.bars{height:176px}}
 </style>
 
 <div class="card" style="margin-bottom:14px;">
@@ -83,6 +86,7 @@
         </div>
         <div class="pill">Saldo € {{ '%.2f'|format(s.net_total) }}</div>
       </div>
+      <div class="chart-scroll">
       <div class="bars">
         {% for d in s.days %}
         <div class="bar-col">
@@ -90,6 +94,7 @@
           <div class="bar-label">{{ d.label }}</div>
         </div>
         {% endfor %}
+      </div>
       </div>
     </div>
     {% endfor %}
