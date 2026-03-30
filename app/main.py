@@ -353,6 +353,9 @@ def login_post(request: Request, username: str = Form(...), password: str = Form
     if not store or store not in STORES:
         return RedirectResponse("/select-store", status_code=HTTP_303_SEE_OTHER)
 
+    amount_value = _safe_amount(amount)
+    if amount_value <= 0:
+        return RedirectResponse('/gestionale/uscite', status_code=HTTP_303_SEE_OTHER)
     ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
@@ -525,6 +528,19 @@ def _ensure_payment_method(cur, name: str, username: str = 'system'):
         cur.execute(f"INSERT INTO cash_payment_methods(name, sort_order, is_default, created_by) VALUES({ph},{ph},0,{ph})", (name, int(max_order) + 10, username or 'system'))
     except Exception:
         pass
+
+def _safe_amount(value, default: float = 0.0) -> float:
+    raw = str(value or "").strip()
+    if not raw:
+        return default
+    raw = raw.replace("€", "").replace("EUR", "").replace("eur", "").replace(" ", "")
+    raw = raw.replace(",", ".")
+    try:
+        amount = float(raw)
+    except Exception:
+        return default
+    return amount if amount >= 0 else default
+
 
 def _parse_flexible_amount(text: str):
     s = (text or '').replace(" ", ' ').replace('€', ' € ')
@@ -948,10 +964,7 @@ async def cash_entries_create(request: Request):
     base_names = list(form.getlist('method_name'))
     base_amounts = list(form.getlist('amount_value'))
     for idx, method_name in enumerate(base_names):
-        try:
-            amount = float(base_amounts[idx] or 0)
-        except Exception:
-            amount = 0.0
+        amount = _safe_amount(base_amounts[idx] if idx < len(base_amounts) else 0)
         if amount > 0:
             method_amounts.append((((method_name or '').strip()), amount))
 
@@ -959,10 +972,7 @@ async def cash_entries_create(request: Request):
     extra_amounts = list(form.getlist('custom_method_amount'))
     for idx, name in enumerate(extra_names):
         name = (name or '').strip()
-        try:
-            amount = float(extra_amounts[idx] or 0)
-        except Exception:
-            amount = 0.0
+        amount = _safe_amount(extra_amounts[idx] if idx < len(extra_amounts) else 0)
         if name and amount > 0:
             method_amounts.append((name, amount))
 
@@ -976,85 +986,16 @@ async def cash_entries_create(request: Request):
             _ensure_payment_method(cur, payment_method, user['username'])
             cur.execute(
                 f"INSERT INTO cash_entries(store, flow_date, payment_method, amount, orders_count, notes, created_by) VALUES({ph},{ph},{ph},{ph},0,{ph},{ph})",
-                (store, flow_date, payment_method, float(amount or 0), notes, user['username']),
+                (store, flow_date, payment_method, amount, notes, user['username']),
             )
             _log(cur, store=store, username=user['username'], action='CREATE', category='CASSA', name=f"Incasso {flow_date} - {payment_method}", delta=float(amount or 0))
     return RedirectResponse('/gestionale/incassi', status_code=HTTP_303_SEE_OTHER)
 
 
 @app.post("/gestionale/incassi/import-txt")
-async def cash_entries_import_txt(request: Request, store: str = Form(''), file: UploadFile = File(...)):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-
-    selected_store = (store or '').strip()
-    if selected_store not in STORES:
-        selected_store = user.get('store') or 'spinza'
-    if not is_admin(request):
-        selected_store = user.get('store') or selected_store
-
-    filename = (file.filename or '').lower()
-    if not filename.endswith('.txt'):
-        return RedirectResponse('/gestionale/incassi?import_error=Carica+un+file+.txt', status_code=HTTP_303_SEE_OTHER)
-
-    raw = await file.read()
-    text = ''
-    for enc in ('utf-8', 'utf-8-sig', 'latin-1'):
-        try:
-            text = raw.decode(enc)
-            break
-        except Exception:
-            continue
-    if not text:
-        return RedirectResponse('/gestionale/incassi?import_error=File+non+leggibile', status_code=HTTP_303_SEE_OTHER)
-
-    blocks = _parse_import_txt_blocks(text, fallback_store=selected_store)
-    if not blocks:
-        return RedirectResponse('/gestionale/incassi?import_error=Nessun+blocco+data+riconosciuto+nel+TXT', status_code=HTTP_303_SEE_OTHER)
-
-    imported_entries = 0
-    imported_expenses = 0
-    ph = _ph()
-    with connect() as conn:
-        cur = conn.cursor()
-        for block in blocks:
-            block_store = block.get('store') or selected_store
-            if not is_admin(request):
-                block_store = user.get('store') or block_store
-            shared_notes = ['Import automatico da TXT']
-            for note in block.get('notes') or []:
-                note = (note or '').strip()
-                if note and note not in shared_notes:
-                    shared_notes.append(note)
-            notes_value = ' | '.join(shared_notes)
-
-            for inc in block.get('incomes') or []:
-                payment_method = (inc.get('payment_method') or '').strip()
-                amount = float(inc.get('amount') or 0)
-                if not payment_method or amount <= 0:
-                    continue
-                _ensure_payment_method(cur, payment_method, user['username'])
-                cur.execute(
-                    f"INSERT INTO cash_entries(store, flow_date, payment_method, amount, orders_count, notes, created_by) VALUES({ph},{ph},{ph},{ph},0,{ph},{ph})",
-                    (block_store, block['date'], payment_method, amount, notes_value, user['username']),
-                )
-                _log(cur, store=block_store, username=user['username'], action='IMPORT', category='CASSA', name=f"Import TXT {block['date']} - {payment_method}", delta=amount)
-                imported_entries += 1
-
-            for exp in block.get('expenses') or []:
-                amount = float(exp.get('amount') or 0)
-                supplier = (exp.get('name') or 'Voce importata').strip()
-                if amount <= 0:
-                    continue
-                cur.execute(
-                    f"INSERT INTO cash_expenses(store, flow_date, category, supplier, payment_method, amount, notes, created_by) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
-                    (block_store, block['date'], 'Import TXT', supplier[:120], 'vario', amount, f"Import automatico da TXT | {exp.get('raw')}", user['username']),
-                )
-                _log(cur, store=block_store, username=user['username'], action='IMPORT', category='USCITA', name=f"Import TXT {block['date']} - {supplier[:80]}", delta=-amount)
-                imported_expenses += 1
-
-    return RedirectResponse(f'/gestionale/incassi?imported_entries={imported_entries}&imported_expenses={imported_expenses}', status_code=HTTP_303_SEE_OTHER)
+async def cash_entries_import_txt(request: Request):
+    require_login(request)
+    return RedirectResponse('/gestionale/incassi?import_error=Import+TXT+disattivato', status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/gestionale/uscite", response_class=HTMLResponse)
@@ -1099,7 +1040,7 @@ def cash_expenses_create(
     category: str = Form(...),
     supplier: str = Form(""),
     payment_method: str = Form(""),
-    amount: float = Form(...),
+    amount: str = Form(''),
     notes: str = Form(""),
 ):
     user = require_login(request)
@@ -1109,14 +1050,17 @@ def cash_expenses_create(
         store = user.get('store') or 'spinza'
     if not is_admin(request):
         store = user.get('store') or store
+    amount_value = _safe_amount(amount)
+    if amount_value <= 0:
+        return RedirectResponse('/gestionale/uscite', status_code=HTTP_303_SEE_OTHER)
     ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
         cur.execute(
             f"INSERT INTO cash_expenses(store, flow_date, category, supplier, payment_method, amount, notes, created_by) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (store, flow_date, (category or '').strip(), (supplier or '').strip(), (payment_method or '').strip(), float(amount or 0), (notes or '').strip(), user['username']),
+            (store, flow_date, (category or '').strip(), (supplier or '').strip(), (payment_method or '').strip(), amount_value, (notes or '').strip(), user['username']),
         )
-        _log(cur, store=store, username=user['username'], action='CREATE', category='CASSA', name=f"Uscita {flow_date} - {(category or '').strip()}", delta=-float(amount or 0))
+        _log(cur, store=store, username=user['username'], action='CREATE', category='CASSA', name=f"Uscita {flow_date} - {(category or '').strip()}", delta=-amount_value)
     return RedirectResponse('/gestionale/uscite', status_code=HTTP_303_SEE_OTHER)
 
 @app.get("/inventario-home", response_class=HTMLResponse)
