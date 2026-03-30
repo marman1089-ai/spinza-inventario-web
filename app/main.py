@@ -1142,6 +1142,70 @@ def cash_expenses_create(
         _log(cur, store=store, username=user['username'], action='CREATE', category='CASSA', name=f"Uscita {flow_date} - {(category or '').strip()}", delta=-amount_value)
     return RedirectResponse('/gestionale/uscite', status_code=HTTP_303_SEE_OTHER)
 
+@app.post("/gestionale/incassi/{entry_id}/delete")
+def cash_entries_delete(request: Request, entry_id: int):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if user.get('role') not in ('admin', 'manager', 'staff'):
+        return RedirectResponse('/gestionale/incassi', status_code=HTTP_303_SEE_OTHER)
+
+    brand = _current_store_scope(request, user)
+    where_sql, params = _cash_scope_where(brand)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(
+            f"SELECT id, store, flow_date, payment_method, amount FROM cash_entries WHERE id={ph} AND {where_sql}",
+            (entry_id, *params),
+        ).fetchone()
+        if row:
+            row = dict(row)
+            cur.execute(f"DELETE FROM cash_entries WHERE id={ph}", (entry_id,))
+            _log(
+                cur,
+                store=row.get('store') or (user.get('store') or 'spinza'),
+                username=user['username'],
+                action='DELETE',
+                category='CASSA',
+                name=f"Incasso eliminato {row.get('flow_date', '')} - {row.get('payment_method', '')}",
+                delta=-float(row.get('amount') or 0),
+            )
+    return RedirectResponse('/gestionale/incassi', status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/gestionale/uscite/{expense_id}/delete")
+def cash_expenses_delete(request: Request, expense_id: int):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if user.get('role') not in ('admin', 'manager', 'staff'):
+        return RedirectResponse('/gestionale/uscite', status_code=HTTP_303_SEE_OTHER)
+
+    brand = _current_store_scope(request, user)
+    where_sql, params = _cash_scope_where(brand)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(
+            f"SELECT id, store, flow_date, category, amount FROM cash_expenses WHERE id={ph} AND {where_sql}",
+            (expense_id, *params),
+        ).fetchone()
+        if row:
+            row = dict(row)
+            cur.execute(f"DELETE FROM cash_expenses WHERE id={ph}", (expense_id,))
+            _log(
+                cur,
+                store=row.get('store') or (user.get('store') or 'spinza'),
+                username=user['username'],
+                action='DELETE',
+                category='CASSA',
+                name=f"Uscita eliminata {row.get('flow_date', '')} - {row.get('category', '')}",
+                delta=float(row.get('amount') or 0),
+            )
+    return RedirectResponse('/gestionale/uscite', status_code=HTTP_303_SEE_OTHER)
+
+
 @app.get("/inventario-home", response_class=HTMLResponse)
 def inventario_home(request: Request):
     user = require_login(request)

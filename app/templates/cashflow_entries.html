@@ -121,7 +121,7 @@
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Storico incassi</h3>
   <table>
-    <thead><tr><th>Data</th><th>Sede</th><th>Metodo</th><th>Importo</th><th>Note</th><th>Creato da</th></tr></thead>
+    <thead><tr><th>Data</th><th>Sede</th><th>Metodo</th><th>Importo</th><th>Note</th><th>Creato da</th>{% if can_edit_management %}<th>Azione</th>{% endif %}</tr></thead>
     <tbody>
       {% for r in rows %}
       <tr>
@@ -131,9 +131,16 @@
         <td><strong>€ {{ '%.2f'|format(r.amount or 0) }}</strong></td>
         <td>{{ r.notes or '-' }}</td>
         <td>{{ r.created_by }}</td>
+        {% if can_edit_management %}
+        <td>
+          <form method="post" action="/gestionale/incassi/{{ r.id }}/delete" onsubmit="return confirm('Eliminare questo incasso?');" style="margin:0;">
+            <button class="btn2" type="submit" style="border-color:#fecaca;background:#fff1f2;">Elimina</button>
+          </form>
+        </td>
+        {% endif %}
       </tr>
       {% else %}
-      <tr><td colspan="6" class="muted">Ancora nessun incasso registrato.</td></tr>
+      <tr><td colspan="7" class="muted">Ancora nessun incasso registrato.</td></tr>
       {% endfor %}
     </tbody>
   </table>
