@@ -10,13 +10,17 @@
   .entry-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
   .method-card{border:1px solid #ececec;border-radius:14px;padding:12px;background:#fafafa}
   .custom-row{display:grid;grid-template-columns:1.2fr .8fr;gap:10px;margin-top:10px}
-  @media(max-width:900px){.entry-grid,.custom-row{grid-template-columns:1fr}}
+  .two-col{display:grid;grid-template-columns:1.08fr .92fr;gap:14px}
+  .ok-box,.err-box{padding:12px 14px;border-radius:14px;margin-top:14px}
+  .ok-box{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46}
+  .err-box{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}
+  @media(max-width:900px){.entry-grid,.custom-row,.two-col{grid-template-columns:1fr}}
 </style>
 <div class="card">
   <div class="row" style="justify-content:space-between;align-items:center;">
     <div>
       <h2 style="margin:0 0 6px 0;">💶 Incassi</h2>
-      <div class="muted">Inserimento serio per negozio e data. Salvi più metodi di pagamento in una sola operazione.</div>
+      <div class="muted">Inserimento giornaliero professionale: niente numero ordini, più spazio alle note e import automatico da file .txt.</div>
     </div>
     <div class="row">
       <a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Dashboard</a>
@@ -25,8 +29,16 @@
   </div>
 </div>
 
+{% if import_error %}
+<div class="err-box">{{ import_error.replace('+', ' ') }}</div>
+{% endif %}
+{% if imported_entries or imported_expenses %}
+<div class="ok-box">Import completato: <strong>{{ imported_entries }}</strong> righe incasso e <strong>{{ imported_expenses }}</strong> righe uscita create automaticamente.</div>
+{% endif %}
+
+<div class="two-col" style="margin-top:14px;">
 {% if can_edit_management %}
-<div class="card" style="margin-top:14px;">
+<div class="card">
   <h3 style="margin-top:0;">Nuovo incasso giornaliero</h3>
   <form method="post" action="/gestionale/incassi" id="incasso-form">
     <div class="row" style="margin-bottom:12px;">
@@ -38,8 +50,7 @@
           {% endif %}
         {% endfor %}
       </select>
-      <input type="number" step="1" min="0" name="orders_count" placeholder="N. ordini totali">
-      <input name="notes" placeholder="Note giornaliere / dettaglio" style="min-width:260px;flex:1;">
+      <input name="notes" placeholder="Note giornaliere / anomalie / dettagli" style="min-width:260px;flex:1;">
     </div>
 
     <div class="entry-grid">
@@ -68,12 +79,32 @@
     </div>
   </form>
 </div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Import automatico da .txt</h3>
+  <div class="muted" style="margin-bottom:10px;">Carichi un file con blocchi data tipo <strong>01/02/26</strong>, righe <strong>Pos/Cash/Deliveroo/Glovo/Just eat</strong>, note e anche eventuali spese. Il sistema prova a creare da solo incassi e uscite.</div>
+  <form method="post" action="/gestionale/incassi/import-txt" enctype="multipart/form-data">
+    <div class="row" style="margin-bottom:12px;">
+      <select name="store">
+        {% for key, label in stores.items() %}
+          {% if brand == 'ALL' or brand == key %}
+          <option value="{{ key }}" {% if active_store==key or (brand==key and brand!='ALL') %}selected{% endif %}>{{ label }}</option>
+          {% endif %}
+        {% endfor %}
+      </select>
+      <input type="file" name="file" accept=".txt" required>
+    </div>
+    <div class="muted" style="margin-bottom:10px;">Riconosce anche metodi extra come <strong>Scuola</strong>. Le righe non di incasso vengono trasformate in uscite categoria <strong>Import TXT</strong>.</div>
+    <button class="btn" type="submit">Importa file .txt</button>
+  </form>
+</div>
 {% endif %}
+</div>
 
 <div class="row" style="margin-top:14px;">
   <div class="card" style="flex:1;min-width:220px;"><div class="muted">Totale filtrato</div><div style="font-size:30px;font-weight:800;">€ {{ '%.2f'|format(total_amount) }}</div></div>
-  <div class="card" style="flex:1;min-width:220px;"><div class="muted">Ordini filtrati</div><div style="font-size:30px;font-weight:800;">{{ total_orders }}</div></div>
   <div class="card" style="flex:1;min-width:220px;"><div class="muted">Negozio grafico</div><div style="font-size:22px;font-weight:800;">{{ stores[chart_store] }}</div></div>
+  <div class="card" style="flex:1;min-width:220px;"><div class="muted">Note</div><div style="font-size:15px;font-weight:700;line-height:1.4;">Ora le anomalie rimangono salvate direttamente su ogni giornata.</div></div>
 </div>
 
 <div class="card" style="margin-top:14px;">
@@ -115,7 +146,7 @@
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Storico incassi</h3>
   <table>
-    <thead><tr><th>Data</th><th>Sede</th><th>Metodo</th><th>Importo</th><th>Ordini</th><th>Note</th><th>Creato da</th></tr></thead>
+    <thead><tr><th>Data</th><th>Sede</th><th>Metodo</th><th>Importo</th><th>Note</th><th>Creato da</th></tr></thead>
     <tbody>
       {% for r in rows %}
       <tr>
@@ -123,12 +154,11 @@
         <td>{{ stores[r.store] if r.store in stores else r.store }}</td>
         <td>{{ r.payment_method }}</td>
         <td><strong>€ {{ '%.2f'|format(r.amount or 0) }}</strong></td>
-        <td>{{ r.orders_count }}</td>
         <td>{{ r.notes or '-' }}</td>
         <td>{{ r.created_by }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="7" class="muted">Ancora nessun incasso registrato.</td></tr>
+      <tr><td colspan="6" class="muted">Ancora nessun incasso registrato.</td></tr>
       {% endfor %}
     </tbody>
   </table>
