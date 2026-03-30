@@ -306,6 +306,32 @@ def init_db():
             ts {ts_default}
         )
         """)
+
+        # CASH FLOW: metodi di pagamento configurabili per gli incassi
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS cash_payment_methods (
+            id {id_col},
+            name TEXT NOT NULL UNIQUE,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            is_default INTEGER NOT NULL DEFAULT 0,
+            created_by TEXT NOT NULL DEFAULT 'system',
+            ts {ts_default}
+        )
+        """)
+
+        default_payment_methods = [
+            ('contanti', 10, 1),
+            ('pos', 20, 1),
+            ('deliveroo', 30, 1),
+            ('glovo', 40, 1),
+            ('just eat', 50, 1),
+        ]
+        for name, sort_order, is_default in default_payment_methods:
+            try:
+                _safe_exec(cur, f"INSERT INTO cash_payment_methods(name, sort_order, is_default, created_by) VALUES({ph},{ph},{ph},{ph})", (name, sort_order, is_default, 'system'))
+            except Exception:
+                pass
+
         # LOGISTICS: order queue + orders
         _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS order_queue (

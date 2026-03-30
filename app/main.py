@@ -464,12 +464,85 @@ def _weekly_dates(days: int = 7):
     return dates
 
 
-def _build_cash_dashboard(cur, scope_store: str):
-    where_sql, params = _cash_scope_where(scope_store)
-    week_dates = _weekly_dates(7)
-    start_s = week_dates[0].isoformat()
-    end_s = week_dates[-1].isoformat()
+def _period_bounds(period_type: str, anchor_day: date):
+    period_type = (period_type or 'day').lower()
+    if period_type == 'month':
+        start = anchor_day.replace(day=1)
+        if start.month == 12:
+            next_month = start.replace(year=start.year + 1, month=1, day=1)
+        else:
+            next_month = start.replace(month=start.month + 1, day=1)
+        end = next_month - timedelta(days=1)
+    elif period_type == 'week':
+        start = anchor_day - timedelta(days=anchor_day.weekday())
+        end = start + timedelta(days=6)
+    else:
+        start = anchor_day
+        end = anchor_day
+        period_type = 'day'
+    return period_type, start, end
+
+
+def _shift_previous_period(period_type: str, start: date, end: date):
+    if period_type == 'month':
+        prev_end = start - timedelta(days=1)
+        prev_start = prev_end.replace(day=1)
+    else:
+        span_days = (end - start).days + 1
+        prev_end = start - timedelta(days=1)
+        prev_start = prev_end - timedelta(days=span_days - 1)
+    return prev_start, prev_end
+
+
+def _pct_change(current: float, previous: float):
+    current = float(current or 0)
+    previous = float(previous or 0)
+    diff = current - previous
+    if previous == 0:
+        if current == 0:
+            return 0.0
+        return 100.0
+    return (diff / abs(previous)) * 100.0
+
+
+def _load_cash_payment_methods(cur):
+    rows = _dict_rows(cur, "SELECT name FROM cash_payment_methods ORDER BY sort_order ASC, name ASC")
+    names = [str(r.get('name') or '').strip() for r in rows if str(r.get('name') or '').strip()]
+    base = ['contanti', 'pos', 'deliveroo', 'glovo', 'just eat']
+    for name in base:
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def _ensure_payment_method(cur, name: str, username: str = 'system'):
+    name = (name or '').strip()
+    if not name:
+        return
     ph = _ph()
+    try:
+        max_order = _fetch_one_int(cur, "SELECT COALESCE(MAX(sort_order), 0) FROM cash_payment_methods", ())
+        cur.execute(f"INSERT INTO cash_payment_methods(name, sort_order, is_default, created_by) VALUES({ph},{ph},0,{ph})", (name, int(max_order) + 10, username or 'system'))
+    except Exception:
+        pass
+
+
+def _build_cash_dashboard(cur, scope_store: str, period_type: str = 'week', anchor_s: str = ''):
+    anchor_day = date.today()
+    if anchor_s:
+        try:
+            anchor_day = datetime.strptime(anchor_s, '%Y-%m-%d').date()
+        except Exception:
+            anchor_day = date.today()
+    period_type, start_d, end_d = _period_bounds(period_type, anchor_day)
+    prev_start, prev_end = _shift_previous_period(period_type, start_d, end_d)
+
+    where_sql, params = _cash_scope_where(scope_store)
+    ph = _ph()
+    start_s = start_d.isoformat()
+    end_s = end_d.isoformat()
+    prev_start_s = prev_start.isoformat()
+    prev_end_s = prev_end.isoformat()
 
     entries = _dict_rows(cur, f"SELECT store, flow_date, SUM(amount) AS total FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY store, flow_date ORDER BY flow_date ASC", params + (start_s, end_s))
     expenses = _dict_rows(cur, f"SELECT store, flow_date, SUM(amount) AS total FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY store, flow_date ORDER BY flow_date ASC", params + (start_s, end_s))
@@ -479,11 +552,13 @@ def _build_cash_dashboard(cur, scope_store: str):
 
     stores = list(STORES.keys()) if scope_store == 'ALL' else [scope_store]
     compare = []
+    days_count = (end_d - start_d).days + 1
+    day_list = [start_d + timedelta(days=i) for i in range(days_count)]
     for s in stores:
         days = []
         total_in = 0.0
         total_out = 0.0
-        for d in week_dates:
+        for d in day_list:
             ds = d.isoformat()
             inc = by_entry.get((s, ds), 0.0)
             usc = by_expense.get((s, ds), 0.0)
@@ -510,34 +585,62 @@ def _build_cash_dashboard(cur, scope_store: str):
             'net_total': total_in - total_out,
         })
 
+    income_current = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph}", params + (start_s, end_s))
+    expense_current = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph}", params + (start_s, end_s))
+    income_previous = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph}", params + (prev_start_s, prev_end_s))
+    expense_previous = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph}", params + (prev_start_s, prev_end_s))
+
     totals = {
         'income_today': _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_entries WHERE {where_sql} AND flow_date={ph}", params + (date.today().isoformat(),)),
         'expense_today': _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_expenses WHERE {where_sql} AND flow_date={ph}", params + (date.today().isoformat(),)),
-        'income_week': _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph}", params + (start_s, end_s)),
-        'expense_week': _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph}", params + (start_s, end_s)),
+        'income_period': income_current,
+        'expense_period': expense_current,
+        'net_period': income_current - expense_current,
+        'income_previous_period': income_previous,
+        'expense_previous_period': expense_previous,
+        'net_previous_period': income_previous - expense_previous,
+        'income_growth_pct': _pct_change(income_current, income_previous),
+        'expense_growth_pct': _pct_change(expense_current, expense_previous),
+        'net_growth_pct': _pct_change(income_current - expense_current, income_previous - expense_previous),
         'entries_count': _fetch_one_int(cur, f"SELECT COUNT(*) FROM cash_entries WHERE {where_sql}", params),
         'expenses_count': _fetch_one_int(cur, f"SELECT COUNT(*) FROM cash_expenses WHERE {where_sql}", params),
     }
     totals['net_today'] = totals['income_today'] - totals['expense_today']
-    totals['net_week'] = totals['income_week'] - totals['expense_week']
 
     recent_entries = _dict_rows(cur, f"SELECT id, flow_date, store, payment_method, amount, orders_count, notes FROM cash_entries WHERE {where_sql} ORDER BY flow_date DESC, id DESC LIMIT 10", params)
     recent_expenses = _dict_rows(cur, f"SELECT id, flow_date, store, category, supplier, payment_method, amount, notes FROM cash_expenses WHERE {where_sql} ORDER BY flow_date DESC, id DESC LIMIT 10", params)
-    return compare, totals, recent_entries, recent_expenses
+    period_meta = {
+        'type': period_type,
+        'anchor': anchor_day.isoformat(),
+        'start': start_s,
+        'end': end_s,
+        'prev_start': prev_start_s,
+        'prev_end': prev_end_s,
+        'label': 'giorno' if period_type == 'day' else ('settimana' if period_type == 'week' else 'mese'),
+    }
+    return compare, totals, recent_entries, recent_expenses, period_meta
 
 
-def _build_store_week_chart(cur, store: str):
+def _build_store_period_chart(cur, store: str, period_type: str = 'week', anchor_s: str = ''):
+    anchor_day = date.today()
+    if anchor_s:
+        try:
+            anchor_day = datetime.strptime(anchor_s, '%Y-%m-%d').date()
+        except Exception:
+            pass
+    period_type, start_d, end_d = _period_bounds(period_type, anchor_day)
     ph = _ph()
-    week_dates = _weekly_dates(7)
-    start_s = week_dates[0].isoformat()
-    end_s = week_dates[-1].isoformat()
+    start_s = start_d.isoformat()
+    end_s = end_d.isoformat()
     entries = _dict_rows(cur, f"SELECT flow_date, SUM(amount) AS total FROM cash_entries WHERE store={ph} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date ORDER BY flow_date ASC", (store, start_s, end_s))
     expenses = _dict_rows(cur, f"SELECT flow_date, SUM(amount) AS total FROM cash_expenses WHERE store={ph} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date ORDER BY flow_date ASC", (store, start_s, end_s))
     by_entry = {str(r['flow_date']): float(r.get('total') or 0) for r in entries}
     by_expense = {str(r['flow_date']): float(r.get('total') or 0) for r in expenses}
     rows = []
     max_amount = 1.0
-    for d in week_dates:
+    days_count = (end_d - start_d).days + 1
+    for i in range(days_count):
+        d = start_d + timedelta(days=i)
         ds = d.isoformat()
         inc = by_entry.get(ds, 0.0)
         usc = by_expense.get(ds, 0.0)
@@ -549,6 +652,7 @@ def _build_store_week_chart(cur, store: str):
         r['net_h'] = max(8, int((abs(r['net'])/max_amount)*130)) if r['net'] else 8
         r['positive'] = r['net'] >= 0
     return rows
+
 
 @app.get("/workspace", response_class=HTMLResponse)
 def workspace_home(request: Request):
@@ -562,7 +666,7 @@ def workspace_home(request: Request):
 
 
 @app.get("/gestionale", response_class=HTMLResponse)
-def gestionale_home(request: Request):
+def gestionale_home(request: Request, period_type: str = 'week', anchor_date: str = ''):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -625,7 +729,7 @@ def gestionale_home(request: Request):
             """
             recent_docs = [dict(r) for r in cur.execute(sql, (store, store, store)).fetchall()]
 
-        compare, totals, recent_entries, recent_expenses = _build_cash_dashboard(cur, store)
+        compare, totals, recent_entries, recent_expenses, period_meta = _build_cash_dashboard(cur, store, period_type, anchor_date)
 
     return render(
         "gestionale_home.html",
@@ -638,15 +742,14 @@ def gestionale_home(request: Request):
         totals=totals,
         recent_entries=recent_entries,
         recent_expenses=recent_expenses,
-        week_start=_weekly_dates(7)[0].strftime('%d/%m/%Y'),
-        week_end=_weekly_dates(7)[-1].strftime('%d/%m/%Y'),
+        period_meta=period_meta,
     )
 
 
 
 
 @app.get("/gestionale/dashboard", response_class=HTMLResponse)
-def gestionale_dashboard(request: Request):
+def gestionale_dashboard(request: Request, period_type: str = 'week', anchor_date: str = ''):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -655,7 +758,7 @@ def gestionale_dashboard(request: Request):
     active_store = request.session.get("active_store") if is_admin(request) else None
     with connect() as conn:
         cur = conn.cursor()
-        compare, totals, recent_entries, recent_expenses = _build_cash_dashboard(cur, brand)
+        compare, totals, recent_entries, recent_expenses, period_meta = _build_cash_dashboard(cur, brand, period_type, anchor_date)
     return render(
         "cashflow_dashboard.html",
         user=user,
@@ -663,8 +766,7 @@ def gestionale_dashboard(request: Request):
         active_store=active_store,
         compare=compare,
         totals=totals,
-        week_start=_weekly_dates(7)[0].strftime('%d/%m/%Y'),
-        week_end=_weekly_dates(7)[-1].strftime('%d/%m/%Y'),
+        period_meta=period_meta,
         recent_entries=recent_entries,
         recent_expenses=recent_expenses,
         stores=STORES,
@@ -672,7 +774,7 @@ def gestionale_dashboard(request: Request):
 
 
 @app.get("/gestionale/incassi", response_class=HTMLResponse)
-def cash_entries_page(request: Request, flow_date: str = "", payment_method: str = "ALL"):
+def cash_entries_page(request: Request, flow_date: str = '', payment_method: str = 'ALL', period_type: str = 'week', anchor_date: str = ''):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -694,7 +796,8 @@ def cash_entries_page(request: Request, flow_date: str = "", payment_method: str
         cur = conn.cursor()
         rows = _dict_rows(cur, sql, tuple(qparams))
         payments = [r['payment_method'] for r in _dict_rows(cur, f"SELECT DISTINCT payment_method FROM cash_entries WHERE {where_sql} ORDER BY payment_method ASC", params) if r.get('payment_method')]
-        chart_rows = _build_store_week_chart(cur, brand if brand != 'ALL' else (active_store or 'spinza'))
+        available_payment_methods = _load_cash_payment_methods(cur)
+        chart_rows = _build_store_period_chart(cur, brand if brand != 'ALL' else (active_store or 'spinza'), period_type, anchor_date)
         total_amount = sum(float(r.get('amount') or 0) for r in rows)
         total_orders = sum(int(r.get('orders_count') or 0) for r in rows)
     return render(
@@ -703,34 +806,61 @@ def cash_entries_page(request: Request, flow_date: str = "", payment_method: str
         can_edit_management=can_edit_management, rows=rows, today=date.today().isoformat(),
         selected_date=flow_date, selected_payment=payment_method, payments=payments,
         total_amount=total_amount, total_orders=total_orders, chart_rows=chart_rows, chart_store=(brand if brand != 'ALL' else (active_store or 'spinza')),
+        available_payment_methods=available_payment_methods, selected_period_type=period_type, selected_anchor_date=(anchor_date or date.today().isoformat()),
     )
 
 
 @app.post("/gestionale/incassi")
-def cash_entries_create(
-    request: Request,
-    flow_date: str = Form(...),
-    store: str = Form(...),
-    payment_method: str = Form(...),
-    amount: float = Form(...),
-    orders_count: int = Form(0),
-    notes: str = Form(""),
-):
+async def cash_entries_create(request: Request):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    form = await request.form()
+    flow_date = str(form.get('flow_date') or '').strip() or date.today().isoformat()
+    store = str(form.get('store') or '').strip()
+    notes = str(form.get('notes') or '').strip()
+    orders_count = int(float(form.get('orders_count') or 0) or 0)
     if store not in STORES:
         store = user.get('store') or 'spinza'
     if not is_admin(request):
         store = user.get('store') or store
+
+    method_amounts = []
+    base_names = list(form.getlist('method_name'))
+    base_amounts = list(form.getlist('amount_value'))
+    for idx, method_name in enumerate(base_names):
+        try:
+            amount = float(base_amounts[idx] or 0)
+        except Exception:
+            amount = 0.0
+        if amount > 0:
+            method_amounts.append((((method_name or '').strip()), amount))
+
+    extra_names = list(form.getlist('custom_method_name'))
+    extra_amounts = list(form.getlist('custom_method_amount'))
+    for idx, name in enumerate(extra_names):
+        name = (name or '').strip()
+        try:
+            amount = float(extra_amounts[idx] or 0)
+        except Exception:
+            amount = 0.0
+        if name and amount > 0:
+            method_amounts.append((name, amount))
+
+    if not method_amounts:
+        return RedirectResponse('/gestionale/incassi', status_code=HTTP_303_SEE_OTHER)
+
     ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
-        cur.execute(
-            f"INSERT INTO cash_entries(store, flow_date, payment_method, amount, orders_count, notes, created_by) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (store, flow_date, (payment_method or '').strip(), float(amount or 0), int(orders_count or 0), (notes or '').strip(), user['username']),
-        )
-        _log(cur, store=store, username=user['username'], action='CREATE', category='CASSA', name=f"Incasso {flow_date} - {(payment_method or '').strip()}", delta=float(amount or 0))
+        for idx, (payment_method, amount) in enumerate(method_amounts):
+            _ensure_payment_method(cur, payment_method, user['username'])
+            entry_orders = orders_count if idx == 0 else 0
+            cur.execute(
+                f"INSERT INTO cash_entries(store, flow_date, payment_method, amount, orders_count, notes, created_by) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (store, flow_date, payment_method, float(amount or 0), int(entry_orders or 0), notes, user['username']),
+            )
+            _log(cur, store=store, username=user['username'], action='CREATE', category='CASSA', name=f"Incasso {flow_date} - {payment_method}", delta=float(amount or 0))
     return RedirectResponse('/gestionale/incassi', status_code=HTTP_303_SEE_OTHER)
 
 
@@ -757,7 +887,7 @@ def cash_expenses_page(request: Request, flow_date: str = "", category: str = "A
         cur = conn.cursor()
         rows = _dict_rows(cur, sql, tuple(qparams))
         categories = [r['category'] for r in _dict_rows(cur, f"SELECT DISTINCT category FROM cash_expenses WHERE {where_sql} ORDER BY category ASC", params) if r.get('category')]
-        chart_rows = _build_store_week_chart(cur, brand if brand != 'ALL' else (active_store or 'spinza'))
+        chart_rows = _build_store_period_chart(cur, brand if brand != 'ALL' else (active_store or 'spinza'))
         total_amount = sum(float(r.get('amount') or 0) for r in rows)
     return render(
         "cashflow_expenses.html",

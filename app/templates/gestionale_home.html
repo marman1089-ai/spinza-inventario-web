@@ -4,23 +4,25 @@
 <style>
   .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
   .mini-stat{background:#fff;border-radius:14px;padding:14px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+  .big-number{font-size:28px;font-weight:800}
+  .growth{font-size:26px;font-weight:800}
+  .growth.pos{color:#0f766e}.growth.neg{color:#b91c1c}.growth.neu{color:#374151}
   .bars{display:flex;align-items:flex-end;gap:10px;height:170px;padding-top:10px}
   .bar-col{display:flex;flex-direction:column;align-items:center;gap:8px;min-width:46px;flex:1}
   .bar{width:24px;border-radius:10px 10px 4px 4px;background:#111}
   .bar.neg{background:#888}
-  .bar.income{background:#1f2937}
-  .bar.expense{background:#cfcfcf}
   .bar-label{font-size:12px;color:#666}
   .store-box{border:1px solid #eee;border-radius:16px;padding:12px}
   .two-col{display:grid;grid-template-columns:1.2fr .8fr;gap:14px}
-  @media(max-width:900px){.two-col{grid-template-columns:1fr}}
+  .period-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+  @media(max-width:900px){.two-col,.period-grid{grid-template-columns:1fr}}
 </style>
 
 <div class="card" style="margin-bottom:14px;">
   <div class="row" style="justify-content:space-between;align-items:center;">
     <div>
       <h2 style="margin:0 0 6px 0;">📊 Gestionale cassa</h2>
-      <div class="muted">Da qui inserisci incassi e uscite in modo ordinato per negozio. Dashboard settimanale dal {{ week_start }} al {{ week_end }}.</div>
+      <div class="muted">Dashboard confronto {{ period_meta.label }} corrente ({{ period_meta.start }}) → ({{ period_meta.end }}) contro periodo precedente ({{ period_meta.prev_start }}) → ({{ period_meta.prev_end }}).</div>
     </div>
     <div class="row">
       <a href="/gestionale/incassi" class="btn" style="text-decoration:none;display:inline-block;">+ Incasso</a>
@@ -29,18 +31,47 @@
   </div>
 </div>
 
+<div class="card" style="margin-bottom:14px;">
+  <form method="get" action="/gestionale" class="period-grid">
+    <div>
+      <div class="muted" style="margin-bottom:6px;">Confronto</div>
+      <select name="period_type">
+        <option value="day" {% if period_meta.type=='day' %}selected{% endif %}>Giorno</option>
+        <option value="week" {% if period_meta.type=='week' %}selected{% endif %}>Settimana</option>
+        <option value="month" {% if period_meta.type=='month' %}selected{% endif %}>Mese</option>
+      </select>
+    </div>
+    <div>
+      <div class="muted" style="margin-bottom:6px;">Data di riferimento</div>
+      <input type="date" name="anchor_date" value="{{ period_meta.anchor }}">
+    </div>
+    <div style="display:flex;align-items:end;">
+      <button class="btn" type="submit">Aggiorna dashboard</button>
+    </div>
+    <div class="muted" style="display:flex;align-items:end;">Così puoi vedere subito se stai migliorando rispetto al periodo precedente.</div>
+  </form>
+</div>
+
 <div class="stat-grid" style="margin-bottom:14px;">
-  <div class="mini-stat"><div class="muted">Incassi oggi</div><div style="font-size:28px;font-weight:800;">€ {{ '%.2f'|format(totals.income_today) }}</div></div>
-  <div class="mini-stat"><div class="muted">Uscite oggi</div><div style="font-size:28px;font-weight:800;">€ {{ '%.2f'|format(totals.expense_today) }}</div></div>
-  <div class="mini-stat"><div class="muted">Saldo oggi</div><div style="font-size:28px;font-weight:800;">€ {{ '%.2f'|format(totals.net_today) }}</div></div>
-  <div class="mini-stat"><div class="muted">Saldo settimana</div><div style="font-size:28px;font-weight:800;">€ {{ '%.2f'|format(totals.net_week) }}</div></div>
-  <div class="mini-stat"><div class="muted">Righe incassi</div><div style="font-size:28px;font-weight:800;">{{ totals.entries_count }}</div></div>
-  <div class="mini-stat"><div class="muted">Righe uscite</div><div style="font-size:28px;font-weight:800;">{{ totals.expenses_count }}</div></div>
+  <div class="mini-stat"><div class="muted">Incassi oggi</div><div class="big-number">€ {{ '%.2f'|format(totals.income_today) }}</div></div>
+  <div class="mini-stat"><div class="muted">Uscite oggi</div><div class="big-number">€ {{ '%.2f'|format(totals.expense_today) }}</div></div>
+  <div class="mini-stat"><div class="muted">Saldo oggi</div><div class="big-number">€ {{ '%.2f'|format(totals.net_today) }}</div></div>
+  <div class="mini-stat"><div class="muted">Saldo {{ period_meta.label }}</div><div class="big-number">€ {{ '%.2f'|format(totals.net_period) }}</div></div>
+  <div class="mini-stat">
+    <div class="muted">Crescita incassi</div>
+    <div class="growth {% if totals.income_growth_pct > 0 %}pos{% elif totals.income_growth_pct < 0 %}neg{% else %}neu{% endif %}">{{ '%+.1f'|format(totals.income_growth_pct) }}%</div>
+    <div class="muted">Prima: € {{ '%.2f'|format(totals.income_previous_period) }}</div>
+  </div>
+  <div class="mini-stat">
+    <div class="muted">Crescita uscite</div>
+    <div class="growth {% if totals.expense_growth_pct > 0 %}neg{% elif totals.expense_growth_pct < 0 %}pos{% else %}neu{% endif %}">{{ '%+.1f'|format(totals.expense_growth_pct) }}%</div>
+    <div class="muted">Prima: € {{ '%.2f'|format(totals.expense_previous_period) }}</div>
+  </div>
 </div>
 
 <div class="card" style="margin-bottom:14px;">
-  <h3 style="margin-top:0;">Confronto settimanale dei 3 negozi</h3>
-  <div class="muted" style="margin-bottom:12px;">Ogni colonna rappresenta il saldo giornaliero della settimana: incassi meno uscite.</div>
+  <h3 style="margin-top:0;">Confronto {{ period_meta.label }} dei negozi</h3>
+  <div class="muted" style="margin-bottom:12px;">Ogni colonna rappresenta il saldo giornaliero del periodo selezionato: incassi meno uscite.</div>
   <div class="row" style="gap:14px;align-items:stretch;">
     {% for s in compare %}
     <div class="store-box" style="flex:1;min-width:260px;">

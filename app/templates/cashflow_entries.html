@@ -7,12 +7,16 @@
   .triple{display:flex;align-items:flex-end;gap:6px;height:160px}
   .cbar{width:14px;border-radius:8px 8px 4px 4px}
   .income{background:#111}.expense{background:#bbb}.net{background:#666}
+  .entry-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  .method-card{border:1px solid #ececec;border-radius:14px;padding:12px;background:#fafafa}
+  .custom-row{display:grid;grid-template-columns:1.2fr .8fr;gap:10px;margin-top:10px}
+  @media(max-width:900px){.entry-grid,.custom-row{grid-template-columns:1fr}}
 </style>
 <div class="card">
   <div class="row" style="justify-content:space-between;align-items:center;">
     <div>
       <h2 style="margin:0 0 6px 0;">💶 Incassi</h2>
-      <div class="muted">Una riga per ogni movimento di cassa che vuoi registrare. Ogni negozio ha il suo storico.</div>
+      <div class="muted">Inserimento serio per negozio e data. Salvi più metodi di pagamento in una sola operazione.</div>
     </div>
     <div class="row">
       <a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Dashboard</a>
@@ -23,9 +27,9 @@
 
 {% if can_edit_management %}
 <div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0;">Nuovo incasso</h3>
-  <form method="post" action="/gestionale/incassi">
-    <div class="row">
+  <h3 style="margin-top:0;">Nuovo incasso giornaliero</h3>
+  <form method="post" action="/gestionale/incassi" id="incasso-form">
+    <div class="row" style="margin-bottom:12px;">
       <input type="date" name="flow_date" value="{{ today }}" required>
       <select name="store">
         {% for key, label in stores.items() %}
@@ -34,10 +38,32 @@
           {% endif %}
         {% endfor %}
       </select>
-      <input name="payment_method" placeholder="Metodo: contanti, carta, delivery..." required>
-      <input type="number" step="0.01" min="0" name="amount" placeholder="Importo €" required>
-      <input type="number" step="1" min="0" name="orders_count" placeholder="N. ordini">
-      <input name="notes" placeholder="Note" style="min-width:260px;flex:1;">
+      <input type="number" step="1" min="0" name="orders_count" placeholder="N. ordini totali">
+      <input name="notes" placeholder="Note giornaliere / dettaglio" style="min-width:260px;flex:1;">
+    </div>
+
+    <div class="entry-grid">
+      {% for method in available_payment_methods %}
+      <div class="method-card">
+        <div style="font-weight:800;text-transform:capitalize;margin-bottom:8px;">{{ method }}</div>
+        <input type="hidden" name="method_name" value="{{ method }}">
+        <input type="number" step="0.01" min="0" name="amount_value" placeholder="Importo €">
+      </div>
+      {% endfor %}
+    </div>
+
+    <div style="margin-top:14px;">
+      <div style="font-weight:800;margin-bottom:8px;">Metodi extra personalizzati</div>
+      <div id="custom-methods">
+        <div class="custom-row">
+          <input name="custom_method_name" placeholder="Nuovo metodo, es. POS 2">
+          <input type="number" step="0.01" min="0" name="custom_method_amount" placeholder="Importo €">
+        </div>
+      </div>
+      <button class="btn2" type="button" onclick="addCustomMethod()" style="margin-top:10px;">+ Aggiungi metodo di pagamento</button>
+    </div>
+
+    <div style="margin-top:14px;">
       <button class="btn" type="submit">Salva incasso</button>
     </div>
   </form>
@@ -58,13 +84,19 @@
       <option value="ALL">Tutti i metodi</option>
       {% for p in payments %}<option value="{{ p }}" {% if selected_payment==p %}selected{% endif %}>{{ p }}</option>{% endfor %}
     </select>
+    <select name="period_type">
+      <option value="day" {% if selected_period_type=='day' %}selected{% endif %}>Grafico giorno</option>
+      <option value="week" {% if selected_period_type=='week' %}selected{% endif %}>Grafico settimana</option>
+      <option value="month" {% if selected_period_type=='month' %}selected{% endif %}>Grafico mese</option>
+    </select>
+    <input type="date" name="anchor_date" value="{{ selected_anchor_date }}">
     <button class="btn2" type="submit">Filtra</button>
     <a class="btn2" href="/gestionale/incassi" style="text-decoration:none;display:inline-block;">Reset</a>
   </form>
 </div>
 
 <div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0;">Grafico settimanale {{ stores[chart_store] }}</h3>
+  <h3 style="margin-top:0;">Grafico {{ selected_period_type }} {{ stores[chart_store] }}</h3>
   <div class="muted">Per ogni giorno vedi incassi, uscite e saldo. Il grafico si aggiorna con i dati che inserisci.</div>
   <div class="chart-wrap">
     {% for d in chart_rows %}
@@ -101,4 +133,14 @@
     </tbody>
   </table>
 </div>
+
+<script>
+function addCustomMethod(){
+  const wrap = document.getElementById('custom-methods');
+  const row = document.createElement('div');
+  row.className = 'custom-row';
+  row.innerHTML = '<input name="custom_method_name" placeholder="Nuovo metodo, es. POS 2"><input type="number" step="0.01" min="0" name="custom_method_amount" placeholder="Importo €">';
+  wrap.appendChild(row);
+}
+</script>
 {% endblock %}

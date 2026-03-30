@@ -1,6 +1,19 @@
 {% extends "base.html" %}
 {% set title = "Dashboard cassa" %}
 {% block content %}
-<div class="card"><h2 style="margin:0 0 6px 0">Dashboard cassa</h2><div class="muted">Questa pagina usa gli stessi dati della home gestionale.</div></div>
-<div style="margin-top:12px"><a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Apri home gestionale completa</a></div>
+<div class="card">
+  <h2 style="margin:0 0 8px 0;">Dashboard cassa</h2>
+  <div class="muted">Questa sezione ora usa il confronto percentuale del periodo selezionato.</div>
+  <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;">
+    <a href="/gestionale?period_type={{ period_meta.type }}&anchor_date={{ period_meta.anchor }}" class="btn" style="text-decoration:none;display:inline-block;">Apri dashboard completa</a>
+    <a href="/gestionale/incassi" class="btn2" style="text-decoration:none;display:inline-block;">Gestisci incassi</a>
+    <a href="/gestionale/uscite" class="btn2" style="text-decoration:none;display:inline-block;">Gestisci uscite</a>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <div class="muted">Periodo attuale</div>
+  <div style="font-weight:800;font-size:22px;">{{ period_meta.start }} → {{ period_meta.end }}</div>
+  <div class="muted" style="margin-top:6px;">Incassi: {{ '%+.1f'|format(totals.income_growth_pct) }}% · Uscite: {{ '%+.1f'|format(totals.expense_growth_pct) }}% · Saldo: {{ '%+.1f'|format(totals.net_growth_pct) }}%</div>
+</div>
 {% endblock %}
