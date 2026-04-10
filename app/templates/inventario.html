@@ -50,8 +50,8 @@
           {% else %}
             Negozio: <strong>{{ user.store_label }}</strong>
           {% endif %}
-          • Tocca +1 / -1 per scarichi veloci. “Sotto minimo” va in rosso.
-          {% if admin and not can_edit %}
+          • Usa 🧮 (calcolatrice) o Set per modificare la quantità. “Sotto minimo” va in rosso.
+          {% if admin and not can_bulk_edit %}
             • Per modificare, seleziona un inventario singolo.
           {% endif %}
         </div>
@@ -59,12 +59,14 @@
       <details>
         <summary class="pill" style="cursor:pointer;">➕ Aggiungi prodotto</summary>
         <div style="margin-top:10px;">
-          {% if can_edit %}
+          {% if can_bulk_edit %}
           <form method="post" action="/items/add">
+            <input type="hidden" name="next_url" value="" />
             <div class="row">
               <input name="category" placeholder="Categoria" required />
               <input name="name" placeholder="Nome prodotto" required />
               <input name="location" placeholder="Posizione (es. Frigo 1, Magazzino A…)" />
+              <input name="unit" placeholder="Unità (es. 1kg, 120g, 1L)" />
               <input name="qty" placeholder="Q.tà" type="number" step="0.01" />
               <input name="min_qty" placeholder="Minimo" type="number" step="0.01" />
               <button class="btn" type="submit">Salva</button>
@@ -76,7 +78,7 @@
         </div>
       </details>
 
-      {% if can_edit %}
+      {% if can_bulk_edit %}
       <details>
         <summary class="pill" style="cursor:pointer;">⬇️⬆️ Import / Export CSV</summary>
         <div style="margin-top:10px;">
@@ -93,77 +95,452 @@
       {% endif %}
     </div>
 
-    <div style="overflow:auto;margin-top:10px;">
-      <table>
-        <thead>
-          <tr>
-            <th>Categoria</th>
-            <th>Prodotto</th>
-            <th>Q.tà</th>
-            <th class="hide-mobile">Min</th>
-            <th style="text-align:right;">Azioni <span class="pill" style="margin-left:6px;">-1 / +1 / Set</span></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for it in items %}
-            {% set low = (it.qty <= it.min_qty) %}
-            <tr {% if low %}style="background:#fff6f6"{% endif %}>
-              <td><span class="pill">{{ it.category }}</span></td>
-              <td><strong>{{ it.name }}</strong>
-                  {% if it.location %}<span class="pill" style="width:fit-content;">📍 {{ it.location }}</span>{% endif %}</td>
-              <td class="qty {% if low %}low{% endif %}">{{ "%.2f"|format(it.qty) }}</td>
-              <td class="hide-mobile">{{ "%.2f"|format(it.min_qty) }}</td>
-              <td>
-                <div class="actions">
-                  {% if can_edit %}
-                  <form method="post" action="/items/{{ it.id }}/delta">
-                    <input type="hidden" name="delta" value="-1">
-                    <button class="mini btn2" type="submit" title="Diminuisci quantità di 1">-1</button>
-                  </form>
-                  <form method="post" action="/items/{{ it.id }}/delta">
-                    <input type="hidden" name="delta" value="1">
-                    <button class="mini btn2" type="submit" title="Aumenta quantità di 1">+1</button>
-                  </form>
-                  <form method="post" action="/items/{{ it.id }}/set" class="row" style="gap:6px;">
-                    <input class="mini" name="qty" type="number" step="0.01" value="{{ it.qty }}" style="width:110px;">
-                    <button class="mini btn" type="submit">Set</button>
-                  </form>
+    <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
+      {% for g in groups %}
+        <div class="card" style="padding:12px;{% if g.any_low %}border-color:#ffb3b3;background:#fff6f6;{% endif %}">
+          <div class="row" style="justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+            <div style="min-width:220px;">
+              <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;">
+                <span class="pill">{{ g.category }}</span>
+                {% if g.any_low %}<span class="pill" style="background:#ffe6e6;border-color:#ffb3b3;">● Sotto minimo</span>{% endif %}
+              </div>
+              
+<div style="margin-top:6px;display:flex;gap:10px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;">
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+    <strong style="font-size:16px;">{{ g.name }}</strong>
+    {% if g.unit %}<span class="pill">📏 {{ g.unit }}</span>{% endif %}
+  </div>
 
-                  <form method="post" action="/ordini/add" style="display:inline;">
-                    <input type="hidden" name="item_id" value="{{ it.id }}">
-                    <button class="mini btn2" type="submit" title="Aggiungi agli ordini da fare">🛒 Ordina</button>
-                  </form>
+  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+    {% if g.positions|length > 1 %}
+      <button class="btn2" type="button"
+        onclick="openTransfer('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}', [{% for pp in g.positions %}'{{ pp.location|replace("'","\\'") }}'{% if not loop.last %},{% endif %}{% endfor %}])">
+        ⇄ SCAMBIA
+      </button>
+    {% endif %}
+    <button class="btn2" type="button"
+      onclick="openAddPos('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}','{{ g.unit|replace("'","\\'") }}')">
+      ➕ AGGIUNGI POSIZIONE
+    </button>
+  </div>
+</div>
 
-                  <details>
-                    <summary class="mini btn2" style="list-style:none;cursor:pointer;">✏️ Modifica</summary>
-                    <div style="margin-top:8px;">
-                      <form method="post" action="/items/{{ it.id }}/edit" class="row" style="gap:6px;">
-                        <input class="mini" name="category" value="{{ it.category }}" style="width:140px;" required />
-                        <input class="mini" name="name" value="{{ it.name }}" style="width:200px;" required />
-                        <input class="mini" name="location" value="{{ it.location or '' }}" placeholder="Posizione" style="width:160px;" />
-                        <input class="mini" name="min_qty" type="number" step="0.01" value="{{ it.min_qty }}" style="width:110px;" />
-                        <button class="mini btn" type="submit">Salva</button>
-                      </form>
-                      <div class="muted" style="margin-top:6px;">Modifica categoria/nome/minimo (la quantità si cambia con Set / +/-).</div>
+<div class="muted" style="margin-top:6px;font-size:12px;">
+
+                Totale: <strong>
+{% if g.disp and g.disp.conv_val is not none and g.disp.show_pieces %}
+  {{ "%.0f"|format(g.disp.pieces) }}<br/>
+  {{ "%.2f"|format(g.disp.conv_val) }} {{ g.disp.conv_unit }}
+{% elif g.unit and g.disp and g.disp.conv_val is not none and (g.disp.conv_unit in ['kg','l']) %}
+  {{ "%.2f"|format(g.disp.conv_val) }} {{ g.disp.conv_unit }}
+{% else %}
+  {{ "%.2f"|format(g.total) }}{% if g.unit %} {{ g.unit }}{% endif %}
+{% endif %}
+</strong>
+              </div>
+            </div>
+
+            <div style="flex:1;min-width:260px;">
+              <div style="display:flex;gap:10px;align-items:stretch;overflow-x:auto;padding-bottom:6px;">
+                {% for p in g.positions %}
+
+                  <div class="card" style="padding:10px;min-width:220px;">
+                    <div class="row" style="justify-content:space-between;align-items:center;gap:8px;">
+                      <span class="pill">📍 {{ p.location }}</span>
+                      <span class="muted" style="font-size:12px;">Min: {{ "%.2f"|format(p.min_qty) }}</span>
                     </div>
-                  </details>
-                  {% if admin %}
-                    <form method="post" action="/items/{{ it.id }}/delete" onsubmit="return confirm('Eliminare {{ it.name }}?')">
-                      <button class="mini" type="submit">🗑</button>
-                    </form>
-                  {% endif %}
-                  {% else %}
-                    <span class="muted" style="font-size:12px;">(Vista sola lettura)</span>
-                  {% endif %}
-                </div>
-              </td>
-            </tr>
-          {% endfor %}
-          {% if not items %}
-            <tr><td colspan="5" class="muted">Nessun prodotto trovato.</td></tr>
-          {% endif %}
-        </tbody>
-      </table>
+
+                    <div style="margin-top:8px;font-size:22px;font-weight:800;line-height:1;" class="{% if p.low %}low{% endif %}">
+                      {{ "%.2f"|format(p.qty) }}
+                    </div>
+
+                    {% if p.missing_qty and p.missing_qty > 0 %}
+                      <div class="pill" style="margin-top:8px;background:#ffe6e6;border-color:#ffb3b3;">⚠️ Mancante: {{ "%.2f"|format(p.missing_qty) }} (ordine {{ p.missing_order_date or '?' }})</div>
+                    {% endif %}
+
+                    {% if can_edit %}
+                      <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
+                        <div class="row" style="gap:8px;flex-wrap:wrap;">
+                          <button class="mini btn2" type="button" title="Calcolatrice (+ / -)" onclick="openCalc({{ p.id }}, {{ p.qty }}, '{{ (p.unit or '')|replace("'","\\'") }}', '{{ p.store }}')">🧮</button>
+                          <details>
+                            <summary class="mini btn2" style="list-style:none;cursor:pointer;">✏️ Modifica</summary>
+                            <div style="margin-top:8px;">
+                              <form method="post" action="/items/{{ p.id }}/edit" class="row" style="gap:6px;flex-wrap:wrap;">
+                                <input type="hidden" name="next_url" value="" />
+                                <input type="hidden" name="store" value="{{ p.store }}" />
+                                <input class="mini" name="category" value="{{ p.category }}" style="width:130px;" required />
+                                <input class="mini" name="name" value="{{ p.name }}" style="width:200px;" required />
+                                <input class="mini" name="location" value="{{ p.location }}" style="width:140px;" required />
+                                <input class="mini" name="unit" value="{{ p.unit or '' }}" placeholder="Unità" style="width:120px;" />
+                                <input class="mini" name="min_qty" type="number" step="0.01" value="{{ p.min_qty }}" style="width:110px;" />
+                                <button class="mini btn" type="submit">Salva</button>
+                              </form>
+                            </div>
+                          </details>
+                          <form method="post" action="/items/{{ p.id }}/delete" onsubmit="return confirm('Eliminare {{ p.name }} ({{ p.location }})?')">
+                            <input type="hidden" name="next_url" value="" />
+                            <input type="hidden" name="store" value="{{ p.store }}" />
+                            <button class="mini" type="submit" title="Elimina posizione">🗑</button>
+                          </form>
+                        </div>
+
+                        <div class="row" style="gap:8px;flex-wrap:wrap;">
+                          <form method="post" action="/items/{{ p.id }}/set" class="row" style="gap:6px;">
+                            <input type="hidden" name="next_url" value="" />
+                            <input type="hidden" name="store" value="{{ p.store }}" />
+                            <input class="mini" name="qty" type="number" step="0.01" value="{{ p.qty }}" style="width:120px;" inputmode="decimal">
+                            <button class="mini btn" type="submit">Set</button>
+                          </form>
+                        </div>
+                      </div>
+                    {% endif %}
+                  </div>
+                {% endfor %}
+
+                {% if g.positions|length == 1 and can_edit %}
+                  <button class="btn2" type="button" style="white-space:nowrap;align-self:center;" onclick="openAddPos('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}','{{ g.unit|replace("'","\\'") }}')">+ 
+                {% endif %}
+              </div>
+
+              <div class="muted" style="font-size:12px;">Tip: puoi “SCAMBIA” tra posizioni e vedere subito il totale in alto.</div>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+      {% if not groups %}
+        <div class="muted">Nessun prodotto trovato.</div>
+      {% endif %}
     </div>
   </div>
+
+  <!-- Modal: SCAMBIA tra posizioni -->
+  <div id="transferModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:120;align-items:center;justify-content:center;">
+    <div class="card" style="max-width:420px;width:92%;">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <strong>⇄ Scambia / Sposta</strong>
+        <button class="mini" type="button" onclick="closeTransfer()">✖</button>
+      </div>
+      <div class="muted" id="transferInfo" style="margin-top:6px;"></div>
+      <form method="post" action="/items/transfer" style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
+        <input type="hidden" name="next_url" value="" />
+        <input type="hidden" name="store" id="tStore" value="" />
+        <input type="hidden" name="category" id="tCat" value="" />
+        <input type="hidden" name="name" id="tName" value="" />
+        <div class="row" style="gap:8px;align-items:flex-end;">
+          <div style="flex:1;">
+            <div class="muted" style="font-size:12px;">Da</div>
+            <select class="mini" name="from_location" id="tFrom" required></select>
+          </div>
+
+          <div style="display:flex;align-items:center;">
+            <button type="button" class="mini" onclick="swapLocations()" style="height:36px;">⇄</button>
+          </div>
+
+          <div style="flex:1;">
+            <div class="muted" style="font-size:12px;">A</div>
+            <select class="mini" name="to_location" id="tTo" required></select>
+          </div>
+          
+        </div>
+        <div>
+          <div class="muted" style="font-size:12px;">Quantità</div>
+          <input class="mini" name="qty" type="number" step="0.01" inputmode="decimal" required />
+        </div>
+        <div class="row" style="justify-content:flex-end;">
+          <button class="btn" type="submit">Conferma</button>
+        </div>
+      </form>
+      <div class="muted" style="font-size:12px;">Puoi anche invertire Da/A per spostare al contrario.</div>
+    </div>
+  </div>
+
+  <!-- Modal: Aggiungi nuova posizione -->
+  <div id="addPosModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:121;align-items:center;justify-content:center;">
+    <div class="card" style="max-width:420px;width:92%;">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <strong>➕ Aggiungi posizione</strong>
+        <button class="mini" type="button" onclick="closeAddPos()">✖</button>
+      </div>
+      <div class="muted" id="addPosInfo" style="margin-top:6px;"></div>
+      <form method="post" action="/items/add" style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
+        <input type="hidden" name="next_url" value="" />
+        <input type="hidden" name="category" id="aCat" value="" />
+        <input type="hidden" name="name" id="aName" value="" />
+        <input type="hidden" name="unit" id="aUnit" value="" />
+        <div>
+          <div class="muted" style="font-size:12px;">Nuova posizione</div>
+          <input class="mini" name="location" id="aLoc" placeholder="Es. SALA, CUCINA, MAGAZZINO…" required />
+        </div>
+        <div class="row" style="gap:8px;">
+          <div style="flex:1;">
+            <div class="muted" style="font-size:12px;">Quantità iniziale</div>
+            <input class="mini" name="qty" type="number" step="0.01" inputmode="decimal" value="0" />
+          </div>
+          <div style="flex:1;">
+            <div class="muted" style="font-size:12px;">Minimo</div>
+            <input class="mini" name="min_qty" type="number" step="0.01" inputmode="decimal" value="0" />
+          </div>
+        </div>
+        <div class="row" style="justify-content:flex-end;">
+          <button class="btn" type="submit">Salva</button>
+        </div>
+      </form>
+      <div class="muted" style="font-size:12px;">Dopo averla creata, puoi usare “SCAMBIA” per spostare quantità tra posizioni.</div>
+    </div>
+  </div>
+
+  <!-- Modal: Calcolatrice (+ / -) -->
+  <div id="calcModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:100;align-items:center;justify-content:center;">
+    <div class="card" style="max-width:360px;width:92%;">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <strong>🧮 Modifica quantità</strong>
+        <button class="mini" type="button" onclick="closeCalc()">✖</button>
+      </div>
+      <div class="muted" id="calcInfo" style="margin-top:6px;"></div>
+      <div class="row" style="gap:8px;margin-top:10px;align-items:center;">
+        <input id="calcDelta" class="mini" inputmode="numeric" pattern="[0-9]*" placeholder="0" style="flex:1;min-width:0;" />
+        <button class="mini btn2" type="button" onclick="calcSetSign(1)">+</button>
+        <button class="mini btn2" type="button" onclick="calcSetSign(-1)">-</button>
+      </div>
+      <div class="muted" id="calcResult" style="margin-top:6px;"></div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;">
+        <button class="btn2" type="button" onclick="calcAppend('1')">1</button>
+        <button class="btn2" type="button" onclick="calcAppend('2')">2</button>
+        <button class="btn2" type="button" onclick="calcAppend('3')">3</button>
+        <button class="btn2" type="button" onclick="calcAppend('4')">4</button>
+        <button class="btn2" type="button" onclick="calcAppend('5')">5</button>
+        <button class="btn2" type="button" onclick="calcAppend('6')">6</button>
+        <button class="btn2" type="button" onclick="calcAppend('7')">7</button>
+        <button class="btn2" type="button" onclick="calcAppend('8')">8</button>
+        <button class="btn2" type="button" onclick="calcAppend('9')">9</button>
+        <button class="btn2" type="button" onclick="calcClear()">C</button>
+        <button class="btn2" type="button" onclick="calcAppend('0')">0</button>
+        <button class="btn2" type="button" onclick="calcBack()">⌫</button>
+      </div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px;">
+        <button class="btn" type="button" onclick="calcSubmit()">Applica</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Quantità ordine -->
+  <div id="orderModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:101;align-items:center;justify-content:center;">
+    <div class="card" style="max-width:360px;width:92%;">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <strong>🛒 Ordina</strong>
+        <button class="mini" type="button" onclick="closeOrderQty()">✖</button>
+      </div>
+      <div class="muted" id="orderInfo" style="margin-top:6px;"></div>
+      <div class="row" style="gap:8px;margin-top:10px;align-items:center;">
+        <input id="orderQty" class="mini" type="number" step="0.01" inputmode="decimal" placeholder="Quantità da ordinare" style="flex:1;min-width:0;" />
+        <button class="mini btn2" type="button" onclick="orderQtySet(1)">+1</button>
+        <button class="mini btn2" type="button" onclick="orderQtySet(5)">+5</button>
+      </div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px;">
+        <button class="btn" type="button" onclick="orderQtySubmit()">Aggiungi</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- hidden forms -->
+  <form id="calcForm" method="post" style="display:none;"></form>
+  <form id="orderForm" method="post" action="/ordini/add_with_qty" style="display:none;">
+    <input type="hidden" name="next_url" value="" />
+    <input type="hidden" name="item_id" id="orderItemId" value="" />
+    <input type="hidden" name="qty_to_order" id="orderItemQty" value="" />
+  </form>
+
+  <script>
+    let _calcItemId = null;
+    let _calcCurrent = 0;
+    let _calcSign = -1;
+    let _calcUnit = '';
+    let _calcStore = '';
+
+    // aggiorna il "Totale: ..." sotto al prodotto (solo informativo, non sostituisce la quantità)
+    function updateTotalForItem(itemId, qty){
+      const el = document.getElementById('total-' + itemId);
+      if(!el) return;
+      el.dataset.qty = String(qty ?? '');
+      if(window._updateTotalEl) window._updateTotalEl(el);
+    }
+
+    function openCalc(id, currentQty, unitStr, storeCode) {
+      _calcItemId = id;
+      _calcCurrent = Number(currentQty) || 0;
+      _calcSign = -1;
+      _calcUnit = (unitStr || '');
+      _calcStore = (storeCode || '');
+      document.getElementById('calcDelta').value = '';
+      document.getElementById('calcInfo').textContent = `Rimasti: ${_calcCurrent.toFixed(2)}. Scegli + o - e scrivi la quantità.`;
+      document.getElementById('calcResult').textContent = '';
+      const m = document.getElementById('calcModal');
+      m.style.display = 'flex';
+      setTimeout(()=>{
+        const inp = document.getElementById('calcDelta');
+        inp.focus();
+        inp.oninput = calcUpdateResult;
+      }, 50);
+    }
+    function closeCalc() {
+      document.getElementById('calcModal').style.display = 'none';
+    }
+    function calcSetSign(s) {
+      _calcSign = s;
+      calcUpdateResult();
+    }
+    function calcAppend(ch) {
+      const el = document.getElementById('calcDelta');
+      el.value = (el.value || '') + ch;
+      calcUpdateResult();
+    }
+    function calcBack() {
+      const el = document.getElementById('calcDelta');
+      el.value = (el.value || '').slice(0, -1);
+      calcUpdateResult();
+    }
+    function calcClear() {
+      document.getElementById('calcDelta').value = '';
+      calcUpdateResult();
+    }
+    function calcUpdateResult() {
+      const raw = document.getElementById('calcDelta').value;
+      const n = raw ? Number(raw) : 0;
+      const delta = (_calcSign * (Number.isFinite(n) ? n : 0));
+      const res = Math.max(0, _calcCurrent + delta);
+      const signChar = _calcSign === 1 ? '+' : '-';
+      const totalText = (window.computeTotalText ? window.computeTotalText(res, _calcUnit) : '');
+      document.getElementById('calcResult').textContent = `Risultato: ${_calcCurrent.toFixed(2)} ${signChar} ${Math.abs(delta).toFixed(2)} = ${res.toFixed(2)}${totalText ? (' • ' + totalText) : ''}`;
+    }
+    function calcSubmit() {
+      const raw = document.getElementById('calcDelta').value;
+      const n = raw ? Number(raw) : 0;
+      if (!Number.isFinite(n) || n <= 0) { closeCalc(); return; }
+      const delta = _calcSign * n;
+      const f = document.getElementById('calcForm');
+      f.action = `/items/${_calcItemId}/delta`;
+      f.innerHTML = '';
+      const next = document.createElement('input');
+      next.type = 'hidden'; next.name = 'next_url'; next.value = window.location.pathname + window.location.search;
+      const st = document.createElement('input');
+      st.type = 'hidden'; st.name = 'store'; st.value = (_calcStore || '');
+      const d = document.createElement('input');
+      d.type = 'hidden'; d.name = 'delta'; d.value = String(delta);
+      f.appendChild(next); f.appendChild(st); f.appendChild(d);
+      f.submit();
+    }
+
+    let _orderItemId = null;
+    let _orderCurrent = 0;
+    function openOrderQty(id, currentQty) {
+      _orderItemId = id;
+      _orderCurrent = Number(currentQty) || 0;
+      document.getElementById('orderQty').value = '';
+      document.getElementById('orderInfo').textContent = `Ti sono rimasti: ${_orderCurrent.toFixed(2)}. Quanto vuoi ordinare?`;
+      document.getElementById('orderModal').style.display = 'flex';
+      setTimeout(()=>document.getElementById('orderQty').focus(), 50);
+    }
+    function closeOrderQty() { document.getElementById('orderModal').style.display = 'none'; }
+    function orderQtySet(add) {
+      const el = document.getElementById('orderQty');
+      const cur = Number(el.value || 0) || 0;
+      el.value = String(cur + add);
+    }
+    function orderQtySubmit() {
+      const el = document.getElementById('orderQty');
+      const n = Number(el.value);
+      if (!Number.isFinite(n) || n <= 0) { closeOrderQty(); return; }
+      document.getElementById('orderItemId').value = String(_orderItemId);
+      document.getElementById('orderItemQty').value = String(n);
+      document.getElementById('orderForm').querySelector('input[name=next_url]').value = window.location.pathname + window.location.search;
+      document.getElementById('orderForm').submit();
+    }
+
+    // ===== SCAMBIA / AGGIUNGI POSIZIONE =====
+    function openTransfer(store, area, category, name, locations){
+      const next = window.location.pathname + window.location.search;
+      const modal = document.getElementById('transferModal');
+      document.getElementById('transferInfo').textContent = `${name} • ${category}`;
+      document.getElementById('tStore').value = store || '';
+      document.getElementById('tCat').value = category || '';
+      document.getElementById('tName').value = name || '';
+
+      // Popola i menu a tendina con le posizioni disponibili
+      const fromSel = document.getElementById('tFrom');
+      const toSel = document.getElementById('tTo');
+      fromSel.innerHTML = '';
+      toSel.innerHTML = '';
+      const locs = Array.isArray(locations) ? locations : [];
+      locs.forEach((l)=>{
+        const opt1 = document.createElement('option');
+        opt1.value = l;
+        opt1.textContent = l;
+        fromSel.appendChild(opt1);
+        const opt2 = document.createElement('option');
+        opt2.value = l;
+        opt2.textContent = l;
+        toSel.appendChild(opt2);
+      });
+
+      // default: prima posizione -> seconda posizione (se esistono)
+      if(locs.length >= 1) fromSel.value = locs[0];
+      if(locs.length >= 2) toSel.value = locs[1];
+      else if(locs.length >= 1) toSel.value = locs[0];
+
+      modal.querySelector('input[name=next_url]').value = next;
+      modal.style.display = 'flex';
+      setTimeout(()=>{
+        const q = modal.querySelector('input[name=qty]');
+        if(q) q.focus();
+      }, 50);
+    }
+    function swapLocations(){
+      const fromSel = document.getElementById('tFrom');
+      const toSel = document.getElementById('tTo');
+      const tmp = fromSel.value;
+      fromSel.value = toSel.value;
+      toSel.value = tmp;
+    }
+
+    function closeTransfer(){
+      document.getElementById('transferModal').style.display = 'none';
+    }
+
+    function openAddPos(store, area, category, name, unit){
+      const next = window.location.pathname + window.location.search;
+      const modal = document.getElementById('addPosModal');
+      document.getElementById('addPosInfo').textContent = `${name} • ${category}`;
+      document.getElementById('aCat').value = category || '';
+      document.getElementById('aName').value = name || '';
+      document.getElementById('aUnit').value = unit || '';
+      modal.querySelector('input[name=next_url]').value = next;
+      document.getElementById('aLoc').value = '';
+      modal.style.display = 'flex';
+      setTimeout(()=>document.getElementById('aLoc').focus(), 50);
+    }
+    function closeAddPos(){
+      document.getElementById('addPosModal').style.display = 'none';
+    }
+  </script>
+
+
+<style>
+@media (max-width: 768px) {
+
+  .card { padding:8px !important; }
+  strong { font-size:14px !important; }
+  .btn, .btn2, .mini {
+    padding:6px 10px !important;
+    font-size:13px !important;
+  }
+  input, select {
+    font-size:13px !important;
+    padding:6px !important;
+  }
+  .row { gap:6px !important; }
+  .muted { font-size:12px !important; }
+
+}
+</style>
+
 {% endblock %}
