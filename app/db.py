@@ -274,64 +274,6 @@ def init_db():
         )
         """)
 
-
-
-        # CASH FLOW: incassi manuali giornalieri
-        _safe_exec(cur, f"""
-        CREATE TABLE IF NOT EXISTS cash_entries (
-            id {id_col},
-            store TEXT NOT NULL,
-            flow_date {date_col} NOT NULL,
-            payment_method TEXT NOT NULL DEFAULT '',
-            amount {qty_col} NOT NULL DEFAULT 0,
-            orders_count INTEGER NOT NULL DEFAULT 0,
-            notes TEXT NOT NULL DEFAULT '',
-            created_by TEXT NOT NULL,
-            ts {ts_default}
-        )
-        """)
-
-        # CASH FLOW: uscite manuali giornaliere
-        _safe_exec(cur, f"""
-        CREATE TABLE IF NOT EXISTS cash_expenses (
-            id {id_col},
-            store TEXT NOT NULL,
-            flow_date {date_col} NOT NULL,
-            category TEXT NOT NULL DEFAULT '',
-            supplier TEXT NOT NULL DEFAULT '',
-            payment_method TEXT NOT NULL DEFAULT '',
-            amount {qty_col} NOT NULL DEFAULT 0,
-            notes TEXT NOT NULL DEFAULT '',
-            created_by TEXT NOT NULL,
-            ts {ts_default}
-        )
-        """)
-
-        # CASH FLOW: metodi di pagamento configurabili per gli incassi
-        _safe_exec(cur, f"""
-        CREATE TABLE IF NOT EXISTS cash_payment_methods (
-            id {id_col},
-            name TEXT NOT NULL UNIQUE,
-            sort_order INTEGER NOT NULL DEFAULT 0,
-            is_default INTEGER NOT NULL DEFAULT 0,
-            created_by TEXT NOT NULL DEFAULT 'system',
-            ts {ts_default}
-        )
-        """)
-
-        default_payment_methods = [
-            ('contanti', 10, 1),
-            ('pos', 20, 1),
-            ('deliveroo', 30, 1),
-            ('glovo', 40, 1),
-            ('just eat', 50, 1),
-        ]
-        for name, sort_order, is_default in default_payment_methods:
-            try:
-                _safe_exec(cur, f"INSERT INTO cash_payment_methods(name, sort_order, is_default, created_by) VALUES({ph},{ph},{ph},{ph})", (name, sort_order, is_default, 'system'))
-            except Exception:
-                pass
-
         # LOGISTICS: order queue + orders
         _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS order_queue (
@@ -432,6 +374,28 @@ def init_db():
         )
         """)
 
+
+        # GESTIONALE - ENTRATE / INCASSI
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS sales_entries (
+            id {id_col},
+            sale_date {date_col} NOT NULL,
+            store TEXT NOT NULL,
+            sales_channel TEXT NOT NULL DEFAULT '',
+            sales_location TEXT NOT NULL DEFAULT '',
+            order_type TEXT NOT NULL DEFAULT '',
+            payment_method TEXT NOT NULL DEFAULT '',
+            order_count INTEGER NOT NULL DEFAULT 0,
+            gross_amount {qty_col} NOT NULL DEFAULT 0,
+            discounts_amount {qty_col} NOT NULL DEFAULT 0,
+            commissions_amount {qty_col} NOT NULL DEFAULT 0,
+            net_amount {qty_col} NOT NULL DEFAULT 0,
+            notes TEXT,
+            created_by TEXT NOT NULL DEFAULT '',
+            ts {ts_default}
+        )
+        """)
+
         # LOGS
         _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS logs (
@@ -484,41 +448,6 @@ def init_db():
                 "ALTER TABLE order_lines ADD COLUMN is_missing INTEGER NOT NULL DEFAULT 0",
             ]
         for stmt in alters:
-            try:
-                _safe_exec(cur, stmt)
-            except Exception:
-                pass
-
-        # Cashflow compatibility migrations: evita errori sui database già esistenti
-        if pg:
-            cash_alters = [
-                "ALTER TABLE cash_entries ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT ''",
-                "ALTER TABLE cash_entries ADD COLUMN IF NOT EXISTS amount DOUBLE PRECISION NOT NULL DEFAULT 0",
-                "ALTER TABLE cash_entries ADD COLUMN IF NOT EXISTS orders_count INTEGER NOT NULL DEFAULT 0",
-                "ALTER TABLE cash_entries ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''",
-                "ALTER TABLE cash_entries ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT 'system'",
-                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT ''",
-                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS supplier TEXT NOT NULL DEFAULT ''",
-                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT ''",
-                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS amount DOUBLE PRECISION NOT NULL DEFAULT 0",
-                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''",
-                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT 'system'",
-            ]
-        else:
-            cash_alters = [
-                "ALTER TABLE cash_entries ADD COLUMN payment_method TEXT NOT NULL DEFAULT ''",
-                "ALTER TABLE cash_entries ADD COLUMN amount REAL NOT NULL DEFAULT 0",
-                "ALTER TABLE cash_entries ADD COLUMN orders_count INTEGER NOT NULL DEFAULT 0",
-                "ALTER TABLE cash_entries ADD COLUMN notes TEXT NOT NULL DEFAULT ''",
-                "ALTER TABLE cash_entries ADD COLUMN created_by TEXT NOT NULL DEFAULT 'system'",
-                "ALTER TABLE cash_expenses ADD COLUMN category TEXT NOT NULL DEFAULT ''",
-                "ALTER TABLE cash_expenses ADD COLUMN supplier TEXT NOT NULL DEFAULT ''",
-                "ALTER TABLE cash_expenses ADD COLUMN payment_method TEXT NOT NULL DEFAULT ''",
-                "ALTER TABLE cash_expenses ADD COLUMN amount REAL NOT NULL DEFAULT 0",
-                "ALTER TABLE cash_expenses ADD COLUMN notes TEXT NOT NULL DEFAULT ''",
-                "ALTER TABLE cash_expenses ADD COLUMN created_by TEXT NOT NULL DEFAULT 'system'",
-            ]
-        for stmt in cash_alters:
             try:
                 _safe_exec(cur, stmt)
             except Exception:

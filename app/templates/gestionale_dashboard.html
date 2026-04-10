@@ -1,71 +1,109 @@
 {% extends "base.html" %}
 {% set title = "Gestionale" %}
 {% block content %}
-<div class="card">
-  <div class="row" style="justify-content:space-between;align-items:center;">
-    <div>
-      <h2 style="margin:0 0 6px 0">📊 Dashboard gestionale</h2>
-      <div class="muted">Questa è la nuova area centrale del tuo gestionale: numeri, canali, ordini e ticket medio.{% if not can_edit_management %} Vista in sola lettura per manager.{% endif %}</div>
-    </div>
-    <div class="row">
-      <a class="btn2" href="/gestionale/entrate" style="text-decoration:none;display:inline-block;">Apri Entrate</a>
-      <a class="btn2" href="/gestionale/report" style="text-decoration:none;display:inline-block;">Apri Report</a>
-    </div>
+<div class="pro-hero card">
+  <div>
+    <div class="section-kicker">GESTIONALE • ENTRATE</div>
+    <h2 style="margin:6px 0 8px 0">Dashboard entrate più professionale</h2>
+    <div class="muted" style="max-width:720px;line-height:1.5;">Ho impostato questa vista come una vera cabina di controllo: numeri chiave in alto, copertura mensile subito visibile, ultimo inserimento reale e storico ordinato esattamente nell’ordine in cui lo scrivi.</div>
+  </div>
+  <div class="row">
+    <a class="btn" href="/gestionale/entrate" style="text-decoration:none;display:inline-block;">Apri Entrate</a>
+    <a class="btn2" href="/gestionale/report" style="text-decoration:none;display:inline-block;">Apri Report</a>
   </div>
 </div>
 
-<div class="row" style="margin-top:14px;">
-  <div class="card" style="flex:1;min-width:180px;"><div class="muted">Incasso oggi</div><div style="font-size:30px;font-weight:800;">€ {{ '%.2f'|format(today_net) }}</div></div>
-  <div class="card" style="flex:1;min-width:180px;"><div class="muted">Ordini oggi</div><div style="font-size:30px;font-weight:800;">{{ today_orders }}</div></div>
-  <div class="card" style="flex:1;min-width:180px;"><div class="muted">Scontrino medio oggi</div><div style="font-size:30px;font-weight:800;">€ {{ '%.2f'|format(today_avg) }}</div></div>
-</div>
-
-<div class="row" style="margin-top:12px;">
-  <div class="card" style="flex:1;min-width:220px;"><div class="muted">Incasso mese</div><div style="font-size:28px;font-weight:800;">€ {{ '%.2f'|format(month_net) }}</div></div>
-  <div class="card" style="flex:1;min-width:220px;"><div class="muted">Ordini mese</div><div style="font-size:28px;font-weight:800;">{{ month_orders }}</div></div>
-  <div class="card" style="flex:1;min-width:220px;"><div class="muted">Scontrino medio mese</div><div style="font-size:28px;font-weight:800;">€ {{ '%.2f'|format(month_avg) }}</div></div>
-</div>
-
-<div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0">Incassi per canale</h3>
-  <table>
-    <thead>
-      <tr><th>Canale</th><th>Incasso</th><th>Ordini</th><th>Media scontrino</th><th>% peso</th></tr>
-    </thead>
-    <tbody>
-      {% for row in channels %}
-      <tr>
-        <td>{{ row.sales_channel }}</td>
-        <td>€ {{ '%.2f'|format(row.net_total) }}</td>
-        <td>{{ row.order_total }}</td>
-        <td>€ {{ '%.2f'|format(row.avg_ticket) }}</td>
-        <td>{{ '%.1f'|format(row.weight) }}%</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="5" class="muted">Non ci sono ancora entrate registrate. Inizia da <a href="/gestionale/entrate">Entrate</a>.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div class="stats-grid" style="margin-top:14px;">
+  <div class="stat-card stat-strong">
+    <div class="stat-label">Ultimo incasso inserito</div>
+    {% if latest_entry %}
+      <div class="stat-value">€ {{ '%.2f'|format(latest_entry.net_amount or 0) }}</div>
+      <div class="stat-sub">{{ latest_entry.sale_date }} • {{ latest_entry.sales_channel or '-' }} • {{ latest_entry.store }}</div>
+    {% else %}
+      <div class="stat-value">—</div>
+      <div class="stat-sub">Nessun inserimento ancora presente</div>
+    {% endif %}
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Mese corrente</div>
+    <div class="stat-value">€ {{ '%.2f'|format(month_net) }}</div>
+    <div class="stat-sub">{{ month_orders }} ordini • ticket medio € {{ '%.2f'|format(month_avg) }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Totale registrato</div>
+    <div class="stat-value">€ {{ '%.2f'|format(total_net) }}</div>
+    <div class="stat-sub">{{ total_orders }} ordini • {{ days_recorded }} giorni caricati</div>
+  </div>
 </div>
 
 <div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0">Ultimi inserimenti</h3>
-  <table>
-    <thead><tr><th>Data</th><th>Sede</th><th>Canale</th><th>Ordini</th><th>Netto</th><th>Metodo</th></tr></thead>
-    <tbody>
-      {% for row in recent %}
-      <tr>
-        <td>{{ row.sale_date }}</td>
-        <td>{{ row.store }}</td>
-        <td>{{ row.sales_channel }}</td>
-        <td>{{ row.order_count }}</td>
-        <td>€ {{ '%.2f'|format(row.net_amount or 0) }}</td>
-        <td>{{ row.payment_method }}</td>
-      </tr>
+  <div class="panel-head">
+    <div>
+      <h3 style="margin:0">Copertura mesi {{ months[0].ym[:4] if months else '' }}</h3>
+      <div class="muted">Nero = almeno un giorno inserito nel mese. Grigio = mese ancora vuoto.</div>
+    </div>
+  </div>
+  <div class="month-strip" style="margin-top:14px;">
+    {% for month in months %}
+      <div class="month-chip {% if month.active %}active{% endif %} {% if month.is_current %}current{% endif %}">
+        <strong>{{ month.label }}</strong>
+        <span>{% if month.active %}{{ month.recorded_days }} g{% else %}vuoto{% endif %}</span>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="row" style="margin-top:14px;align-items:stretch;">
+  <div class="card" style="flex:1;min-width:280px;">
+    <div class="panel-head">
+      <div>
+        <h3 style="margin:0">Ultimi inserimenti scritti</h3>
+        <div class="muted">Ordinati per ordine di scrittura reale: l’ultima riga inserita viene sempre mostrata per prima, anche se la data incasso è vecchia.</div>
+      </div>
+    </div>
+    <div class="list-stack" style="margin-top:14px;">
+      {% for row in recent[:8] %}
+      <div class="entry-row">
+        <div>
+          <div style="font-weight:800;">€ {{ '%.2f'|format(row.net_amount or 0) }}</div>
+          <div class="muted">{{ row.sale_date }} • {{ row.sales_channel or '-' }} • {{ row.payment_method or '-' }}</div>
+        </div>
+        <div style="text-align:right;">
+          <div class="pill-dark">{{ row.store }}</div>
+          <div class="muted" style="margin-top:6px;">{{ row.order_count or 0 }} ordini</div>
+        </div>
+      </div>
       {% else %}
-      <tr><td colspan="6" class="muted">Ancora nessun dato.</td></tr>
+      <div class="muted">Ancora nessun dato.</div>
       {% endfor %}
-    </tbody>
-  </table>
+    </div>
+  </div>
+
+  <div class="card" style="flex:1.1;min-width:320px;">
+    <div class="panel-head">
+      <div>
+        <h3 style="margin:0">Incassi per canale</h3>
+        <div class="muted">Vista sintetica per capire subito quali canali spingono davvero.</div>
+      </div>
+    </div>
+    <table style="margin-top:12px;">
+      <thead>
+        <tr><th>Canale</th><th>Incasso</th><th>Ordini</th><th>Media</th><th>% peso</th></tr>
+      </thead>
+      <tbody>
+        {% for row in channels %}
+        <tr>
+          <td>{{ row.sales_channel }}</td>
+          <td>€ {{ '%.2f'|format(row.net_total) }}</td>
+          <td>{{ row.order_total }}</td>
+          <td>€ {{ '%.2f'|format(row.avg_ticket) }}</td>
+          <td>{{ '%.1f'|format(row.weight) }}%</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="muted">Non ci sono ancora entrate registrate. Inizia da <a href="/gestionale/entrate">Entrate</a>.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}

@@ -1,37 +1,74 @@
 {% extends "base.html" %}
 {% set title = "Entrate" %}
 {% block content %}
-<div class="card">
-  <h2 style="margin-top:0">💶 Entrate / Incassi</h2>
-  <div class="muted">Qui inserisci gli incassi in modo serio: canale, dove hai venduto, numero ordini, sconti, commissioni e scontrino medio.</div>
+<div class="pro-hero card">
+  <div>
+    <div class="section-kicker">GESTIONE ENTRATE</div>
+    <h2 style="margin:6px 0 8px 0">Registro incassi professionale</h2>
+    <div class="muted" style="max-width:760px;line-height:1.5;">Qui inserisci gli incassi come in un gestionale serio: canale, sede, metodo di pagamento, volumi, netto e storico controllabile con filtri chiari.</div>
+  </div>
+  <div class="row">
+    <a class="btn2" href="/gestionale/dashboard" style="text-decoration:none;display:inline-block;">Torna alla dashboard</a>
+  </div>
+</div>
+
+<div class="stats-grid" style="margin-top:14px;">
+  <div class="stat-card stat-strong">
+    <div class="stat-label">Righe trovate</div>
+    <div class="stat-value">{{ summary.entry_count }}</div>
+    <div class="stat-sub">{{ summary.day_count }} giorni distinti</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Netto totale</div>
+    <div class="stat-value">€ {{ '%.2f'|format(summary.total_net) }}</div>
+    <div class="stat-sub">{{ summary.total_orders }} ordini complessivi</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Ticket medio</div>
+    <div class="stat-value">€ {{ '%.2f'|format(summary.avg_ticket) }}</div>
+    {% if latest_entry %}
+      <div class="stat-sub">Ultimo inserimento: {{ latest_entry.sale_date }} • {{ latest_entry.sales_channel or '-' }}</div>
+    {% else %}
+      <div class="stat-sub">Nessun inserimento ancora presente</div>
+    {% endif %}
+  </div>
 </div>
 
 {% if can_edit_management %}
 <div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0">Nuovo inserimento</h3>
-  <form method="post" action="/gestionale/entrate">
-    <div class="row">
-      <input type="date" name="sale_date" value="{{ today }}" required>
-      <select name="store" {% if active_store != 'ALL' %}disabled{% endif %}>
-        {% if active_store == 'ALL' %}
-          <option value="spinza">Spinza</option>
-          <option value="reburger_camaldoli">Reburger Camaldoli</option>
-          <option value="reburger_palazzuolo">Reburger Palazzuolo</option>
-        {% else %}
-          <option value="{{ active_store }}">{{ active_store }}</option>
-        {% endif %}
-      </select>
+  <div class="panel-head">
+    <div>
+      <h3 style="margin:0">Nuovo inserimento</h3>
+      <div class="muted">Modulo più pulito e pronto per compilazioni rapide.</div>
+    </div>
+  </div>
+  <form method="post" action="/gestionale/entrate" style="margin-top:14px;">
+    <div class="pro-form-grid">
+      <label><span>Data incasso</span><input type="date" name="sale_date" value="{{ today }}" required></label>
+      <label><span>Sede</span>
+        <select name="store" {% if active_store != 'ALL' %}disabled{% endif %}>
+          {% if active_store == 'ALL' %}
+            <option value="spinza">Spinza</option>
+            <option value="reburger_camaldoli">Reburger Camaldoli</option>
+            <option value="reburger_palazzuolo">Reburger Palazzuolo</option>
+          {% else %}
+            <option value="{{ active_store }}">{{ active_store }}</option>
+          {% endif %}
+        </select>
+      </label>
       {% if active_store != 'ALL' %}<input type="hidden" name="store" value="{{ active_store }}">{% endif %}
-      <input name="sales_channel" placeholder="Canale: banco, asporto, Deliveroo..." required>
-      <input name="sales_location" placeholder="Dove venduto: sala, delivery, tavolo...">
-      <input name="order_type" placeholder="Tipo ordine">
-      <input name="payment_method" placeholder="Pagamento: carta, contanti, delivery...">
-      <input type="number" name="order_count" min="0" step="1" placeholder="Numero ordini">
-      <input type="number" name="gross_amount" min="0" step="0.01" placeholder="Lordo €">
-      <input type="number" name="discounts_amount" min="0" step="0.01" placeholder="Sconti €">
-      <input type="number" name="commissions_amount" min="0" step="0.01" placeholder="Commissioni €">
-      <input type="number" name="net_amount" min="0" step="0.01" placeholder="Netto € (se vuoto auto)">
-      <input name="notes" placeholder="Note" style="min-width:260px;flex:1;">
+      <label><span>Canale vendita</span><input name="sales_channel" placeholder="Banco, asporto, Deliveroo..." required></label>
+      <label><span>Dove venduto</span><input name="sales_location" placeholder="Sala, delivery, tavolo..."></label>
+      <label><span>Tipo ordine</span><input name="order_type" placeholder="Pranzo, cena, promo..."></label>
+      <label><span>Metodo pagamento</span><input name="payment_method" placeholder="Carta, contanti, delivery..."></label>
+      <label><span>Numero ordini</span><input type="number" name="order_count" min="0" step="1" placeholder="0"></label>
+      <label><span>Lordo €</span><input type="number" name="gross_amount" min="0" step="0.01" placeholder="0.00"></label>
+      <label><span>Sconti €</span><input type="number" name="discounts_amount" min="0" step="0.01" placeholder="0.00"></label>
+      <label><span>Commissioni €</span><input type="number" name="commissions_amount" min="0" step="0.01" placeholder="0.00"></label>
+      <label><span>Netto €</span><input type="number" name="net_amount" min="0" step="0.01" placeholder="Se vuoto, calcolo automatico"></label>
+      <label class="pro-span-2"><span>Note</span><input name="notes" placeholder="Note operative, dettaglio promo, anomalia, riferimento..."></label>
+    </div>
+    <div style="margin-top:14px;display:flex;justify-content:flex-end;">
       <button class="btn" type="submit">Salva entrata</button>
     </div>
   </form>
@@ -41,47 +78,65 @@
 {% endif %}
 
 <div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0">Filtri</h3>
-  <form method="get" action="/gestionale/entrate" class="row">
-    <input type="date" name="sale_date" value="{{ sale_date }}">
-    <select name="sales_channel">
-      <option value="ALL">Tutti i canali</option>
-      {% for c in channels %}
-      <option value="{{ c }}" {% if selected_channel == c %}selected{% endif %}>{{ c }}</option>
-      {% endfor %}
-    </select>
+  <div class="panel-head">
+    <div>
+      <h3 style="margin:0">Filtri</h3>
+      <div class="muted">Filtra per data o canale e controlla lo storico senza confusione.</div>
+    </div>
+  </div>
+  <form method="get" action="/gestionale/entrate" class="row" style="margin-top:14px;align-items:end;">
+    <label style="display:flex;flex-direction:column;gap:6px;min-width:180px;">
+      <span class="muted">Data</span>
+      <input type="date" name="sale_date" value="{{ sale_date }}">
+    </label>
+    <label style="display:flex;flex-direction:column;gap:6px;min-width:220px;">
+      <span class="muted">Canale</span>
+      <select name="sales_channel">
+        <option value="ALL">Tutti i canali</option>
+        {% for c in channels %}
+        <option value="{{ c }}" {% if selected_channel == c %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <button class="btn2" type="submit">Filtra</button>
     <a class="btn2" href="/gestionale/entrate" style="text-decoration:none;display:inline-block;">Reset</a>
   </form>
 </div>
 
 <div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0">Storico entrate</h3>
-  <table>
-    <thead>
-      <tr>
-        <th>Data</th><th>Sede</th><th>Canale</th><th>Dove</th><th>Ordini</th><th>Lordo</th><th>Sconti</th><th>Commissioni</th><th>Netto</th><th>Media</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in rows %}
-      {% set avg = ((row.net_amount or 0) / row.order_count) if row.order_count else 0 %}
-      <tr>
-        <td>{{ row.sale_date }}</td>
-        <td>{{ row.store }}</td>
-        <td>{{ row.sales_channel }}</td>
-        <td>{{ row.sales_location }}</td>
-        <td>{{ row.order_count }}</td>
-        <td>€ {{ '%.2f'|format(row.gross_amount or 0) }}</td>
-        <td>€ {{ '%.2f'|format(row.discounts_amount or 0) }}</td>
-        <td>€ {{ '%.2f'|format(row.commissions_amount or 0) }}</td>
-        <td><strong>€ {{ '%.2f'|format(row.net_amount or 0) }}</strong></td>
-        <td>€ {{ '%.2f'|format(avg) }}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="10" class="muted">Nessuna entrata trovata.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="panel-head">
+    <div>
+      <h3 style="margin:0">Storico entrate</h3>
+      <div class="muted">Ordinato per ordine di scrittura reale, non per data incasso.</div>
+    </div>
+  </div>
+  <div style="overflow-x:auto;margin-top:12px;">
+    <table>
+      <thead>
+        <tr>
+          <th>Data</th><th>Sede</th><th>Canale</th><th>Dove</th><th>Ordini</th><th>Lordo</th><th>Sconti</th><th>Commissioni</th><th>Netto</th><th>Media</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        {% set avg = ((row.net_amount or 0) / row.order_count) if row.order_count else 0 %}
+        <tr>
+          <td>{{ row.sale_date }}</td>
+          <td>{{ row.store }}</td>
+          <td>{{ row.sales_channel }}</td>
+          <td>{{ row.sales_location }}</td>
+          <td>{{ row.order_count }}</td>
+          <td>€ {{ '%.2f'|format(row.gross_amount or 0) }}</td>
+          <td>€ {{ '%.2f'|format(row.discounts_amount or 0) }}</td>
+          <td>€ {{ '%.2f'|format(row.commissions_amount or 0) }}</td>
+          <td><strong>€ {{ '%.2f'|format(row.net_amount or 0) }}</strong></td>
+          <td>€ {{ '%.2f'|format(avg) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="muted">Nessuna entrata trovata.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}

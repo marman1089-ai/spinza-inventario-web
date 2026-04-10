@@ -1,36 +1,35 @@
-
 {% extends "base.html" %}
-{% set title = "Inventario" %}
+{% set title = "Scegli area" %}
 {% block content %}
-  <div class="card" style="margin-bottom:14px;">
-    <h2 style="margin:0 0 6px 0;">Inventario</h2>
-    <div class="muted">Questa area è dedicata a <strong>giacenze, prodotti, ordini e logistica</strong>. La contabilità resta separata dentro il Gestionale.</div>
-  </div>
+  <div class="card">
+    <h2 style="margin-top:0">Benvenuto nel gestionale</h2>
+    <div class="muted">Da qui separi in modo chiaro il <strong>gestionale</strong> dall'<strong>inventario</strong>. Così il sito non è più solo un inventario con cose aggiunte, ma una struttura professionale.</div>
 
-  <div class="row" style="gap:14px;align-items:stretch;">
-    <a href="/select-area?area=bibite" style="text-decoration:none;color:#111;flex:1;min-width:240px;">
-      <div class="card" style="height:100%;padding:18px;">
-        <div class="pill">🥤 Sala / Bar</div>
-        <h3 style="margin:14px 0 8px 0;">Bibite</h3>
-        <div class="muted">Apri l'inventario della sala, con bevande e articoli collegati.</div>
-      </div>
-    </a>
-    <a href="/select-area?area=prodotti" style="text-decoration:none;color:#111;flex:1;min-width:240px;">
-      <div class="card" style="height:100%;padding:18px;">
-        <div class="pill">🍽️ Cucina</div>
-        <h3 style="margin:14px 0 8px 0;">Prodotti</h3>
-        <div class="muted">Apri l'inventario della cucina con giacenze, posizioni e minimi.</div>
-      </div>
-    </a>
-  </div>
-
-  <div class="card" style="margin-top:14px;">
-    <h3 style="margin-top:0;">Logistica inventario</h3>
-    <div class="row" style="gap:10px;">
-      <a href="/ordini" class="pill" style="text-decoration:none;color:#111;">🚚 Ordini da fare</a>
-      <a href="/ordinati" class="pill" style="text-decoration:none;color:#111;">📦 Ordini in corso</a>
-      <a href="/storico-ordini" class="pill" style="text-decoration:none;color:#111;">🗂️ Storico ordini</a>
-      <a href="/scambi" class="pill" style="text-decoration:none;color:#111;">🔁 Scambi tra negozi</a>
+    <div class="row" style="margin-top:18px;gap:14px;align-items:stretch;">
+      <a href="/select-area?module=gestionale" style="text-decoration:none;color:#111;flex:1;min-width:260px;">
+        <div class="card" style="margin:0;height:100%;">
+          <h3 style="margin:0 0 8px 0">📊 Gestionale</h3>
+          <div class="muted">Entrate, uscite, cassa, report, KPI, numero ordini e scontrino medio.</div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+            <span class="pill">Incassi per canale</span>
+            <span class="pill">Ordini</span>
+            <span class="pill">Media scontrino</span>
+            <span class="pill">Report</span>
+          </div>
+        </div>
+      </a>
+      <a href="/select-area?module=inventario" style="text-decoration:none;color:#111;flex:1;min-width:260px;">
+        <div class="card" style="margin:0;height:100%;">
+          <h3 style="margin:0 0 8px 0">📦 Inventario</h3>
+          <div class="muted">Giacenze, bibite, prodotti, posizioni, ordini da fare, ordini in corso e scambi.</div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+            <span class="pill">Giacenze</span>
+            <span class="pill">Ordini</span>
+            <span class="pill">Posizioni</span>
+            <span class="pill">Scambi</span>
+          </div>
+        </div>
+      </a>
     </div>
   </div>
 {% endblock %}
