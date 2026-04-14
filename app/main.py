@@ -931,6 +931,46 @@ def _month_label(month_key: str) -> str:
     return f"{months[d.month-1]} {d.year}"
 
 
+def _previous_month_key(month_key: str):
+    month_key = _month_key_from_value(month_key)
+    try:
+        dt = datetime.strptime(month_key + '-01', '%Y-%m-%d').date()
+    except Exception:
+        dt = date.today().replace(day=1)
+    prev_last = dt - timedelta(days=1)
+    return prev_last.strftime('%Y-%m')
+
+
+def _pct_change_value(current: float, previous: float):
+    current = float(current or 0)
+    previous = float(previous or 0)
+    if abs(previous) < 1e-9:
+        return None
+    return round(((current - previous) / previous) * 100.0, 1)
+
+
+def _sales_tree_value_map(nodes, prefix=''):
+    out = {}
+    for n in nodes or []:
+        path = f"{prefix}/{(n.get('name') or '').strip().lower()}" if prefix else (n.get('name') or '').strip().lower()
+        out[path] = {
+            'amount': float(n.get('amount') or 0),
+            'quantity': float(n.get('quantity') or 0),
+        }
+        out.update(_sales_tree_value_map(n.get('children') or [], path))
+    return out
+
+
+def _annotate_sales_tree_growth(nodes, previous_map, prefix=''):
+    for n in nodes or []:
+        path = f"{prefix}/{(n.get('name') or '').strip().lower()}" if prefix else (n.get('name') or '').strip().lower()
+        prev = previous_map.get(path) or {}
+        n['growth_amount_pct'] = _pct_change_value(float(n.get('amount') or 0), float(prev.get('amount') or 0))
+        n['growth_quantity_pct'] = _pct_change_value(float(n.get('quantity') or 0), float(prev.get('quantity') or 0))
+        _annotate_sales_tree_growth(n.get('children') or [], previous_map, path)
+    return nodes
+
+
 def _ensure_sales_report_period(cur, store: str, month_key: str, username: str = 'system'):
     ph = _ph()
     row = cur.execute(f"SELECT id, label FROM sales_report_periods WHERE store={ph} AND month_key={ph}", (store, month_key)).fetchone()
@@ -1255,6 +1295,11 @@ def sales_report_page(request: Request, month_key: str = '', store: str = '', im
         period_row = cur.execute(f"SELECT id, store, month_key, label FROM sales_report_periods WHERE id={_ph()}", (period_id,)).fetchone()
         period = dict(period_row) if period_row else {'id': period_id, 'store': selected_store, 'month_key': selected_month, 'label': _month_label(selected_month)}
         tree = _sales_report_tree(cur, period_id)
+        prev_month_key = _previous_month_key(selected_month)
+        prev_period_row = cur.execute(f"SELECT id FROM sales_report_periods WHERE store={_ph()} AND month_key={_ph()}", (selected_store, prev_month_key)).fetchone()
+        previous_tree = _sales_report_tree(cur, int(prev_period_row['id'])) if prev_period_row else []
+        previous_map = _sales_tree_value_map(previous_tree)
+        tree = _annotate_sales_tree_growth(tree, previous_map)
         top_amount = sum(float(x.get('amount') or 0) for x in tree)
         top_qty = sum(float(x.get('quantity') or 0) for x in tree)
         parent_options = _sales_report_flat_options(tree)
@@ -1383,6 +1428,66 @@ async def sales_report_add_group(request: Request):
         params = (period_id, parent_id, name, amount, quantity, int(next_sort)+10, user.get('username') or 'system') if parent_id is not None else (period_id, name, amount, quantity, int(next_sort)+10, user.get('username') or 'system')
         cur.execute(f"INSERT INTO sales_report_groups({cols}) VALUES({placeholders})", params)
         _log(cur, store=store, username=user['username'], action='CREATE', category='REPORT_VENDITE', name=f"Report vendite {month_key} - {name}", delta=float(amount or 0))
+        conn.commit()
+
+    return RedirectResponse(f"/gestionale/report-vendite?store={store}&month_key={month_key}", status_code=HTTP_303_SEE_OTHER)
+
+
+
+@app.post("/gestionale/report-vendite/voce/{group_id}/move")
+async def sales_report_move_group(request: Request, group_id: int):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    target_raw = str(form.get('parent_id') or '').strip()
+    target_parent = int(target_raw) if target_raw.isdigit() else None
+    month_key = _month_key_from_value(str(form.get('month_key') or ''))
+    store = str(form.get('store') or '').strip()
+    brand = _current_store_scope(request, user)
+    ph = _ph()
+
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(
+            f"SELECT g.id, g.parent_id, g.name, p.id AS period_id, p.store, p.month_key FROM sales_report_groups g JOIN sales_report_periods p ON p.id=g.period_id WHERE g.id={ph}",
+            (group_id,),
+        ).fetchone()
+        if not row:
+            return RedirectResponse("/gestionale/report-vendite", status_code=HTTP_303_SEE_OTHER)
+        row = dict(row)
+        if brand != 'ALL' and row.get('store') != brand:
+            return RedirectResponse("/gestionale/report-vendite", status_code=HTTP_303_SEE_OTHER)
+        period_id = int(row['period_id'])
+        if store not in STORES:
+            store = row.get('store') or 'spinza'
+        if not month_key:
+            month_key = row.get('month_key') or _today_str()[:7]
+        if target_parent == group_id:
+            target_parent = None
+
+        descendants = {group_id}
+        frontier = [group_id]
+        while frontier:
+            current = frontier.pop()
+            children = _dict_rows(cur, f"SELECT id FROM sales_report_groups WHERE parent_id={ph}", (current,))
+            for c in children:
+                cid = int(c['id'])
+                if cid not in descendants:
+                    descendants.add(cid)
+                    frontier.append(cid)
+        if target_parent in descendants:
+            target_parent = None
+        if target_parent is not None:
+            valid = _fetch_one_int(cur, f"SELECT COUNT(*) FROM sales_report_groups WHERE id={ph} AND period_id={ph}", (target_parent, period_id))
+            if not valid:
+                target_parent = None
+
+        cur.execute(f"UPDATE sales_report_groups SET parent_id={ph} WHERE id={ph}", (target_parent, group_id))
+        _log(cur, store=row.get('store') or 'spinza', username=user['username'], action='UPDATE', category='REPORT_VENDITE', name=f"Spostata voce report {row.get('name','')}", delta=0)
         conn.commit()
 
     return RedirectResponse(f"/gestionale/report-vendite?store={store}&month_key={month_key}", status_code=HTTP_303_SEE_OTHER)
