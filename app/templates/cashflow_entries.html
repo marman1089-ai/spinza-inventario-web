@@ -79,6 +79,27 @@
 </div>
 {% endif %}
 
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Metodi di pagamento configurati</h3>
+  <div class="muted" style="margin-bottom:10px;">Puoi togliere i metodi extra che hai creato per errore. I metodi base restano fissi.</div>
+  <div class="row">
+    {% for method in available_payment_methods %}
+      <div class="method-card" style="min-width:180px;">
+        <div style="font-weight:800;text-transform:capitalize;">{{ method }}</div>
+        {% if method not in ['contanti', 'pos', 'deliveroo', 'glovo', 'just eat'] %}
+        <form method="post" action="/gestionale/payment-methods/delete" onsubmit="return confirm('Eliminare questo metodo dalla schermata incassi?');" style="margin-top:10px;">
+          <input type="hidden" name="method_name" value="{{ method }}">
+          <button class="btn2" type="submit" style="border-color:#fecaca;background:#fff1f2;">Elimina opzione</button>
+        </form>
+        {% else %}
+        <div class="tiny" style="margin-top:10px;">Metodo base</div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
 <div class="row" style="margin-top:14px;">
   <div class="card" style="flex:1;min-width:220px;"><div class="muted">Totale filtrato</div><div style="font-size:30px;font-weight:800;">€ {{ '%.2f'|format(total_amount) }}</div></div>
   <div class="card" style="flex:1;min-width:220px;"><div class="muted">Negozio grafico</div><div style="font-size:22px;font-weight:800;">{{ stores[chart_store] }}</div></div>
@@ -125,30 +146,46 @@
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Storico incassi</h3>
+  <div class="muted" style="margin-bottom:10px;">Se più incassi hanno la stessa data, ora li vedi nella stessa riga con una colonna per ogni metodo.</div>
+  <div style="overflow-x:auto;">
   <table>
-    <thead><tr><th>Data</th><th>Sede</th><th>Metodo</th><th>Importo</th><th>Note</th><th>Creato da</th>{% if can_edit_management %}<th>Azione</th>{% endif %}</tr></thead>
-    <tbody>
-      {% for r in rows %}
+    <thead>
       <tr>
-        <td>{{ r.flow_date }}</td>
-        <td>{{ stores[r.store] if r.store in stores else r.store }}</td>
-        <td>{{ r.payment_method }}</td>
-        <td><strong>€ {{ '%.2f'|format(r.amount or 0) }}</strong></td>
-        <td>{{ r.notes or '-' }}</td>
-        <td>{{ r.created_by }}</td>
-        {% if can_edit_management %}
+        <th>Data</th><th>Sede</th>
+        {% for method in history_methods %}<th style="text-transform:capitalize;">{{ method }}</th>{% endfor %}
+        <th>Totale</th><th>Note</th><th>Creato da</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in grouped_rows %}
+      <tr>
+        <td>{{ row.flow_date }}</td>
+        <td>{{ stores[row.store] if row.store in stores else row.store }}</td>
+        {% for method in history_methods %}
+        {% set cell = row.methods.get(method) %}
         <td>
-          <form method="post" action="/gestionale/incassi/{{ r.id }}/delete" onsubmit="return confirm('Eliminare questo incasso?');" style="margin:0;">
-            <button class="btn2" type="submit" style="border-color:#fecaca;background:#fff1f2;">Elimina</button>
-          </form>
+          {% if cell and cell.amount > 0 %}
+            <div><strong>€ {{ '%.2f'|format(cell.amount or 0) }}</strong></div>
+            {% if can_edit_management %}
+              {% for entry in cell.entries %}
+              <form method="post" action="/gestionale/incassi/{{ entry.id }}/delete" onsubmit="return confirm('Eliminare questo incasso?');" style="margin:6px 0 0 0;">
+                <button class="btn2" type="submit" style="border-color:#fecaca;background:#fff1f2;padding:4px 8px;">Elimina</button>
+              </form>
+              {% endfor %}
+            {% endif %}
+          {% else %}-{% endif %}
         </td>
-        {% endif %}
+        {% endfor %}
+        <td><strong>€ {{ '%.2f'|format(row.row_total or 0) }}</strong></td>
+        <td>{{ row.notes_text }}</td>
+        <td>{{ row.created_by_text }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="7" class="muted">Ancora nessun incasso registrato.</td></tr>
+      <tr><td colspan="{{ 6 + (history_methods|length) }}" class="muted">Ancora nessun incasso registrato.</td></tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 
 <script>

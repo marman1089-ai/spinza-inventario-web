@@ -331,6 +331,36 @@ def init_db():
         )
         """)
 
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS sales_report_periods (
+            id {id_col},
+            store TEXT NOT NULL,
+            month_key TEXT NOT NULL,
+            label TEXT NOT NULL DEFAULT '',
+            created_by TEXT NOT NULL,
+            ts {ts_default}
+        )
+        """)
+
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS sales_report_groups (
+            id {id_col},
+            period_id INTEGER NOT NULL,
+            parent_id INTEGER,
+            name TEXT NOT NULL,
+            amount {qty_col} NOT NULL DEFAULT 0,
+            quantity {qty_col} NOT NULL DEFAULT 0,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_by TEXT NOT NULL,
+            ts {ts_default}
+        )
+        """)
+
+        try:
+            _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_period_store_month ON sales_report_periods(store, month_key)")
+        except Exception:
+            pass
+
         default_payment_methods = [
             ('contanti', 10, 1),
             ('pos', 20, 1),
@@ -501,7 +531,39 @@ def init_db():
             except Exception:
                 pass
 
-        # Cashflow compatibility migrations: evita errori sui database già esistenti
+                # Sales reports (report vendite) compatibility migrations
+        try:
+            _safe_exec(cur, f"""
+            CREATE TABLE IF NOT EXISTS sales_report_periods (
+                id {id_col},
+                store TEXT NOT NULL,
+                month_key TEXT NOT NULL,
+                label TEXT NOT NULL DEFAULT '',
+                created_by TEXT NOT NULL,
+                ts {ts_default}
+            )
+            """)
+            _safe_exec(cur, f"""
+            CREATE TABLE IF NOT EXISTS sales_report_groups (
+                id {id_col},
+                period_id INTEGER NOT NULL,
+                parent_id INTEGER,
+                name TEXT NOT NULL,
+                amount {qty_col} NOT NULL DEFAULT 0,
+                quantity {qty_col} NOT NULL DEFAULT 0,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_by TEXT NOT NULL,
+                ts {ts_default}
+            )
+            """)
+            try:
+                _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_period_store_month ON sales_report_periods(store, month_key)")
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+# Cashflow compatibility migrations: evita errori sui database già esistenti
         if pg:
             cash_alters = [
                 "ALTER TABLE cash_entries ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT ''",

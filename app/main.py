@@ -910,6 +910,206 @@ def _build_store_period_chart(cur, store: str, period_type: str = 'week', anchor
     return rows
 
 
+def _month_key_from_value(raw: str) -> str:
+    s = (raw or '').strip()
+    if not s:
+        return date.today().strftime('%Y-%m')
+    try:
+        if len(s) == 7:
+            return datetime.strptime(s, '%Y-%m').strftime('%Y-%m')
+        return datetime.strptime(s, '%Y-%m-%d').strftime('%Y-%m')
+    except Exception:
+        return date.today().strftime('%Y-%m')
+
+
+def _month_label(month_key: str) -> str:
+    try:
+        d = datetime.strptime((month_key or '') + '-01', '%Y-%m-%d').date()
+    except Exception:
+        d = date.today().replace(day=1)
+    months = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre']
+    return f"{months[d.month-1]} {d.year}"
+
+
+def _ensure_sales_report_period(cur, store: str, month_key: str, username: str = 'system'):
+    ph = _ph()
+    row = cur.execute(f"SELECT id, label FROM sales_report_periods WHERE store={ph} AND month_key={ph}", (store, month_key)).fetchone()
+    if row:
+        try:
+            return int(row['id'])
+        except Exception:
+            return int(row[0])
+    label = _month_label(month_key)
+    cur.execute(
+        f"INSERT INTO sales_report_periods(store, month_key, label, created_by) VALUES({ph},{ph},{ph},{ph})",
+        (store, month_key, label, username or 'system'),
+    )
+    row = cur.execute(f"SELECT id FROM sales_report_periods WHERE store={ph} AND month_key={ph}", (store, month_key)).fetchone()
+    try:
+        return int(row['id'])
+    except Exception:
+        return int(row[0])
+
+
+def _sales_report_periods(cur, scope_store: str):
+    where_sql, params = _cash_scope_where(scope_store)
+    sql = f"SELECT id, store, month_key, label FROM sales_report_periods WHERE {where_sql} ORDER BY month_key DESC, id DESC"
+    rows = _dict_rows(cur, sql, params)
+    for r in rows:
+        r['store_label'] = _store_label(r.get('store'))
+        r['label_full'] = f"{r.get('label') or _month_label(r.get('month_key') or '')} · {r['store_label']}"
+    return rows
+
+
+def _sales_report_tree(cur, period_id: int):
+    ph = _ph()
+    rows = _dict_rows(cur, f"SELECT id, period_id, parent_id, name, amount, quantity, sort_order FROM sales_report_groups WHERE period_id={ph} ORDER BY sort_order ASC, name ASC, id ASC", (int(period_id),))
+    by_parent = {}
+    for r in rows:
+        r['amount'] = float(r.get('amount') or 0)
+        r['quantity'] = float(r.get('quantity') or 0)
+        pid = r.get('parent_id')
+        by_parent.setdefault(pid, []).append(r)
+    def build(parent_id=None):
+        items = []
+        children = by_parent.get(parent_id, [])
+        amount_total = sum(float(x.get('amount') or 0) for x in children)
+        qty_total = sum(float(x.get('quantity') or 0) for x in children)
+        for idx, child in enumerate(children, start=1):
+            node = {
+                'id': int(child['id']),
+                'name': child.get('name') or 'Voce',
+                'amount': float(child.get('amount') or 0),
+                'quantity': float(child.get('quantity') or 0),
+                'sort_order': int(child.get('sort_order') or idx*10),
+                'children': build(int(child['id'])),
+            }
+            child_amount_total = sum(float(c.get('amount') or 0) for c in by_parent.get(int(child['id']), []))
+            child_qty_total = sum(float(c.get('quantity') or 0) for c in by_parent.get(int(child['id']), []))
+            node['share_amount'] = round((node['amount'] / amount_total) * 100, 1) if amount_total > 0 else 0.0
+            node['share_quantity'] = round((node['quantity'] / qty_total) * 100, 1) if qty_total > 0 else 0.0
+            node['child_amount_total'] = child_amount_total
+            node['child_quantity_total'] = child_qty_total
+            node['has_children'] = len(node['children']) > 0
+            items.append(node)
+        return items
+    return build(None)
+
+
+def _sales_report_flat_options(nodes, prefix=''):
+    out = []
+    for n in nodes:
+        label = f"{prefix}{n['name']}"
+        out.append({'id': n['id'], 'label': label})
+        out.extend(_sales_report_flat_options(n.get('children') or [], prefix + '— '))
+    return out
+
+
+def _parse_sales_report_upload(filename: str, raw_bytes: bytes):
+    """Legge CSV/XLS/XLSX del report vendite e restituisce una lista di voci.
+    Ogni voce: {name, quantity, amount}.
+    """
+    filename = (filename or '').lower()
+    rows = []
+
+    def normalize_table(table_rows):
+        normalized = []
+        header = None
+        for raw in table_rows:
+            vals = [str(x).strip() if x is not None else '' for x in raw]
+            if not any(vals):
+                continue
+            first = (vals[0] or '').strip().lower()
+            if first == 'name':
+                header = vals
+                continue
+            if header is None and len(vals) >= 3 and (vals[0].strip().lower() == 'name' or vals[2].strip().lower() == 'total'):
+                header = vals
+                continue
+            if first == 'total':
+                continue
+            normalized.append(vals)
+        if not normalized:
+            return []
+        out = []
+        for vals in normalized:
+            name = (vals[0] if len(vals) > 0 else '').strip()
+            if not name or name.lower() == 'name':
+                continue
+            quantity = _safe_amount(vals[2] if len(vals) > 2 else 0, 0.0)
+            amount = 0.0
+            preferred = [v for v in vals[3:] if str(v).strip() != '']
+            if preferred:
+                amount = _safe_amount(preferred[-1], 0.0)
+                if amount <= 0:
+                    for cand in reversed(preferred):
+                        amount = _safe_amount(cand, 0.0)
+                        if amount > 0:
+                            break
+            out.append({'name': name, 'quantity': quantity, 'amount': amount})
+        return [r for r in out if r['name']]
+
+    if filename.endswith('.csv'):
+        text_data = raw_bytes.decode('utf-8-sig', errors='ignore')
+        reader = csv.reader(io.StringIO(text_data))
+        return normalize_table(list(reader))
+
+    if filename.endswith('.xlsx') or filename.endswith('.xls'):
+        try:
+            import pandas as pd
+            try:
+                df = pd.read_excel(io.BytesIO(raw_bytes), header=None)
+            except Exception:
+                df = pd.read_html(io.BytesIO(raw_bytes))[0]
+            return normalize_table(df.fillna('').values.tolist())
+        except Exception as e:
+            raise ValueError(f'File Excel non leggibile: {e}')
+
+    raise ValueError('Formato non supportato. Usa CSV oppure Excel.')
+
+
+def _group_cash_rows_by_date(rows, methods):
+    ordered_methods = list(methods or [])
+    grouped = {}
+    for r in rows:
+        store = r.get('store') or ''
+        ds = r.get('flow_date') or ''
+        key = (ds, store)
+        item = grouped.setdefault(key, {
+            'flow_date': ds,
+            'store': store,
+            'methods': {m: {'amount': 0.0, 'entries': []} for m in ordered_methods},
+            'notes': [],
+            'created_by': [],
+            'row_total': 0.0,
+        })
+        method = (r.get('payment_method') or '').strip()
+        if method and method not in item['methods']:
+            item['methods'][method] = {'amount': 0.0, 'entries': []}
+            if method not in ordered_methods:
+                ordered_methods.append(method)
+        if method:
+            cell = item['methods'][method]
+            amount = float(r.get('amount') or 0)
+            cell['amount'] += amount
+            cell['entries'].append({'id': r.get('id'), 'amount': amount})
+            item['row_total'] += amount
+        notes = (r.get('notes') or '').strip()
+        if notes and notes not in item['notes']:
+            item['notes'].append(notes)
+        created = (r.get('created_by') or '').strip()
+        if created and created not in item['created_by']:
+            item['created_by'].append(created)
+    result = sorted(grouped.values(), key=lambda x: (x['flow_date'], x['store']), reverse=True)
+    for item in result:
+        item['notes_text'] = ' | '.join(item['notes']) if item['notes'] else '-'
+        item['created_by_text'] = ', '.join(item['created_by']) if item['created_by'] else '-'
+        for m in ordered_methods:
+            item['methods'].setdefault(m, {'amount': 0.0, 'entries': []})
+    return ordered_methods, result
+
+
+
 @app.get("/workspace", response_class=HTMLResponse)
 def workspace_home(request: Request):
     user = require_login(request)
@@ -1033,6 +1233,196 @@ def gestionale_dashboard(request: Request, period_type: str = 'week', anchor_dat
     )
 
 
+@app.get("/gestionale/report-vendite", response_class=HTMLResponse)
+def sales_report_page(request: Request, month_key: str = '', store: str = '', import_ok: int = 0, import_error: str = ''):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+
+    brand = _current_store_scope(request, user)
+    active_store = request.session.get("active_store") if is_admin(request) else None
+    selected_store = (store or (brand if brand != 'ALL' else (active_store or 'spinza'))).strip()
+    if selected_store not in STORES:
+        selected_store = brand if brand != 'ALL' else 'spinza'
+    selected_month = _month_key_from_value(month_key)
+
+    with connect() as conn:
+        cur = conn.cursor()
+        period_id = _ensure_sales_report_period(cur, selected_store, selected_month, user.get('username') or 'system')
+        periods = _sales_report_periods(cur, brand)
+        period_row = cur.execute(f"SELECT id, store, month_key, label FROM sales_report_periods WHERE id={_ph()}", (period_id,)).fetchone()
+        period = dict(period_row) if period_row else {'id': period_id, 'store': selected_store, 'month_key': selected_month, 'label': _month_label(selected_month)}
+        tree = _sales_report_tree(cur, period_id)
+        top_amount = sum(float(x.get('amount') or 0) for x in tree)
+        top_qty = sum(float(x.get('quantity') or 0) for x in tree)
+        parent_options = _sales_report_flat_options(tree)
+
+    period['store_label'] = _store_label(period.get('store'))
+    return render(
+        'sales_report.html',
+        user=user,
+        brand=brand,
+        active_store=active_store,
+        stores=STORES,
+        selected_store=selected_store,
+        selected_month=selected_month,
+        selected_month_label=_month_label(selected_month),
+        period=period,
+        periods=periods,
+        parent_options=parent_options,
+        tree=tree,
+        chart_tree_json=json.dumps(tree),
+        totals={'amount': top_amount, 'quantity': top_qty},
+        import_ok=import_ok,
+        import_error=import_error,
+    )
+
+
+@app.post("/gestionale/report-vendite/import")
+async def sales_report_import_file(request: Request, upload_file: UploadFile = File(...)):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse('/', status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse('/gestionale', status_code=HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    month_key = _month_key_from_value(str(form.get('month_key') or ''))
+    store = str(form.get('store') or '').strip()
+    if store not in STORES:
+        store = _current_store_scope(request, user)
+        if store == 'ALL':
+            store = request.session.get('active_store') or 'spinza'
+    if not is_admin(request):
+        store = user.get('store') or store
+
+    parent_raw = str(form.get('parent_id') or '').strip()
+    parent_id = int(parent_raw) if parent_raw.isdigit() else None
+    filename = upload_file.filename or 'report.csv'
+    raw = await upload_file.read()
+    if not raw:
+        return RedirectResponse(f'/gestionale/report-vendite?store={store}&month_key={month_key}&import_error=File+vuoto', status_code=HTTP_303_SEE_OTHER)
+
+    try:
+        rows = _parse_sales_report_upload(filename, raw)
+    except Exception as e:
+        msg = str(e).replace(' ', '+')
+        return RedirectResponse(f'/gestionale/report-vendite?store={store}&month_key={month_key}&import_error={msg}', status_code=HTTP_303_SEE_OTHER)
+
+    inserted = 0
+    with connect() as conn:
+        cur = conn.cursor()
+        period_id = _ensure_sales_report_period(cur, store, month_key, user.get('username') or 'system')
+        if parent_id:
+            parent_exists = _fetch_one_int(cur, f'SELECT COUNT(*) FROM sales_report_groups WHERE id={_ph()} AND period_id={_ph()}', (parent_id, period_id))
+            if not parent_exists:
+                parent_id = None
+        for row in rows:
+            name = str(row.get('name') or '').strip()
+            if not name:
+                continue
+            amount = float(row.get('amount') or 0)
+            quantity = float(row.get('quantity') or 0)
+            if parent_id is None:
+                next_sort = _fetch_one_int(cur, f'SELECT COALESCE(MAX(sort_order),0) FROM sales_report_groups WHERE period_id={_ph()} AND parent_id IS NULL', (period_id,))
+                cur.execute(
+                    f'INSERT INTO sales_report_groups(period_id, name, amount, quantity, sort_order, created_by) VALUES({_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()})',
+                    (period_id, name, amount, quantity, int(next_sort) + 10, user.get('username') or 'system')
+                )
+            else:
+                next_sort = _fetch_one_int(cur, f'SELECT COALESCE(MAX(sort_order),0) FROM sales_report_groups WHERE period_id={_ph()} AND parent_id={_ph()}', (period_id, parent_id))
+                cur.execute(
+                    f'INSERT INTO sales_report_groups(period_id, parent_id, name, amount, quantity, sort_order, created_by) VALUES({_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()})',
+                    (period_id, parent_id, name, amount, quantity, int(next_sort) + 10, user.get('username') or 'system')
+                )
+            inserted += 1
+        _log(cur, store=store, username=user['username'], action='IMPORT', category='REPORT_VENDITE', name=f'Import report vendite {month_key}', delta=0)
+        conn.commit()
+
+    return RedirectResponse(f'/gestionale/report-vendite?store={store}&month_key={month_key}&import_ok={inserted}', status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/gestionale/report-vendite/voce")
+async def sales_report_add_group(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    month_key = _month_key_from_value(str(form.get('month_key') or ''))
+    store = str(form.get('store') or '').strip()
+    if store not in STORES:
+        store = _current_store_scope(request, user)
+        if store == 'ALL':
+            store = request.session.get('active_store') or 'spinza'
+    if not is_admin(request):
+        store = user.get('store') or store
+
+    name = str(form.get('name') or '').strip()
+    parent_raw = str(form.get('parent_id') or '').strip()
+    amount = _safe_amount(form.get('amount'), 0.0)
+    quantity = _safe_amount(form.get('quantity'), 0.0)
+    if not name:
+        return RedirectResponse(f"/gestionale/report-vendite?store={store}&month_key={month_key}", status_code=HTTP_303_SEE_OTHER)
+    parent_id = int(parent_raw) if parent_raw.isdigit() else None
+
+    with connect() as conn:
+        cur = conn.cursor()
+        period_id = _ensure_sales_report_period(cur, store, month_key, user.get('username') or 'system')
+        next_sort = _fetch_one_int(cur, f"SELECT COALESCE(MAX(sort_order),0) FROM sales_report_groups WHERE period_id={_ph()} AND " + (f"parent_id={_ph()}" if parent_id else "parent_id IS NULL"), ((period_id, parent_id) if parent_id else (period_id,)))
+        if parent_id:
+            parent_exists = _fetch_one_int(cur, f"SELECT COUNT(*) FROM sales_report_groups WHERE id={_ph()} AND period_id={_ph()}", (parent_id, period_id))
+            if not parent_exists:
+                parent_id = None
+        cols = f"period_id, parent_id, name, amount, quantity, sort_order, created_by" if parent_id is not None else f"period_id, name, amount, quantity, sort_order, created_by"
+        placeholders = f"{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()}" if parent_id is not None else f"{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()}"
+        params = (period_id, parent_id, name, amount, quantity, int(next_sort)+10, user.get('username') or 'system') if parent_id is not None else (period_id, name, amount, quantity, int(next_sort)+10, user.get('username') or 'system')
+        cur.execute(f"INSERT INTO sales_report_groups({cols}) VALUES({placeholders})", params)
+        _log(cur, store=store, username=user['username'], action='CREATE', category='REPORT_VENDITE', name=f"Report vendite {month_key} - {name}", delta=float(amount or 0))
+        conn.commit()
+
+    return RedirectResponse(f"/gestionale/report-vendite?store={store}&month_key={month_key}", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/gestionale/report-vendite/voce/{group_id}/delete")
+def sales_report_delete_group(request: Request, group_id: int):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+
+    brand = _current_store_scope(request, user)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(
+            f"SELECT g.id, g.name, g.amount, p.store, p.month_key FROM sales_report_groups g JOIN sales_report_periods p ON p.id=g.period_id WHERE g.id={ph}",
+            (group_id,),
+        ).fetchone()
+        if not row:
+            return RedirectResponse("/gestionale/report-vendite", status_code=HTTP_303_SEE_OTHER)
+        row = dict(row)
+        if brand != 'ALL' and row.get('store') != brand:
+            return RedirectResponse("/gestionale/report-vendite", status_code=HTTP_303_SEE_OTHER)
+        ids = [group_id]
+        cursor = 0
+        while cursor < len(ids):
+            children = _dict_rows(cur, f"SELECT id FROM sales_report_groups WHERE parent_id={ph}", (ids[cursor],))
+            ids.extend(int(c['id']) for c in children if int(c['id']) not in ids)
+            cursor += 1
+        placeholders = ','.join([ph] * len(ids))
+        cur.execute(f"DELETE FROM sales_report_groups WHERE id IN ({placeholders})", tuple(ids))
+        _log(cur, store=row.get('store') or 'spinza', username=user['username'], action='DELETE', category='REPORT_VENDITE', name=f"Report vendite eliminato {row.get('month_key','')} - {row.get('name','')}", delta=float(row.get('amount') or 0))
+        conn.commit()
+        return RedirectResponse(f"/gestionale/report-vendite?store={row.get('store')}&month_key={row.get('month_key')}", status_code=HTTP_303_SEE_OTHER)
+
+
+
 @app.get("/gestionale/incassi", response_class=HTMLResponse)
 def cash_entries_page(request: Request, flow_date: str = '', payment_method: str = 'ALL', period_type: str = 'week', anchor_date: str = '', imported_entries: int = 0, imported_expenses: int = 0, import_error: str = ''):
     user = require_login(request)
@@ -1059,6 +1449,7 @@ def cash_entries_page(request: Request, flow_date: str = '', payment_method: str
         rows = _dict_rows(cur, sql, tuple(qparams))
         payments = [r['payment_method'] for r in _dict_rows(cur, f"SELECT DISTINCT payment_method FROM cash_entries WHERE {where_sql} ORDER BY payment_method ASC", params) if r.get('payment_method')]
         available_payment_methods = _load_cash_payment_methods(cur)
+        history_methods, grouped_rows = _group_cash_rows_by_date(rows, available_payment_methods)
         chart_rows = _build_store_period_chart(cur, brand if brand != 'ALL' else (active_store or 'spinza'), period_type, anchor_date)
         total_amount = sum(float(r.get('amount') or 0) for r in rows)
     return render(
@@ -1067,7 +1458,7 @@ def cash_entries_page(request: Request, flow_date: str = '', payment_method: str
         can_edit_management=can_edit_management, rows=rows, today=date.today().isoformat(),
         selected_date=flow_date, selected_payment=payment_method, payments=payments,
         total_amount=total_amount, chart_rows=chart_rows, chart_store=(brand if brand != 'ALL' else (active_store or 'spinza')), imported_entries=imported_entries, imported_expenses=imported_expenses, import_error=import_error,
-        available_payment_methods=available_payment_methods, selected_period_type=period_type, selected_anchor_date=(anchor_date or date.today().isoformat()),
+        available_payment_methods=available_payment_methods, history_methods=history_methods, grouped_rows=grouped_rows, selected_period_type=period_type, selected_anchor_date=(anchor_date or date.today().isoformat()),
     )
 
 
@@ -1234,6 +1625,30 @@ def cash_entries_delete(request: Request, entry_id: int):
                 delta=-float(row.get('amount') or 0),
             )
     return RedirectResponse('/gestionale/incassi', status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/gestionale/payment-methods/delete")
+async def cash_payment_method_delete(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+    form = await request.form()
+    clean_name = str(form.get('method_name') or '').strip()
+    if not clean_name:
+        return RedirectResponse('/gestionale/incassi', status_code=HTTP_303_SEE_OTHER)
+    if clean_name.lower() in {'contanti', 'pos', 'deliveroo', 'glovo', 'just eat'}:
+        return RedirectResponse('/gestionale/incassi', status_code=HTTP_303_SEE_OTHER)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        brand = _current_store_scope(request, user)
+        cur.execute(f"DELETE FROM cash_payment_methods WHERE LOWER(name)=LOWER({ph})", (clean_name,))
+        _log(cur, store=(brand if brand != 'ALL' else (request.session.get('active_store') or 'spinza')), username=user['username'], action='DELETE', category='CASSA', name=f"Metodo pagamento rimosso {clean_name}", delta=0)
+        conn.commit()
+    return RedirectResponse('/gestionale/incassi', status_code=HTTP_303_SEE_OTHER)
+
 
 
 @app.post("/gestionale/uscite/{expense_id}/delete")
