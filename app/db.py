@@ -356,23 +356,8 @@ def init_db():
         )
         """)
 
-        _safe_exec(cur, f"""
-        CREATE TABLE IF NOT EXISTS sales_report_product_mappings (
-            id {id_col},
-            store TEXT NOT NULL,
-            product_name TEXT NOT NULL,
-            macro_group_name TEXT NOT NULL,
-            updated_by TEXT NOT NULL DEFAULT 'system',
-            ts {ts_default}
-        )
-        """)
-
         try:
             _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_period_store_month ON sales_report_periods(store, month_key)")
-        except Exception:
-            pass
-        try:
-            _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_mapping_store_product ON sales_report_product_mappings(store, product_name)")
         except Exception:
             pass
 
@@ -571,22 +556,8 @@ def init_db():
                 ts {ts_default}
             )
             """)
-            _safe_exec(cur, f"""
-            CREATE TABLE IF NOT EXISTS sales_report_product_mappings (
-                id {id_col},
-                store TEXT NOT NULL,
-                product_name TEXT NOT NULL,
-                macro_group_name TEXT NOT NULL,
-                updated_by TEXT NOT NULL DEFAULT 'system',
-                ts {ts_default}
-            )
-            """)
             try:
                 _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_period_store_month ON sales_report_periods(store, month_key)")
-            except Exception:
-                pass
-            try:
-                _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_mapping_store_product ON sales_report_product_mappings(store, product_name)")
             except Exception:
                 pass
         except Exception:

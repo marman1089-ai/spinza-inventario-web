@@ -47,18 +47,6 @@ STORES = {
     "reburger_palazzuolo": "Reburger Palazzuolo",
 }
 
-DEFAULT_SALES_REPORT_GROUPS = [
-    "Pinze classiche",
-    "Pinze speciali",
-    "Pinze stagionali",
-    "Soft drink",
-    "Alcol drink",
-    "Delivery",
-    "Desert (Dolci)",
-    "Prodotti da assegnare",
-]
-
-
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.environ.get("SESSION_SECRET", "CHANGE_ME_PLS"),
@@ -961,26 +949,6 @@ def _pct_change_value(current: float, previous: float):
     return round(((current - previous) / previous) * 100.0, 1)
 
 
-def _sales_report_norm_name(value: str):
-    value = str(value or '').strip().lower()
-    value = re.sub(r'\s+', ' ', value)
-    return value
-
-
-def _sales_report_root_name_from_tree(nodes, node_id: int):
-    def walk(items, root_name=None):
-        for item in items or []:
-            current_root = root_name or item.get('name') or ''
-            if int(item.get('id') or 0) == int(node_id or 0):
-                return current_root
-            found = walk(item.get('children') or [], current_root)
-            if found:
-                return found
-        return None
-    return walk(nodes or [])
-
-
-
 def _sales_tree_value_map(nodes, prefix=''):
     out = {}
     for n in nodes or []:
@@ -1003,34 +971,69 @@ def _annotate_sales_tree_growth(nodes, previous_map, prefix=''):
     return nodes
 
 
-def _ensure_default_sales_report_groups(cur, period_id: int, username: str = 'system'):
+SALES_REPORT_DEFAULT_GROUPS = [
+    "Pinze classiche",
+    "Pinze speciali",
+    "Pinze stagionali",
+    "Soft drink",
+    "Alcol drink",
+    "Delivery",
+    "Desert (Dolci)",
+    "Da assegnare",
+]
+
+
+def _ensure_sales_report_default_groups(cur, period_id: int, username: str = 'system'):
     ph = _ph()
-    existing_rows = _dict_rows(cur, f"SELECT id, name FROM sales_report_groups WHERE period_id={ph} AND parent_id IS NULL", (period_id,))
-    existing = {_sales_report_norm_name(r.get('name')): int(r.get('id')) for r in existing_rows}
-    next_sort = _fetch_one_int(cur, f"SELECT COALESCE(MAX(sort_order),0) FROM sales_report_groups WHERE period_id={ph} AND parent_id IS NULL", (period_id,))
-    for name in DEFAULT_SALES_REPORT_GROUPS:
-        norm = _sales_report_norm_name(name)
-        if norm in existing:
+    existing_rows = _dict_rows(cur, f"SELECT id, name FROM sales_report_groups WHERE period_id={ph} AND parent_id IS NULL", (int(period_id),))
+    existing = {(r.get('name') or '').strip().lower() for r in existing_rows}
+    next_sort = _fetch_one_int(cur, f'SELECT COALESCE(MAX(sort_order),0) FROM sales_report_groups WHERE period_id={ph} AND parent_id IS NULL', (int(period_id),))
+    for name in SALES_REPORT_DEFAULT_GROUPS:
+        key = name.strip().lower()
+        if key in existing:
             continue
         next_sort = int(next_sort) + 10
         cur.execute(
-            f"INSERT INTO sales_report_groups(period_id, name, amount, quantity, sort_order, created_by) VALUES({ph},{ph},{ph},{ph},{ph},{ph})",
-            (period_id, name, 0.0, 0.0, next_sort, username),
+            f'INSERT INTO sales_report_groups(period_id, name, amount, quantity, sort_order, created_by) VALUES({ph},{ph},{ph},{ph},{ph},{ph})',
+            (int(period_id), name, 0.0, 0.0, next_sort, username or 'system')
         )
+        existing.add(key)
+
+
+def _sales_report_root_groups(cur, period_id: int):
+    ph = _ph()
+    return _dict_rows(cur, f"SELECT id, name, sort_order FROM sales_report_groups WHERE period_id={ph} AND parent_id IS NULL ORDER BY sort_order ASC, name ASC, id ASC", (int(period_id),))
+
+
+def _sales_report_default_parent_id(cur, period_id: int):
+    roots = _sales_report_root_groups(cur, period_id)
+    for row in roots:
+        if (row.get('name') or '').strip().lower() == 'da assegnare':
+            return int(row['id'])
+    return int(roots[0]['id']) if roots else None
 
 
 def _ensure_sales_report_period(cur, store: str, month_key: str, username: str = 'system'):
     ph = _ph()
     row = cur.execute(f"SELECT id, label FROM sales_report_periods WHERE store={ph} AND month_key={ph}", (store, month_key)).fetchone()
-    if not row:
-        label = _month_label(month_key)
-        cur.execute(
-            f"INSERT INTO sales_report_periods(store, month_key, label, created_by) VALUES({ph},{ph},{ph},{ph})",
-            (store, month_key, label, username),
-        )
-        row = cur.execute(f"SELECT id FROM sales_report_periods WHERE store={ph} AND month_key={ph}", (store, month_key)).fetchone()
-    period_id = int(row['id'])
-    _ensure_default_sales_report_groups(cur, period_id, username)
+    if row:
+        try:
+            period_id = int(row['id'])
+        except Exception:
+            period_id = int(row[0])
+        _ensure_sales_report_default_groups(cur, period_id, username)
+        return period_id
+    label = _month_label(month_key)
+    cur.execute(
+        f"INSERT INTO sales_report_periods(store, month_key, label, created_by) VALUES({ph},{ph},{ph},{ph})",
+        (store, month_key, label, username or 'system'),
+    )
+    row = cur.execute(f"SELECT id FROM sales_report_periods WHERE store={ph} AND month_key={ph}", (store, month_key)).fetchone()
+    try:
+        period_id = int(row['id'])
+    except Exception:
+        period_id = int(row[0])
+    _ensure_sales_report_default_groups(cur, period_id, username)
     return period_id
 
 
@@ -1060,28 +1063,31 @@ def _sales_report_tree(cur, period_id: int):
         for idx, child in enumerate(children, start=1):
             nested = build(int(child['id']))
             own_amount = float(child.get('amount') or 0)
-            own_quantity = float(child.get('quantity') or 0)
-            total_amount = own_amount + sum(float(c.get('amount') or 0) for c in nested)
-            total_quantity = own_quantity + sum(float(c.get('quantity') or 0) for c in nested)
+            own_qty = float(child.get('quantity') or 0)
+            child_amount_total = sum(float(c.get('amount') or 0) for c in nested)
+            child_qty_total = sum(float(c.get('quantity') or 0) for c in nested)
+            total_amount = own_amount + child_amount_total
+            total_qty = own_qty + child_qty_total
             node = {
                 'id': int(child['id']),
                 'name': child.get('name') or 'Voce',
                 'amount': total_amount,
-                'quantity': total_quantity,
+                'quantity': total_qty,
                 'own_amount': own_amount,
-                'own_quantity': own_quantity,
-                'sort_order': int(child.get('sort_order') or idx * 10),
+                'own_quantity': own_qty,
+                'sort_order': int(child.get('sort_order') or idx*10),
                 'children': nested,
+                'child_amount_total': child_amount_total,
+                'child_quantity_total': child_qty_total,
+                'has_children': len(nested) > 0,
             }
-            node['has_children'] = len(nested) > 0
             items.append(node)
+
         amount_total = sum(float(x.get('amount') or 0) for x in items)
         qty_total = sum(float(x.get('quantity') or 0) for x in items)
         for node in items:
             node['share_amount'] = round((float(node.get('amount') or 0) / amount_total) * 100, 1) if amount_total > 0 else 0.0
             node['share_quantity'] = round((float(node.get('quantity') or 0) / qty_total) * 100, 1) if qty_total > 0 else 0.0
-            node['child_amount_total'] = sum(float(c.get('amount') or 0) for c in node.get('children') or [])
-            node['child_quantity_total'] = sum(float(c.get('quantity') or 0) for c in node.get('children') or [])
         return items
 
     return build(None)
@@ -1105,25 +1111,18 @@ def _parse_sales_report_upload(filename: str, raw_bytes: bytes):
 
     def normalize_table(table_rows):
         normalized = []
-        header_idx = None
-        amount_idx = None
-        quantity_idx = None
+        header = None
         for raw in table_rows:
             vals = [str(x).strip() if x is not None else '' for x in raw]
             if not any(vals):
                 continue
-            lowered = [(v or '').strip().lower() for v in vals]
-            if 'name' in lowered and (('incl. vat' in lowered) or ('incl. discount' in lowered) or ('excl. vat' in lowered) or ('total' in lowered)):
-                header_idx = lowered.index('name')
-                quantity_idx = lowered.index('total') if 'total' in lowered else 2
-                if 'incl. vat' in lowered:
-                    amount_idx = len(lowered) - 1 - lowered[::-1].index('incl. vat')
-                elif 'incl. discount' in lowered:
-                    amount_idx = len(lowered) - 1 - lowered[::-1].index('incl. discount')
-                elif 'excl. vat' in lowered:
-                    amount_idx = len(lowered) - 1 - lowered[::-1].index('excl. vat')
+            first = (vals[0] or '').strip().lower()
+            if first == 'name':
+                header = vals
                 continue
-            first = lowered[0] if lowered else ''
+            if header is None and len(vals) >= 3 and (vals[0].strip().lower() == 'name' or vals[2].strip().lower() == 'total'):
+                header = vals
+                continue
             if first == 'total':
                 continue
             normalized.append(vals)
@@ -1131,23 +1130,19 @@ def _parse_sales_report_upload(filename: str, raw_bytes: bytes):
             return []
         out = []
         for vals in normalized:
-            name = (vals[header_idx] if header_idx is not None and len(vals) > header_idx else vals[0] if len(vals) > 0 else '').strip()
+            name = (vals[0] if len(vals) > 0 else '').strip()
             if not name or name.lower() == 'name':
                 continue
-            quantity_source = vals[quantity_idx] if quantity_idx is not None and len(vals) > quantity_idx else vals[2] if len(vals) > 2 else 0
-            quantity = _safe_amount(quantity_source, 0.0)
-            if amount_idx is not None and len(vals) > amount_idx:
-                amount = _safe_amount(vals[amount_idx], 0.0)
-            else:
-                amount = 0.0
-                preferred = [v for v in vals[3:] if str(v).strip() != '']
-                if preferred:
-                    amount = _safe_amount(preferred[-1], 0.0)
-                    if amount <= 0:
-                        for cand in reversed(preferred):
-                            amount = _safe_amount(cand, 0.0)
-                            if amount > 0:
-                                break
+            quantity = _safe_amount(vals[2] if len(vals) > 2 else 0, 0.0)
+            amount = 0.0
+            preferred = [v for v in vals[3:] if str(v).strip() != '']
+            if preferred:
+                amount = _safe_amount(preferred[-1], 0.0)
+                if amount <= 0:
+                    for cand in reversed(preferred):
+                        amount = _safe_amount(cand, 0.0)
+                        if amount > 0:
+                            break
             out.append({'name': name, 'quantity': quantity, 'amount': amount})
         return [r for r in out if r['name']]
 
@@ -1362,11 +1357,10 @@ def sales_report_page(request: Request, month_key: str = '', store: str = '', im
         previous_tree = _sales_report_tree(cur, int(prev_period_row['id'])) if prev_period_row else []
         previous_map = _sales_tree_value_map(previous_tree)
         tree = _annotate_sales_tree_growth(tree, previous_map)
-        top_amount = sum(float(x.get('amount') or 0) for x in tree if _sales_report_norm_name(x.get('name')) != _sales_report_norm_name('Prodotti da assegnare'))
-        top_qty = sum(float(x.get('quantity') or 0) for x in tree if _sales_report_norm_name(x.get('name')) != _sales_report_norm_name('Prodotti da assegnare'))
+        top_amount = sum(float(x.get('amount') or 0) for x in tree)
+        top_qty = sum(float(x.get('quantity') or 0) for x in tree)
         parent_options = _sales_report_flat_options(tree)
-        root_groups = tree
-        mapping_rows = _dict_rows(cur, f"SELECT product_name, macro_group_name FROM sales_report_product_mappings WHERE store={_ph()} ORDER BY product_name ASC", (selected_store,))
+        root_options = [{'id': int(r['id']), 'label': r.get('name') or 'Gruppo'} for r in _sales_report_root_groups(cur, period_id) if (r.get('name') or '').strip().lower() != 'da assegnare']
 
     period['store_label'] = _store_label(period.get('store'))
     return render(
@@ -1381,14 +1375,12 @@ def sales_report_page(request: Request, month_key: str = '', store: str = '', im
         period=period,
         periods=periods,
         parent_options=parent_options,
+        root_options=root_options,
         tree=tree,
         chart_tree_json=json.dumps(tree),
         totals={'amount': top_amount, 'quantity': top_qty},
         import_ok=import_ok,
         import_error=import_error,
-        root_groups=root_groups,
-        saved_mappings=mapping_rows,
-        default_group_names=DEFAULT_SALES_REPORT_GROUPS,
     )
 
 
@@ -1396,15 +1388,13 @@ def sales_report_page(request: Request, month_key: str = '', store: str = '', im
 async def sales_report_import_file(request: Request, upload_file: UploadFile = File(...)):
     user = require_login(request)
     if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+        return RedirectResponse('/', status_code=HTTP_303_SEE_OTHER)
     if not can_view_management_finance(request, user):
-        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+        return RedirectResponse('/gestionale', status_code=HTTP_303_SEE_OTHER)
 
     form = await request.form()
     month_key = _month_key_from_value(str(form.get('month_key') or ''))
     store = str(form.get('store') or '').strip()
-    parent_raw = str(form.get('parent_id') or '').strip()
-    parent_id = int(parent_raw) if parent_raw.isdigit() else None
     if store not in STORES:
         store = _current_store_scope(request, user)
         if store == 'ALL':
@@ -1412,11 +1402,13 @@ async def sales_report_import_file(request: Request, upload_file: UploadFile = F
     if not is_admin(request):
         store = user.get('store') or store
 
+    parent_raw = str(form.get('parent_id') or '').strip()
+    parent_id = int(parent_raw) if parent_raw.isdigit() else None
+    filename = upload_file.filename or 'report.csv'
     raw = await upload_file.read()
     if not raw:
         return RedirectResponse(f'/gestionale/report-vendite?store={store}&month_key={month_key}&import_error=File+vuoto', status_code=HTTP_303_SEE_OTHER)
 
-    filename = upload_file.filename or 'report.csv'
     try:
         rows = _parse_sales_report_upload(filename, raw)
     except Exception as e:
@@ -1427,32 +1419,22 @@ async def sales_report_import_file(request: Request, upload_file: UploadFile = F
     with connect() as conn:
         cur = conn.cursor()
         period_id = _ensure_sales_report_period(cur, store, month_key, user.get('username') or 'system')
-        tree = _sales_report_tree(cur, period_id)
-        root_id_by_name = {_sales_report_norm_name(n.get('name')): int(n.get('id')) for n in tree}
         if parent_id:
-            parent_exists = _fetch_one_int(cur, f'SELECT COUNT(*) FROM sales_report_groups WHERE id={_ph()} AND period_id={_ph()}', (parent_id, period_id))
+            parent_exists = _fetch_one_int(cur, f'SELECT COUNT(*) FROM sales_report_groups WHERE id={_ph()} AND period_id={_ph()} AND parent_id IS NULL', (parent_id, period_id))
             if not parent_exists:
                 parent_id = None
-        mapping_rows = _dict_rows(cur, f"SELECT product_name, macro_group_name FROM sales_report_product_mappings WHERE store={_ph()}", (store,))
-        mapping = {_sales_report_norm_name(r.get('product_name')): _sales_report_norm_name(r.get('macro_group_name')) for r in mapping_rows}
-        unassigned_id = root_id_by_name.get(_sales_report_norm_name('Prodotti da assegnare'))
-
+        if parent_id is None:
+            parent_id = _sales_report_default_parent_id(cur, period_id)
         for row in rows:
             name = str(row.get('name') or '').strip()
             if not name:
                 continue
             amount = float(row.get('amount') or 0)
             quantity = float(row.get('quantity') or 0)
-            target_parent = parent_id
-            if target_parent is None:
-                mapped_name = mapping.get(_sales_report_norm_name(name))
-                target_parent = root_id_by_name.get(mapped_name) if mapped_name else None
-            if target_parent is None:
-                target_parent = unassigned_id
-            next_sort = _fetch_one_int(cur, f'SELECT COALESCE(MAX(sort_order),0) FROM sales_report_groups WHERE period_id={_ph()} AND parent_id={_ph()}', (period_id, target_parent))
+            next_sort = _fetch_one_int(cur, f'SELECT COALESCE(MAX(sort_order),0) FROM sales_report_groups WHERE period_id={_ph()} AND parent_id={_ph()}', (period_id, parent_id))
             cur.execute(
                 f'INSERT INTO sales_report_groups(period_id, parent_id, name, amount, quantity, sort_order, created_by) VALUES({_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()})',
-                (period_id, target_parent, name, amount, quantity, int(next_sort) + 10, user.get('username') or 'system')
+                (period_id, parent_id, name, amount, quantity, int(next_sort) + 10, user.get('username') or 'system')
             )
             inserted += 1
         _log(cur, store=store, username=user['username'], action='IMPORT', category='REPORT_VENDITE', name=f'Import report vendite {month_key}', delta=0)
@@ -1559,82 +1541,9 @@ async def sales_report_move_group(request: Request, group_id: int):
                 target_parent = None
 
         cur.execute(f"UPDATE sales_report_groups SET parent_id={ph} WHERE id={ph}", (target_parent, group_id))
-        current_tree = _sales_report_tree(cur, period_id)
-        root_name = _sales_report_root_name_from_tree(current_tree, target_parent) if target_parent else ''
-        group_row = cur.execute(f"SELECT name, amount FROM sales_report_groups WHERE id={ph}", (group_id,)).fetchone()
-        if group_row and float(group_row.get('amount') or 0) > 0 and root_name and _sales_report_norm_name(root_name) != _sales_report_norm_name('Prodotti da assegnare'):
-            existing = cur.execute(f"SELECT id FROM sales_report_product_mappings WHERE store={ph} AND product_name={ph}", (row.get('store') or 'spinza', group_row.get('name'))).fetchone()
-            if existing:
-                cur.execute(f"UPDATE sales_report_product_mappings SET macro_group_name={ph}, updated_by={ph}, ts={_now()} WHERE id={ph}", (root_name, user.get('username') or 'system', int(existing['id'])))
-            else:
-                cur.execute(f"INSERT INTO sales_report_product_mappings(store, product_name, macro_group_name, updated_by) VALUES({ph},{ph},{ph},{ph})", (row.get('store') or 'spinza', group_row.get('name'), root_name, user.get('username') or 'system'))
         _log(cur, store=row.get('store') or 'spinza', username=user['username'], action='UPDATE', category='REPORT_VENDITE', name=f"Spostata voce report {row.get('name','')}", delta=0)
         conn.commit()
 
-    return RedirectResponse(f"/gestionale/report-vendite?store={store}&month_key={month_key}", status_code=HTTP_303_SEE_OTHER)
-
-
-@app.post("/gestionale/report-vendite/voce/{group_id}/rename")
-async def sales_report_rename_group(request: Request, group_id: int):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    if not can_view_management_finance(request, user):
-        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
-
-    form = await request.form()
-    new_name = str(form.get('name') or '').strip()
-    store = str(form.get('store') or '').strip()
-    month_key = _month_key_from_value(str(form.get('month_key') or ''))
-    if not new_name:
-        return RedirectResponse(f"/gestionale/report-vendite?store={store}&month_key={month_key}", status_code=HTTP_303_SEE_OTHER)
-
-    ph = _ph()
-    brand = _current_store_scope(request, user)
-    with connect() as conn:
-        cur = conn.cursor()
-        row = cur.execute(
-            f"SELECT g.id, g.name, p.store, p.month_key FROM sales_report_groups g JOIN sales_report_periods p ON p.id=g.period_id WHERE g.id={ph}",
-            (group_id,),
-        ).fetchone()
-        if not row:
-            return RedirectResponse("/gestionale/report-vendite", status_code=HTTP_303_SEE_OTHER)
-        row = dict(row)
-        if brand != 'ALL' and row.get('store') != brand:
-            return RedirectResponse("/gestionale/report-vendite", status_code=HTTP_303_SEE_OTHER)
-        cur.execute(f"UPDATE sales_report_groups SET name={ph} WHERE id={ph}", (new_name, group_id))
-        _log(cur, store=row.get('store') or 'spinza', username=user['username'], action='UPDATE', category='REPORT_VENDITE', name=f"Rinomina voce report {row.get('name','')}", delta=0)
-        conn.commit()
-        return RedirectResponse(f"/gestionale/report-vendite?store={row.get('store')}&month_key={row.get('month_key')}", status_code=HTTP_303_SEE_OTHER)
-
-
-@app.post("/gestionale/report-vendite/mapping")
-async def sales_report_save_mapping(request: Request):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    if not can_view_management_finance(request, user):
-        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
-
-    form = await request.form()
-    store = str(form.get('store') or '').strip()
-    month_key = _month_key_from_value(str(form.get('month_key') or ''))
-    product_name = str(form.get('product_name') or '').strip()
-    macro_group_name = str(form.get('macro_group_name') or '').strip()
-    if not product_name or not macro_group_name:
-        return RedirectResponse(f"/gestionale/report-vendite?store={store}&month_key={month_key}", status_code=HTTP_303_SEE_OTHER)
-    if store not in STORES:
-        store = user.get('store') or 'spinza'
-
-    ph = _ph()
-    with connect() as conn:
-        cur = conn.cursor()
-        existing = cur.execute(f"SELECT id FROM sales_report_product_mappings WHERE store={ph} AND product_name={ph}", (store, product_name)).fetchone()
-        if existing:
-            cur.execute(f"UPDATE sales_report_product_mappings SET macro_group_name={ph}, updated_by={ph}, ts={_now()} WHERE id={ph}", (macro_group_name, user.get('username') or 'system', int(existing['id'])))
-        else:
-            cur.execute(f"INSERT INTO sales_report_product_mappings(store, product_name, macro_group_name, updated_by) VALUES({ph},{ph},{ph},{ph})", (store, product_name, macro_group_name, user.get('username') or 'system'))
-        conn.commit()
     return RedirectResponse(f"/gestionale/report-vendite?store={store}&month_key={month_key}", status_code=HTTP_303_SEE_OTHER)
 
 
@@ -5079,3 +4988,4 @@ def invoices_delete(request: Request, doc_id: int):
             )
 
     return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
+
