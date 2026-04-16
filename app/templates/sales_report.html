@@ -25,7 +25,7 @@
     <div class="row" style="justify-content:space-between;align-items:center;">
       <div>
         <h2 style="margin:0 0 6px 0;">📈 Report delle vendite</h2>
-        <div class="muted">Carichi il mese, importi il file e poi organizzi tutto nei gruppi che vuoi.</div>
+        <div class="muted">Carichi il mese, importi il file anche in modo disordinato e il sistema prova a metterlo nei gruppi giusti in automatico.</div>
       </div>
       <div class="row">
         <a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Gestionale</a>
@@ -70,7 +70,7 @@
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Importa file report</h3>
-  <div class="muted" style="margin-bottom:10px;">Scegli il mese, carica il file e ogni riga del CSV verrà inserita come sottogruppo dentro un gruppo grande.</div>
+  <div class="muted" style="margin-bottom:10px;">Importi il CSV: ogni riga entra come sottovoce. Se il nome è già conosciuto, viene messo nel gruppo giusto in automatico. Se lo sposti o lo rinomini, il sistema ricorda la scelta anche per gli altri mesi.</div>
   <form method="post" action="/gestionale/report-vendite/import" enctype="multipart/form-data" class="form-grid">
     <input type="hidden" name="month_key" value="{{ selected_month }}">
     <input type="hidden" name="store" value="{{ selected_store }}">
@@ -79,10 +79,10 @@
       <input type="file" name="upload_file" accept=".csv,.xls,.xlsx" required>
     </div>
     <div>
-      <div class="muted" style="margin-bottom:6px;">Gruppo grande di destinazione</div>
+      <div class="muted" style="margin-bottom:6px;">Inserimento iniziale</div>
       <select name="parent_id">
-        <option value="">Da assegnare</option>
-        {% for opt in root_options %}<option value="{{ opt.id }}">{{ opt.label }}</option>{% endfor %}
+        <option value="">Automatico / fuori dai gruppi se nuovo</option>
+        {% for opt in parent_options %}<option value="{{ opt.id }}">{{ opt.label }}</option>{% endfor %}
       </select>
     </div>
     <div style="display:flex;align-items:end;">
@@ -92,7 +92,7 @@
 </div>
 
 <div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0;">Aggiungi gruppo grande o sottogruppo</h3>
+  <h3 style="margin-top:0;">Aggiungi gruppo o sottogruppo</h3>
   <form method="post" action="/gestionale/report-vendite/voce" class="form-grid">
     <input type="hidden" name="month_key" value="{{ selected_month }}">
     <input type="hidden" name="store" value="{{ selected_store }}">
@@ -139,7 +139,7 @@
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Struttura salvata</h3>
-  <div class="tiny" style="margin-bottom:10px;">Le righe del CSV entrano sempre come sottogruppi. Qui puoi spostarle tra i gruppi grandi, creare nuovi gruppi o aggiungere sottogruppi manuali.</div>
+  <div class="tiny" style="margin-bottom:10px;">Qui puoi sistemare le voci importate. Quando sposti, rinomini o elimini una voce finale, la regola viene ricordata e si applica anche agli altri mesi dello stesso negozio.</div>
   {% macro render_rows(nodes, depth=0) %}
     {% for n in nodes %}
       <div class="tree-row">
@@ -147,8 +147,8 @@
           <div style="padding-left:{{ depth * 18 }}px;font-weight:700;">{{ n.name }}</div>
           <div class="tiny" style="padding-left:{{ depth * 18 }}px;">{% if n.has_children %}Gruppo con {{ n.children|length }} voci{% else %}Voce singola{% endif %}</div>
         </div>
-        <div>€ {{ '%.2f'|format(n.amount or 0) }}</div>
-        <div>{{ '%.2f'|format(n.quantity or 0) }}</div>
+        <div>€ {{ '%.2f'|format(n.total_amount or 0) }}</div>
+        <div>{{ '%.2f'|format(n.total_quantity or 0) }}</div>
         <div>
           <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/move" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <input type="hidden" name="month_key" value="{{ selected_month }}">
@@ -164,8 +164,12 @@
             <button class="btn2" type="submit">Sposta</button>
           </form>
         </div>
-        <div>
-          <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/delete" onsubmit="return confirm('Eliminare questa voce e i suoi sottogruppi?');">
+        <div style="display:flex;gap:8px;flex-direction:column;align-items:stretch;">
+          <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/rename" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <input type="text" name="name" value="{{ n.name }}" placeholder="Nuovo nome" style="min-width:140px;">
+            <button class="btn2" type="submit">Rinomina</button>
+          </form>
+          <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/delete" onsubmit="return confirm('Eliminare questa voce? Se è una voce finale, verrà nascosta anche negli altri mesi.');">
             <button class="btn2" type="submit" style="border-color:#fecaca;background:#fff1f2;">Elimina</button>
           </form>
         </div>

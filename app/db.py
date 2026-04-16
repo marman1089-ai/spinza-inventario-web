@@ -348,10 +348,25 @@ def init_db():
             period_id INTEGER NOT NULL,
             parent_id INTEGER,
             name TEXT NOT NULL,
+            base_name TEXT NOT NULL DEFAULT '',
             amount {qty_col} NOT NULL DEFAULT 0,
             quantity {qty_col} NOT NULL DEFAULT 0,
             sort_order INTEGER NOT NULL DEFAULT 0,
             created_by TEXT NOT NULL,
+            ts {ts_default}
+        )
+        """)
+
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS sales_report_name_rules (
+            id {id_col},
+            store TEXT NOT NULL,
+            source_name_norm TEXT NOT NULL,
+            source_name TEXT NOT NULL DEFAULT '',
+            target_group_name TEXT NOT NULL DEFAULT '',
+            target_name TEXT NOT NULL DEFAULT '',
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            created_by TEXT NOT NULL DEFAULT 'system',
             ts {ts_default}
         )
         """)
@@ -549,6 +564,7 @@ def init_db():
                 period_id INTEGER NOT NULL,
                 parent_id INTEGER,
                 name TEXT NOT NULL,
+                base_name TEXT NOT NULL DEFAULT '',
                 amount {qty_col} NOT NULL DEFAULT 0,
                 quantity {qty_col} NOT NULL DEFAULT 0,
                 sort_order INTEGER NOT NULL DEFAULT 0,
@@ -556,10 +572,54 @@ def init_db():
                 ts {ts_default}
             )
             """)
+            _safe_exec(cur, f"""
+            CREATE TABLE IF NOT EXISTS sales_report_name_rules (
+                id {id_col},
+                store TEXT NOT NULL,
+                source_name_norm TEXT NOT NULL,
+                source_name TEXT NOT NULL DEFAULT '',
+                target_group_name TEXT NOT NULL DEFAULT '',
+                target_name TEXT NOT NULL DEFAULT '',
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                created_by TEXT NOT NULL DEFAULT 'system',
+                ts {ts_default}
+            )
+            """)
             try:
                 _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_period_store_month ON sales_report_periods(store, month_key)")
+                _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_name_rules_store_source ON sales_report_name_rules(store, source_name_norm)")
             except Exception:
                 pass
+        except Exception:
+            pass
+
+
+        if pg:
+            sales_report_alters = [
+                "ALTER TABLE sales_report_groups ADD COLUMN IF NOT EXISTS base_name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS source_name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS target_group_name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS target_name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS is_deleted INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT 'system'",
+            ]
+        else:
+            sales_report_alters = [
+                "ALTER TABLE sales_report_groups ADD COLUMN base_name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN source_name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN target_group_name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN target_name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN created_by TEXT NOT NULL DEFAULT 'system'",
+            ]
+        for stmt in sales_report_alters:
+            try:
+                _safe_exec(cur, stmt)
+            except Exception:
+                pass
+        try:
+            _safe_exec(cur, "UPDATE sales_report_groups SET base_name=name WHERE COALESCE(base_name,'')=''")
+            _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_name_rules_store_source ON sales_report_name_rules(store, source_name_norm)")
         except Exception:
             pass
 
