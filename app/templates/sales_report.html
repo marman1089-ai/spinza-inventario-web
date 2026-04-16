@@ -10,22 +10,39 @@
   .ring::before{content:"";width:92px;height:92px;border-radius:50%;background:#fff;display:block;box-shadow:inset 0 0 0 1px #f1f1f1}
   .ring-center{position:relative;margin-top:-90px;text-align:center;min-height:88px;display:flex;align-items:center;justify-content:center;flex-direction:column}
   .ring-value{font-size:24px;font-weight:800;line-height:1.05}
-  .ring-sub{font-size:12px;color:#666}.growth{font-size:13px;font-weight:800;margin-top:4px}.growth.pos{color:#0f8b4c}.growth.neg{color:#c62828}.growth.neutral{color:#8a8a8a}.mode-bar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}.mode-switch{display:flex;gap:8px;flex-wrap:wrap}.tree-row{display:grid;grid-template-columns:minmax(180px,1.2fr) .7fr .7fr minmax(180px,.9fr) auto;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid #f0f0f0}
+  .ring-sub{font-size:12px;color:#666}
+  .growth{font-size:13px;font-weight:800;margin-top:4px}
+  .growth.pos{color:#0f8b4c}.growth.neg{color:#c62828}.growth.neutral{color:#8a8a8a}
+  .mode-bar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+  .mode-switch{display:flex;gap:8px;flex-wrap:wrap}
   .crumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
   .crumb{border:1px solid #ddd;background:#fff;border-radius:999px;padding:8px 12px;cursor:pointer}
   .summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
   .sum-box{background:#fff;border:1px solid #ececec;border-radius:18px;padding:14px}
-    .tiny{font-size:12px;color:#666}
+  .tiny{font-size:12px;color:#666}
   .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .tree-row{display:grid;grid-template-columns:minmax(200px,1.2fr) .7fr .7fr minmax(240px,1fr) minmax(160px,.7fr) auto;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid #f0f0f0}
+  .macro-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+  .macro-card{background:#fff;border:1px solid #ececec;border-radius:22px;padding:16px;box-shadow:0 10px 26px rgba(0,0,0,.04)}
+  .dropzone{min-height:170px;border:1px dashed #d7d7d7;border-radius:18px;padding:10px;background:#fafafa;display:flex;flex-direction:column;gap:10px}
+  .dropzone.drag-over{border-color:#111;background:#f5f5f5}
+  .product-pill{background:#fff;border:1px solid #ececec;border-radius:16px;padding:10px 12px;box-shadow:0 6px 14px rgba(0,0,0,.04);cursor:grab}
+  .product-pill:active{cursor:grabbing}
+  .product-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+  .mini-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .inline-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .inline-form input,.inline-form select{min-width:0}
+  .mapping-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+  .mapping-item{border:1px solid #ececec;border-radius:16px;padding:12px;background:#fff}
   @media(max-width:900px){.report-top,.summary-grid,.form-grid,.tree-row{grid-template-columns:1fr}.ring{width:118px;height:118px}.ring::before{width:82px;height:82px}.ring-center{margin-top:-82px}.mode-bar{align-items:flex-start}}
 </style>
 
 <div class="report-top">
   <div class="card">
-    <div class="row" style="justify-content:space-between;align-items:center;">
+    <div class="row" style="justify-content:space-between;align-items:center;gap:10px;">
       <div>
         <h2 style="margin:0 0 6px 0;">📈 Report delle vendite</h2>
-        <div class="muted">Carichi il mese, importi il file e poi organizzi tutto nei gruppi che vuoi.</div>
+        <div class="muted">Gruppi grandi fissi, sottogruppi dal CSV, spostamento veloce e grafico ad anello navigabile.</div>
       </div>
       <div class="row">
         <a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Gestionale</a>
@@ -53,7 +70,9 @@
       </div>
     </form>
 
-    {% if import_error %}<div class="err-box" style="margin-top:14px;padding:12px 14px;border-radius:14px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;">{{ import_error.replace('+', ' ') }}</div>{% endif %}{% if import_ok %}<div class="ok-box" style="margin-top:14px;padding:12px 14px;border-radius:14px;background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;">Import completato: {{ import_ok }} voci aggiunte.</div>{% endif %}<div class="crumbs" id="crumbs"></div>
+    {% if import_error %}<div class="err-box" style="margin-top:14px;padding:12px 14px;border-radius:14px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;">{{ import_error.replace('+', ' ') }}</div>{% endif %}
+    {% if import_ok %}<div class="ok-box" style="margin-top:14px;padding:12px 14px;border-radius:14px;background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;">Import completato: {{ import_ok }} voci aggiunte.</div>{% endif %}
+    <div class="crumbs" id="crumbs"></div>
   </div>
 
   <div class="card">
@@ -63,14 +82,14 @@
     <div class="summary-grid" style="margin-top:14px;">
       <div class="sum-box"><div class="muted">Totale soldi</div><div style="font-size:28px;font-weight:800;">€ {{ '%.2f'|format(totals.amount or 0) }}</div></div>
       <div class="sum-box"><div class="muted">Totale quantità</div><div style="font-size:28px;font-weight:800;">{{ '%.2f'|format(totals.quantity or 0) }}</div></div>
-      <div class="sum-box"><div class="muted">Confronto</div><div style="font-size:16px;font-weight:800;margin-top:10px;">vs mese scorso</div></div>
+      <div class="sum-box"><div class="muted">Macro gruppi pronti</div><div style="font-size:16px;font-weight:800;margin-top:10px;">{{ root_groups|length }}</div></div>
     </div>
   </div>
 </div>
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Importa file report</h3>
-  <div class="muted" style="margin-bottom:10px;">Scegli il mese, carica il file e poi organizza le voci nei gruppi grandi che preferisci.</div>
+  <div class="muted" style="margin-bottom:10px;">Il CSV viene letto in automatico. Le voci già mappate finiscono subito nel gruppo giusto, le altre vanno in <b>Prodotti da assegnare</b>.</div>
   <form method="post" action="/gestionale/report-vendite/import" enctype="multipart/form-data" class="form-grid">
     <input type="hidden" name="month_key" value="{{ selected_month }}">
     <input type="hidden" name="store" value="{{ selected_store }}">
@@ -81,7 +100,7 @@
     <div>
       <div class="muted" style="margin-bottom:6px;">Metti subito in gruppo</div>
       <select name="parent_id">
-        <option value="">Lascia fuori dai gruppi</option>
+        <option value="">Usa mappatura automatica</option>
         {% for opt in parent_options %}<option value="{{ opt.id }}">{{ opt.label }}</option>{% endfor %}
       </select>
     </div>
@@ -92,18 +111,18 @@
 </div>
 
 <div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0;">Aggiungi gruppo o sottogruppo</h3>
+  <h3 style="margin-top:0;">Crea gruppi grandi o sottogruppi</h3>
   <form method="post" action="/gestionale/report-vendite/voce" class="form-grid">
     <input type="hidden" name="month_key" value="{{ selected_month }}">
     <input type="hidden" name="store" value="{{ selected_store }}">
     <div>
       <div class="muted" style="margin-bottom:6px;">Nome gruppo</div>
-      <input name="name" placeholder="Es. Bibite, Coca Cola, Pizze classiche" required>
+      <input name="name" placeholder="Es. Bevande premium, Birre artigianali" required>
     </div>
     <div>
       <div class="muted" style="margin-bottom:6px;">Gruppo padre</div>
       <select name="parent_id">
-        <option value="">Nessun gruppo padre</option>
+        <option value="">Nuovo gruppo grande</option>
         {% for opt in parent_options %}
         <option value="{{ opt.id }}">{{ opt.label }}</option>
         {% endfor %}
@@ -138,8 +157,77 @@
 </div>
 
 <div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0;">Struttura salvata</h3>
-  <div class="tiny" style="margin-bottom:10px;">Qui puoi sistemare le voci importate, spostarle nei gruppi grandi e cancellarle se sbagli.</div>
+  <div class="mode-bar">
+    <div>
+      <h3 style="margin:0;">Organizzazione veloce dei gruppi</h3>
+      <div class="tiny">Trascina i prodotti tra i gruppi grandi. Quando sposti un prodotto in un gruppo, la mappatura viene salvata automaticamente per i prossimi CSV.</div>
+    </div>
+  </div>
+  <div class="macro-grid">
+    {% for group in root_groups %}
+    <div class="macro-card drop-target" data-group-id="{{ group.id }}" data-group-name="{{ group.name }}">
+      <div class="product-top">
+        <div>
+          <div style="font-weight:800;font-size:18px;">{{ group.name }}</div>
+          <div class="tiny">€ {{ '%.2f'|format(group.amount or 0) }} · {{ '%.2f'|format(group.quantity or 0) }}</div>
+        </div>
+        <div class="tiny">{{ group.children|length }} voci</div>
+      </div>
+
+      <form method="post" action="/gestionale/report-vendite/voce/{{ group.id }}/rename" class="inline-form" style="margin-top:10px;">
+        <input type="hidden" name="month_key" value="{{ selected_month }}">
+        <input type="hidden" name="store" value="{{ selected_store }}">
+        <input type="text" name="name" value="{{ group.name }}">
+        <button class="btn2" type="submit">Rinomina</button>
+      </form>
+
+      <div class="dropzone" style="margin-top:12px;">
+        {% for child in group.children %}
+        <div class="product-pill draggable-product" draggable="true" data-item-id="{{ child.id }}" data-item-name="{{ child.name }}">
+          <div class="product-top">
+            <div>
+              <div style="font-weight:700;">{{ child.name }}</div>
+              <div class="tiny">€ {{ '%.2f'|format(child.amount or 0) }} · {{ '%.2f'|format(child.quantity or 0) }}</div>
+            </div>
+          </div>
+          <div class="mini-actions">
+            <form method="post" action="/gestionale/report-vendite/mapping" class="inline-form">
+              <input type="hidden" name="month_key" value="{{ selected_month }}">
+              <input type="hidden" name="store" value="{{ selected_store }}">
+              <input type="hidden" name="product_name" value="{{ child.name }}">
+              <input type="hidden" name="macro_group_name" value="{{ group.name }}">
+              <button class="btn2" type="submit">Salva regola</button>
+            </form>
+            <form method="post" action="/gestionale/report-vendite/voce/{{ child.id }}/delete" onsubmit="return confirm('Eliminare questa voce?');">
+              <button class="btn2" type="submit" style="border-color:#fecaca;background:#fff1f2;">Elimina</button>
+            </form>
+          </div>
+        </div>
+        {% else %}
+        <div class="tiny">Trascina qui le voci del CSV.</div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+{% if saved_mappings %}
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Mappature salvate</h3>
+  <div class="mapping-grid">
+    {% for item in saved_mappings %}
+    <div class="mapping-item">
+      <div style="font-weight:700;">{{ item.product_name }}</div>
+      <div class="tiny">→ {{ item.macro_group_name }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Struttura salvata completa</h3>
   {% macro render_rows(nodes, depth=0) %}
     {% for n in nodes %}
       <div class="tree-row">
@@ -150,7 +238,7 @@
         <div>€ {{ '%.2f'|format(n.amount or 0) }}</div>
         <div>{{ '%.2f'|format(n.quantity or 0) }}</div>
         <div>
-          <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/move" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/move" class="inline-form">
             <input type="hidden" name="month_key" value="{{ selected_month }}">
             <input type="hidden" name="store" value="{{ selected_store }}">
             <select name="parent_id">
@@ -165,6 +253,14 @@
           </form>
         </div>
         <div>
+          <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/rename" class="inline-form">
+            <input type="hidden" name="month_key" value="{{ selected_month }}">
+            <input type="hidden" name="store" value="{{ selected_store }}">
+            <input type="text" name="name" value="{{ n.name }}">
+            <button class="btn2" type="submit">Rinomina</button>
+          </form>
+        </div>
+        <div>
           <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/delete" onsubmit="return confirm('Eliminare questa voce e i suoi sottogruppi?');">
             <button class="btn2" type="submit" style="border-color:#fecaca;background:#fff1f2;">Elimina</button>
           </form>
@@ -174,9 +270,6 @@
     {% endfor %}
   {% endmacro %}
   {{ render_rows(tree) }}
-  {% if not tree %}
-    <div class="muted">Ancora nessun gruppo creato.</div>
-  {% endif %}
 </div>
 
 {% if periods %}
@@ -190,21 +283,24 @@
 </div>
 {% endif %}
 
+<form id="dragMoveForm" method="post" style="display:none;">
+  <input type="hidden" name="month_key" value="{{ selected_month }}">
+  <input type="hidden" name="store" value="{{ selected_store }}">
+  <input type="hidden" name="parent_id" id="dragParentId">
+</form>
+
 <script>
 const reportTree = {{ chart_tree_json|safe }};
 let currentMode = 'amount';
 let currentPath = [];
+let draggedItemId = null;
 
 function fmt(value){
   const num = Number(value || 0);
   if (currentMode === 'amount') return '€ ' + num.toFixed(2);
   return num.toFixed(2);
 }
-
-function growthValue(node){
-  return currentMode === 'amount' ? node.growth_amount_pct : node.growth_quantity_pct;
-}
-
+function growthValue(node){ return currentMode === 'amount' ? node.growth_amount_pct : node.growth_quantity_pct; }
 function growthHtml(node){
   const value = growthValue(node);
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '<div class="growth neutral">Nuovo</div>';
@@ -213,15 +309,8 @@ function growthHtml(node){
   const sign = num > 0 ? '+' : '';
   return `<div class="growth ${cls}">${sign}${num.toFixed(1)}%</div>`;
 }
-
-function nodeValue(node){
-  return currentMode === 'amount' ? Number(node.amount || 0) : Number(node.quantity || 0);
-}
-
-function nodeShare(node){
-  return currentMode === 'amount' ? Number(node.share_amount || 0) : Number(node.share_quantity || 0);
-}
-
+function nodeValue(node){ return currentMode === 'amount' ? Number(node.amount || 0) : Number(node.quantity || 0); }
+function nodeShare(node){ return currentMode === 'amount' ? Number(node.share_amount || 0) : Number(node.share_quantity || 0); }
 function nodesAtPath(){
   let nodes = reportTree;
   for (const id of currentPath){
@@ -231,7 +320,6 @@ function nodesAtPath(){
   }
   return nodes || [];
 }
-
 function breadcrumbNodes(){
   const crumbs = [];
   let nodes = reportTree;
@@ -243,7 +331,6 @@ function breadcrumbNodes(){
   }
   return crumbs;
 }
-
 function renderCrumbs(){
   const wrap = document.getElementById('crumbs');
   wrap.innerHTML = '';
@@ -253,8 +340,7 @@ function renderCrumbs(){
   home.textContent = 'Principale';
   home.onclick = () => { currentPath = []; renderCards(); };
   wrap.appendChild(home);
-  const crumbs = breadcrumbNodes();
-  crumbs.forEach((node, idx) => {
+  breadcrumbNodes().forEach((node, idx) => {
     const el = document.createElement('button');
     el.type = 'button';
     el.className = 'crumb';
@@ -263,13 +349,12 @@ function renderCrumbs(){
     wrap.appendChild(el);
   });
 }
-
 function renderCards(){
   renderCrumbs();
-  const box = document.getElementById('reportCards');
-  const empty = document.getElementById('emptyState');
   const nodes = nodesAtPath();
-  box.innerHTML = '';
+  const wrap = document.getElementById('reportCards');
+  const empty = document.getElementById('emptyState');
+  wrap.innerHTML = '';
   if (!nodes.length){
     empty.style.display = 'block';
     return;
@@ -282,29 +367,48 @@ function renderCards(){
       <div class="ring" style="--pct:${Math.max(0, Math.min(100, nodeShare(node)))}"></div>
       <div class="ring-center">
         <div class="ring-value">${fmt(nodeValue(node))}</div>
-        <div class="ring-sub">${nodeShare(node).toFixed(1)}% del totale visibile</div>
+        <div class="ring-sub">${node.name}</div>
         ${growthHtml(node)}
       </div>
-      <div style="text-align:center;margin-top:8px;">
-        <div style="font-size:19px;font-weight:800;">${node.name}</div>
-        <div class="tiny" style="margin-top:6px;">${node.has_children ? 'Apri dettaglio' : 'Voce finale'}</div>
-      </div>`;
-    if (node.has_children){
+      <div class="tiny" style="margin-top:12px;">${node.children && node.children.length ? node.children.length + ' sottogruppi' : 'Voce finale'}</div>
+    `;
+    if (node.children && node.children.length){
       card.onclick = () => { currentPath.push(node.id); renderCards(); };
-    } else {
-      card.style.cursor = 'default';
     }
-    box.appendChild(card);
+    wrap.appendChild(card);
   });
-  ['toggleMoneyTop'].forEach(id => { const el=document.getElementById(id); if(el){ el.classList.toggle('btn', currentMode === 'amount'); el.classList.toggle('btn2', currentMode !== 'amount'); }});
-  ['toggleQtyTop'].forEach(id => { const el=document.getElementById(id); if(el){ el.classList.toggle('btn', currentMode === 'quantity'); el.classList.toggle('btn2', currentMode !== 'quantity'); }});
+  const moneyBtn = document.getElementById('toggleMoneyTop');
+  const qtyBtn = document.getElementById('toggleQtyTop');
+  moneyBtn.style.background = currentMode === 'amount' ? '#111' : '';
+  moneyBtn.style.color = currentMode === 'amount' ? '#fff' : '';
+  qtyBtn.style.background = currentMode === 'quantity' ? '#111' : '';
+  qtyBtn.style.color = currentMode === 'quantity' ? '#fff' : '';
 }
+function setMode(mode){ currentMode = mode; renderCards(); }
 
-function setMode(mode){
-  currentMode = mode;
-  renderCards();
-}
-
+document.querySelectorAll('.draggable-product').forEach(el => {
+  el.addEventListener('dragstart', () => {
+    draggedItemId = el.dataset.itemId;
+    el.style.opacity = '.5';
+  });
+  el.addEventListener('dragend', () => {
+    draggedItemId = null;
+    el.style.opacity = '1';
+  });
+});
+document.querySelectorAll('.drop-target').forEach(zone => {
+  zone.addEventListener('dragover', ev => { ev.preventDefault(); zone.querySelector('.dropzone').classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => { zone.querySelector('.dropzone').classList.remove('drag-over'); });
+  zone.addEventListener('drop', ev => {
+    ev.preventDefault();
+    zone.querySelector('.dropzone').classList.remove('drag-over');
+    if (!draggedItemId) return;
+    const form = document.getElementById('dragMoveForm');
+    document.getElementById('dragParentId').value = zone.dataset.groupId;
+    form.action = `/gestionale/report-vendite/voce/${draggedItemId}/move`;
+    form.submit();
+  });
+});
 renderCards();
 </script>
 {% endblock %}
