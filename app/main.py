@@ -989,18 +989,59 @@ def _sales_name_norm(value: str) -> str:
     return ' '.join((value or '').strip().lower().split())
 
 
-def _ensure_default_sales_report_groups(cur, period_id: int, username: str = 'system'):
+def _sales_report_model_groups(cur, store: str):
     ph = _ph()
+    rows = _dict_rows(cur, f"SELECT id, name, name_norm, sort_order, is_active FROM sales_report_group_models WHERE store={ph} AND COALESCE(is_active,1)=1 ORDER BY sort_order ASC, name ASC, id ASC", (store,))
+    return rows
+
+
+def _upsert_sales_report_model_group(cur, store: str, name: str, username: str = 'system', sort_order: int | None = None, is_active: int = 1):
+    ph = _ph()
+    clean = (name or '').strip()
+    norm = _sales_name_norm(clean)
+    if not norm:
+        return None
+    row = cur.execute(f"SELECT id, sort_order FROM sales_report_group_models WHERE store={ph} AND name_norm={ph}", (store, norm)).fetchone()
+    if row:
+        rid = int(row['id']) if isinstance(row, sqlite3.Row) or hasattr(row, 'keys') else int(row[0])
+        keep_sort = int(sort_order if sort_order is not None else (row['sort_order'] if isinstance(row, sqlite3.Row) or hasattr(row, 'keys') else row[1]) or 0)
+        cur.execute(f"UPDATE sales_report_group_models SET name={ph}, name_norm={ph}, sort_order={ph}, is_active={ph}, created_by={ph} WHERE id={ph}", (clean, norm, keep_sort, int(is_active or 0), username or 'system', rid))
+        return rid
+    if sort_order is None:
+        sort_order = _fetch_one_int(cur, f"SELECT COALESCE(MAX(sort_order),0) FROM sales_report_group_models WHERE store={ph}", (store,)) + 10
+    cur.execute(f"INSERT INTO sales_report_group_models(store, name, name_norm, sort_order, is_active, created_by) VALUES({ph},{ph},{ph},{ph},{ph},{ph})", (store, clean, norm, int(sort_order or 0), int(is_active or 0), username or 'system'))
+    row = cur.execute(f"SELECT id FROM sales_report_group_models WHERE store={ph} AND name_norm={ph}", (store, norm)).fetchone()
+    return int(row['id']) if row else None
+
+
+def _delete_sales_report_model_group(cur, store: str, name: str):
+    ph = _ph()
+    norm = _sales_name_norm(name)
+    if not norm:
+        return
+    cur.execute(f"DELETE FROM sales_report_group_models WHERE store={ph} AND name_norm={ph}", (store, norm))
+
+
+def _ensure_sales_report_root_models(cur, store: str, username: str = 'system'):
+    existing = _sales_report_model_groups(cur, store)
+    if existing:
+        return existing
+    for idx, label in enumerate(DEFAULT_SALES_REPORT_GROUPS, start=1):
+        _upsert_sales_report_model_group(cur, store, label, username=username, sort_order=idx*10, is_active=1)
+    return _sales_report_model_groups(cur, store)
+
+
+def _ensure_sales_report_groups_from_models(cur, period_id: int, store: str, username: str = 'system'):
+    ph = _ph()
+    models = _ensure_sales_report_root_models(cur, store, username)
     existing = _dict_rows(cur, f"SELECT id, name FROM sales_report_groups WHERE period_id={ph} AND parent_id IS NULL ORDER BY sort_order ASC, id ASC", (int(period_id),))
     existing_norm = {_sales_name_norm(r.get('name') or '') for r in existing}
-    next_sort = _fetch_one_int(cur, f"SELECT COALESCE(MAX(sort_order),0) FROM sales_report_groups WHERE period_id={ph} AND parent_id IS NULL", (int(period_id),))
-    for label in DEFAULT_SALES_REPORT_GROUPS:
-        if _sales_name_norm(label) in existing_norm:
+    for model in models:
+        if _sales_name_norm(model.get('name') or '') in existing_norm:
             continue
-        next_sort += 10
         cur.execute(
             f"INSERT INTO sales_report_groups(period_id, parent_id, name, base_name, amount, quantity, sort_order, created_by) VALUES({ph},NULL,{ph},{ph},0,0,{ph},{ph})",
-            (int(period_id), label, label, next_sort, username or 'system')
+            (int(period_id), model.get('name') or '', model.get('name') or '', int(model.get('sort_order') or 0), username or 'system')
         )
 
 
@@ -1070,7 +1111,7 @@ def _sales_report_apply_rules_to_existing_rows(cur, store: str, base_name: str, 
         target_parent = None
         target_group = (rule.get('target_group_name') or '').strip()
         if target_group:
-            _ensure_default_sales_report_groups(cur, period_id, username)
+            _ensure_sales_report_groups_from_models(cur, period_id, store, username)
             target_parent = _find_root_group_id_by_name(cur, period_id, target_group)
         cur.execute(f"UPDATE sales_report_groups SET name={ph}, parent_id={ph} WHERE id={ph}", (target_name, target_parent, gid))
 
@@ -1079,9 +1120,11 @@ def _ensure_sales_report_period(cur, store: str, month_key: str, username: str =
     row = cur.execute(f"SELECT id, label FROM sales_report_periods WHERE store={ph} AND month_key={ph}", (store, month_key)).fetchone()
     if row:
         try:
-            return int(row['id'])
+            period_id = int(row['id'])
         except Exception:
-            return int(row[0])
+            period_id = int(row[0])
+        _ensure_sales_report_groups_from_models(cur, period_id, store, username)
+        return period_id
     label = _month_label(month_key)
     cur.execute(
         f"INSERT INTO sales_report_periods(store, month_key, label, created_by) VALUES({ph},{ph},{ph},{ph})",
@@ -1092,7 +1135,7 @@ def _ensure_sales_report_period(cur, store: str, month_key: str, username: str =
         period_id = int(row['id'])
     except Exception:
         period_id = int(row[0])
-    _ensure_default_sales_report_groups(cur, period_id, username)
+    _ensure_sales_report_groups_from_models(cur, period_id, store, username)
     return period_id
 
 
@@ -1444,6 +1487,7 @@ def sales_report_page(request: Request, month_key: str = '', store: str = '', im
         top_amount = sum(float(x.get('amount') or 0) for x in tree)
         top_qty = sum(float(x.get('quantity') or 0) for x in tree)
         parent_options = _sales_report_flat_options(tree)
+        model_groups = _sales_report_model_groups(cur, selected_store)
 
     period['store_label'] = _store_label(period.get('store'))
     return render(
@@ -1458,6 +1502,7 @@ def sales_report_page(request: Request, month_key: str = '', store: str = '', im
         period=period,
         periods=periods,
         parent_options=parent_options,
+        model_groups=model_groups,
         tree=tree,
         chart_tree_json=json.dumps(tree),
         totals={'amount': top_amount, 'quantity': top_qty},
@@ -1505,23 +1550,34 @@ async def sales_report_import_file(request: Request, upload_file: UploadFile = F
             parent_exists = _fetch_one_int(cur, f'SELECT COUNT(*) FROM sales_report_groups WHERE id={_ph()} AND period_id={_ph()}', (parent_id, period_id))
             if not parent_exists:
                 parent_id = None
+        _ensure_sales_report_groups_from_models(cur, period_id, store, user.get('username') or 'system')
         for row in rows:
             name = str(row.get('name') or '').strip()
             if not name:
                 continue
             amount = float(row.get('amount') or 0)
             quantity = float(row.get('quantity') or 0)
-            if parent_id is None:
+            target_parent = parent_id
+            target_name = name
+            if target_parent is None:
+                rule = _sales_report_rule_for_name(cur, store, name) or {}
+                if int(rule.get('is_deleted') or 0):
+                    continue
+                target_name = (rule.get('target_name') or '').strip() or name
+                target_group_name = (rule.get('target_group_name') or '').strip()
+                if target_group_name:
+                    target_parent = _find_root_group_id_by_name(cur, period_id, target_group_name)
+            if target_parent is None:
                 next_sort = _fetch_one_int(cur, f'SELECT COALESCE(MAX(sort_order),0) FROM sales_report_groups WHERE period_id={_ph()} AND parent_id IS NULL', (period_id,))
                 cur.execute(
-                    f'INSERT INTO sales_report_groups(period_id, name, amount, quantity, sort_order, created_by) VALUES({_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()})',
-                    (period_id, name, amount, quantity, int(next_sort) + 10, user.get('username') or 'system')
+                    f'INSERT INTO sales_report_groups(period_id, name, base_name, amount, quantity, sort_order, created_by) VALUES({_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()})',
+                    (period_id, target_name, name, amount, quantity, int(next_sort) + 10, user.get('username') or 'system')
                 )
             else:
-                next_sort = _fetch_one_int(cur, f'SELECT COALESCE(MAX(sort_order),0) FROM sales_report_groups WHERE period_id={_ph()} AND parent_id={_ph()}', (period_id, parent_id))
+                next_sort = _fetch_one_int(cur, f'SELECT COALESCE(MAX(sort_order),0) FROM sales_report_groups WHERE period_id={_ph()} AND parent_id={_ph()}', (period_id, target_parent))
                 cur.execute(
-                    f'INSERT INTO sales_report_groups(period_id, parent_id, name, amount, quantity, sort_order, created_by) VALUES({_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()})',
-                    (period_id, parent_id, name, amount, quantity, int(next_sort) + 10, user.get('username') or 'system')
+                    f'INSERT INTO sales_report_groups(period_id, parent_id, name, base_name, amount, quantity, sort_order, created_by) VALUES({_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()})',
+                    (period_id, target_parent, target_name, name, amount, quantity, int(next_sort) + 10, user.get('username') or 'system')
                 )
             inserted += 1
         _log(cur, store=store, username=user['username'], action='IMPORT', category='REPORT_VENDITE', name=f'Import report vendite {month_key}', delta=0)
@@ -1552,6 +1608,7 @@ async def sales_report_add_group(request: Request):
     parent_raw = str(form.get('parent_id') or '').strip()
     amount = _safe_amount(form.get('amount'), 0.0)
     quantity = _safe_amount(form.get('quantity'), 0.0)
+    persist_model = str(form.get('persist_model') or '1').strip() in ('1', 'true', 'on', 'yes')
     if not name:
         return RedirectResponse(f"/gestionale/report-vendite?store={store}&month_key={month_key}", status_code=HTTP_303_SEE_OTHER)
     parent_id = int(parent_raw) if parent_raw.isdigit() else None
@@ -1568,6 +1625,8 @@ async def sales_report_add_group(request: Request):
         placeholders = f"{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()}" if parent_id is not None else f"{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()}"
         params = (period_id, parent_id, name, name, amount, quantity, int(next_sort)+10, user.get('username') or 'system') if parent_id is not None else (period_id, name, name, amount, quantity, int(next_sort)+10, user.get('username') or 'system')
         cur.execute(f"INSERT INTO sales_report_groups({cols}) VALUES({placeholders})", params)
+        if parent_id is None and persist_model:
+            _upsert_sales_report_model_group(cur, store, name, username=user.get('username') or 'system', sort_order=int(next_sort)+10, is_active=1)
         _log(cur, store=store, username=user['username'], action='CREATE', category='REPORT_VENDITE', name=f"Report vendite {month_key} - {name}", delta=float(amount or 0))
         conn.commit()
 
@@ -1638,7 +1697,13 @@ async def sales_report_move_group(request: Request, group_id: int):
             _upsert_sales_report_rule(cur, row.get('store') or 'spinza', base_name, user.get('username') or 'system', target_group_name=target_group_name)
             _sales_report_apply_rules_to_existing_rows(cur, row.get('store') or 'spinza', base_name, user.get('username') or 'system')
         else:
+            was_root = row.get('parent_id') is None
             cur.execute(f"UPDATE sales_report_groups SET parent_id={ph} WHERE id={ph}", (target_parent, group_id))
+            if was_root and target_parent is not None:
+                _delete_sales_report_model_group(cur, row.get('store') or 'spinza', row.get('name') or '')
+            elif (not was_root) and target_parent is None:
+                next_sort_model = _fetch_one_int(cur, f"SELECT COALESCE(MAX(sort_order),0) FROM sales_report_group_models WHERE store={ph}", (row.get('store') or 'spinza',)) + 10
+                _upsert_sales_report_model_group(cur, row.get('store') or 'spinza', row.get('name') or '', username=user.get('username') or 'system', sort_order=next_sort_model, is_active=1)
         _log(cur, store=row.get('store') or 'spinza', username=user['username'], action='UPDATE', category='REPORT_VENDITE', name=f"Spostata voce report {row.get('name','')}", delta=0)
         conn.commit()
 
@@ -1672,10 +1737,18 @@ async def sales_report_rename_group(request: Request, group_id: int):
             return RedirectResponse("/gestionale/report-vendite", status_code=HTTP_303_SEE_OTHER)
         base_name = (row.get('base_name') or row.get('name') or '').strip()
         is_leaf = _fetch_one_int(cur, f"SELECT COUNT(*) FROM sales_report_groups WHERE parent_id={ph}", (group_id,)) == 0
+        parent_row = cur.execute(f"SELECT parent_id FROM sales_report_groups WHERE id={ph}", (group_id,)).fetchone()
+        is_root = (dict(parent_row).get('parent_id') if parent_row else None) is None
         if is_leaf and base_name:
             rule = _sales_report_rule_for_name(cur, row.get('store') or 'spinza', base_name) or {}
             _upsert_sales_report_rule(cur, row.get('store') or 'spinza', base_name, user.get('username') or 'system', target_group_name=rule.get('target_group_name') or '', target_name=new_name, is_deleted=0)
             _sales_report_apply_rules_to_existing_rows(cur, row.get('store') or 'spinza', base_name, user.get('username') or 'system')
+        elif is_root:
+            cur.execute(f"UPDATE sales_report_groups SET name={ph}, base_name=CASE WHEN COALESCE(base_name,'')='' THEN {ph} ELSE base_name END WHERE period_id IN (SELECT id FROM sales_report_periods WHERE store={ph}) AND parent_id IS NULL AND LOWER(TRIM(name))={ph}", (new_name, new_name, row.get('store') or 'spinza', _sales_name_norm(row.get('name') or '')))
+            model_row = cur.execute(f"SELECT sort_order FROM sales_report_group_models WHERE store={ph} AND name_norm={ph}", (row.get('store') or 'spinza', _sales_name_norm(row.get('name') or ''))).fetchone()
+            sort_order = int((dict(model_row).get('sort_order') if model_row else 0) or 0) if model_row else None
+            _delete_sales_report_model_group(cur, row.get('store') or 'spinza', row.get('name') or '')
+            _upsert_sales_report_model_group(cur, row.get('store') or 'spinza', new_name, username=user.get('username') or 'system', sort_order=sort_order, is_active=1)
         else:
             cur.execute(f"UPDATE sales_report_groups SET name={ph} WHERE id={ph}", (new_name, group_id))
         _log(cur, store=row.get('store') or 'spinza', username=user['username'], action='UPDATE', category='REPORT_VENDITE', name=f"Rinominata voce report {row.get('name','')} -> {new_name}", delta=0)
@@ -1705,6 +1778,8 @@ def sales_report_delete_group(request: Request, group_id: int):
         if brand != 'ALL' and row.get('store') != brand:
             return RedirectResponse("/gestionale/report-vendite", status_code=HTTP_303_SEE_OTHER)
         is_leaf = _fetch_one_int(cur, f"SELECT COUNT(*) FROM sales_report_groups WHERE parent_id={ph}", (group_id,)) == 0
+        parent_row = cur.execute(f"SELECT parent_id FROM sales_report_groups WHERE id={ph}", (group_id,)).fetchone()
+        is_root = (dict(parent_row).get('parent_id') if parent_row else None) is None
         base_row = cur.execute(f"SELECT base_name FROM sales_report_groups WHERE id={ph}", (group_id,)).fetchone()
         base_name = ((dict(base_row).get('base_name') if base_row else '') or row.get('name') or '').strip()
         if is_leaf and base_name:
@@ -1712,6 +1787,22 @@ def sales_report_delete_group(request: Request, group_id: int):
             _upsert_sales_report_rule(cur, row.get('store') or 'spinza', base_name, user.get('username') or 'system', target_group_name=rule.get('target_group_name') or '', target_name=rule.get('target_name') or '', is_deleted=1)
             _sales_report_apply_rules_to_existing_rows(cur, row.get('store') or 'spinza', base_name, user.get('username') or 'system')
         else:
+            if is_root:
+                _delete_sales_report_model_group(cur, row.get('store') or 'spinza', row.get('name') or '')
+                period_ids = _dict_rows(cur, f"SELECT id FROM sales_report_periods WHERE store={ph}", (row.get('store') or 'spinza',))
+                for pr in period_ids:
+                    rid = cur.execute(f"SELECT id FROM sales_report_groups WHERE period_id={ph} AND parent_id IS NULL AND LOWER(TRIM(name))={ph}", (int(pr['id']), _sales_name_norm(row.get('name') or ''))).fetchone()
+                    if not rid:
+                        continue
+                    gid2 = int(dict(rid).get('id'))
+                    ids = [gid2]
+                    cursor = 0
+                    while cursor < len(ids):
+                        children = _dict_rows(cur, f"SELECT id FROM sales_report_groups WHERE parent_id={ph}", (ids[cursor],))
+                        ids.extend(int(c['id']) for c in children if int(c['id']) not in ids)
+                        cursor += 1
+                    placeholders = ','.join([ph] * len(ids))
+                    cur.execute(f"DELETE FROM sales_report_groups WHERE id IN ({placeholders})", tuple(ids))
             ids = [group_id]
             cursor = 0
             while cursor < len(ids):

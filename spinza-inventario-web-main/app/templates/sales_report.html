@@ -25,7 +25,7 @@
     <div class="row" style="justify-content:space-between;align-items:center;">
       <div>
         <h2 style="margin:0 0 6px 0;">📈 Report delle vendite</h2>
-        <div class="muted">Carichi il mese, importi il file e poi organizzi tutto nei gruppi che vuoi.</div>
+        <div class="muted">Carichi il mese, importi il file anche in modo disordinato e il sistema prova a metterlo nei gruppi giusti in automatico.</div>
       </div>
       <div class="row">
         <a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Gestionale</a>
@@ -70,7 +70,7 @@
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Importa file report</h3>
-  <div class="muted" style="margin-bottom:10px;">Scegli il mese, carica il file e poi organizza le voci nei gruppi grandi che preferisci.</div>
+  <div class="muted" style="margin-bottom:10px;">Importi il CSV una volta sola come fai da Dish. Il programma controlla i gruppi principali che hai deciso tu, prova a riconoscere i nomi già imparati e mette in automatico le voci nel gruppo corretto. Se un prodotto nuovo non è ancora conosciuto, puoi spostarlo una volta e dalla volta dopo lo rifà da solo.</div>
   <form method="post" action="/gestionale/report-vendite/import" enctype="multipart/form-data" class="form-grid">
     <input type="hidden" name="month_key" value="{{ selected_month }}">
     <input type="hidden" name="store" value="{{ selected_store }}">
@@ -79,9 +79,9 @@
       <input type="file" name="upload_file" accept=".csv,.xls,.xlsx" required>
     </div>
     <div>
-      <div class="muted" style="margin-bottom:6px;">Metti subito in gruppo</div>
+      <div class="muted" style="margin-bottom:6px;">Inserimento iniziale</div>
       <select name="parent_id">
-        <option value="">Lascia fuori dai gruppi</option>
+        <option value="">Automatico / fuori dai gruppi se nuovo</option>
         {% for opt in parent_options %}<option value="{{ opt.id }}">{{ opt.label }}</option>{% endfor %}
       </select>
     </div>
@@ -89,6 +89,17 @@
       <button class="btn" type="submit">Importa file</button>
     </div>
   </form>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Gruppi principali prestabiliti</h3>
+  <div class="tiny" style="margin-bottom:10px;">Questi sono i gruppi fissi che il programma usa ogni volta quando apri un nuovo mese e quando importi il CSV.</div>
+  <div class="row" style="margin-bottom:12px;">
+    {% for g in model_groups %}
+      <span class="pill">{{ g.name }}</span>
+    {% endfor %}
+    {% if not model_groups %}<span class="muted">Ancora nessun gruppo principale fisso.</span>{% endif %}
+  </div>
 </div>
 
 <div class="card" style="margin-top:14px;">
@@ -117,7 +128,11 @@
       <div class="muted" style="margin-bottom:6px;">Quantità</div>
       <input type="number" step="0.01" min="0" name="quantity" value="0">
     </div>
-    <div style="display:flex;align-items:end;">
+    <div style="display:flex;align-items:end;gap:8px;">
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#475569;">
+        <input type="checkbox" name="persist_model" value="1" checked>
+        Usa come gruppo fisso anche nei prossimi mesi
+      </label>
       <button class="btn" type="submit">Salva voce</button>
     </div>
   </form>
@@ -139,7 +154,7 @@
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Struttura salvata</h3>
-  <div class="tiny" style="margin-bottom:10px;">Qui puoi sistemare le voci importate, spostarle nei gruppi grandi e cancellarle se sbagli.</div>
+  <div class="tiny" style="margin-bottom:10px;">Qui puoi sistemare le voci importate. Quando sposti, rinomini o elimini una voce finale, la regola viene ricordata e si applica anche agli altri mesi dello stesso negozio.</div>
   {% macro render_rows(nodes, depth=0) %}
     {% for n in nodes %}
       <div class="tree-row">
@@ -147,8 +162,8 @@
           <div style="padding-left:{{ depth * 18 }}px;font-weight:700;">{{ n.name }}</div>
           <div class="tiny" style="padding-left:{{ depth * 18 }}px;">{% if n.has_children %}Gruppo con {{ n.children|length }} voci{% else %}Voce singola{% endif %}</div>
         </div>
-        <div>€ {{ '%.2f'|format(n.amount or 0) }}</div>
-        <div>{{ '%.2f'|format(n.quantity or 0) }}</div>
+        <div>€ {{ '%.2f'|format(n.total_amount or 0) }}</div>
+        <div>{{ '%.2f'|format(n.total_quantity or 0) }}</div>
         <div>
           <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/move" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <input type="hidden" name="month_key" value="{{ selected_month }}">
@@ -164,8 +179,12 @@
             <button class="btn2" type="submit">Sposta</button>
           </form>
         </div>
-        <div>
-          <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/delete" onsubmit="return confirm('Eliminare questa voce e i suoi sottogruppi?');">
+        <div style="display:flex;gap:8px;flex-direction:column;align-items:stretch;">
+          <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/rename" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <input type="text" name="name" value="{{ n.name }}" placeholder="Nuovo nome" style="min-width:140px;">
+            <button class="btn2" type="submit">Rinomina</button>
+          </form>
+          <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/delete" onsubmit="return confirm('Eliminare questa voce? Se è una voce finale, verrà nascosta anche negli altri mesi.');">
             <button class="btn2" type="submit" style="border-color:#fecaca;background:#fff1f2;">Elimina</button>
           </form>
         </div>

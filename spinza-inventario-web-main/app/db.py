@@ -11,7 +11,15 @@ from psycopg.rows import dict_row
 
 
 BASE_DIR = Path(__file__).resolve().parent
-SQLITE_PATH = BASE_DIR / "spinza.db"
+
+
+def _sqlite_dict_factory(cursor, row):
+    return {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
+# Preferisci il DB storico nella root del progetto se presente, così non si perde
+# tutto quando il file non è dentro /app ma un livello sopra.
+_ROOT_SQLITE_PATH = BASE_DIR.parent / "spinza.db"
+_APP_SQLITE_PATH = BASE_DIR / "spinza.db"
+SQLITE_PATH = _ROOT_SQLITE_PATH if _ROOT_SQLITE_PATH.exists() and _ROOT_SQLITE_PATH.stat().st_size > 0 else _APP_SQLITE_PATH
 
 
 def _database_url() -> str | None:
@@ -53,7 +61,7 @@ def connect():
     # --- SQLITE fallback ---
     SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(SQLITE_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
+    conn.row_factory = _sqlite_dict_factory
     try:
         yield conn
         conn.commit()
@@ -180,11 +188,6 @@ def init_db():
         except Exception:
             pass
 
-        _safe_exec(cur, """
-        CREATE UNIQUE INDEX IF NOT EXISTS ux_products_store_cat_name_loc
-        ON products(store, area, category, name, location)
-        """)
-
         # ensure 'area' column exists on older DBs
         if using_postgres():
             # Postgres: evita errore (e transazione abortita) se la colonna esiste già
@@ -220,6 +223,15 @@ def init_db():
                 cur.execute("ALTER TABLE products ADD COLUMN missing_qty REAL NOT NULL DEFAULT 0")
             except Exception:
                 pass
+
+        # Crea l'indice multi-posizione solo DOPO essersi assicurati che le colonne esistano.
+        try:
+            _safe_exec(cur, """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_products_store_cat_name_loc
+            ON products(store, area, category, name, location)
+            """)
+        except Exception:
+            pass
 
         # TRANSFERS (scambi tra negozi)
         _safe_exec(cur, f"""
@@ -273,6 +285,123 @@ def init_db():
             data {blob_col}
         )
         """)
+
+
+
+        # CASH FLOW: incassi manuali giornalieri
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS cash_entries (
+            id {id_col},
+            store TEXT NOT NULL,
+            flow_date {date_col} NOT NULL,
+            payment_method TEXT NOT NULL DEFAULT '',
+            amount {qty_col} NOT NULL DEFAULT 0,
+            orders_count INTEGER NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            created_by TEXT NOT NULL,
+            ts {ts_default}
+        )
+        """)
+
+        # CASH FLOW: uscite manuali giornaliere
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS cash_expenses (
+            id {id_col},
+            store TEXT NOT NULL,
+            flow_date {date_col} NOT NULL,
+            category TEXT NOT NULL DEFAULT '',
+            supplier TEXT NOT NULL DEFAULT '',
+            payment_method TEXT NOT NULL DEFAULT '',
+            amount {qty_col} NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            created_by TEXT NOT NULL,
+            ts {ts_default}
+        )
+        """)
+
+        # CASH FLOW: metodi di pagamento configurabili per gli incassi
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS cash_payment_methods (
+            id {id_col},
+            name TEXT NOT NULL UNIQUE,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            is_default INTEGER NOT NULL DEFAULT 0,
+            created_by TEXT NOT NULL DEFAULT 'system',
+            ts {ts_default}
+        )
+        """)
+
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS sales_report_periods (
+            id {id_col},
+            store TEXT NOT NULL,
+            month_key TEXT NOT NULL,
+            label TEXT NOT NULL DEFAULT '',
+            created_by TEXT NOT NULL,
+            ts {ts_default}
+        )
+        """)
+
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS sales_report_groups (
+            id {id_col},
+            period_id INTEGER NOT NULL,
+            parent_id INTEGER,
+            name TEXT NOT NULL,
+            base_name TEXT NOT NULL DEFAULT '',
+            amount {qty_col} NOT NULL DEFAULT 0,
+            quantity {qty_col} NOT NULL DEFAULT 0,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_by TEXT NOT NULL,
+            ts {ts_default}
+        )
+        """)
+
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS sales_report_name_rules (
+            id {id_col},
+            store TEXT NOT NULL,
+            source_name_norm TEXT NOT NULL,
+            source_name TEXT NOT NULL DEFAULT '',
+            target_group_name TEXT NOT NULL DEFAULT '',
+            target_name TEXT NOT NULL DEFAULT '',
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            created_by TEXT NOT NULL DEFAULT 'system',
+            ts {ts_default}
+        )
+        """)
+
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS sales_report_group_models (
+            id {id_col},
+            store TEXT NOT NULL,
+            name TEXT NOT NULL,
+            name_norm TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_by TEXT NOT NULL DEFAULT 'system',
+            ts {ts_default}
+        )
+        """)
+
+        try:
+            _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_period_store_month ON sales_report_periods(store, month_key)")
+            _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_group_models_store_name ON sales_report_group_models(store, name_norm)")
+        except Exception:
+            pass
+
+        default_payment_methods = [
+            ('contanti', 10, 1),
+            ('pos', 20, 1),
+            ('deliveroo', 30, 1),
+            ('glovo', 40, 1),
+            ('just eat', 50, 1),
+        ]
+        for name, sort_order, is_default in default_payment_methods:
+            try:
+                _safe_exec(cur, f"INSERT INTO cash_payment_methods(name, sort_order, is_default, created_by) VALUES({ph},{ph},{ph},{ph})", (name, sort_order, is_default, 'system'))
+            except Exception:
+                pass
 
         # LOGISTICS: order queue + orders
         _safe_exec(cur, f"""
@@ -374,28 +503,6 @@ def init_db():
         )
         """)
 
-
-        # GESTIONALE - ENTRATE / INCASSI
-        _safe_exec(cur, f"""
-        CREATE TABLE IF NOT EXISTS sales_entries (
-            id {id_col},
-            sale_date {date_col} NOT NULL,
-            store TEXT NOT NULL,
-            sales_channel TEXT NOT NULL DEFAULT '',
-            sales_location TEXT NOT NULL DEFAULT '',
-            order_type TEXT NOT NULL DEFAULT '',
-            payment_method TEXT NOT NULL DEFAULT '',
-            order_count INTEGER NOT NULL DEFAULT 0,
-            gross_amount {qty_col} NOT NULL DEFAULT 0,
-            discounts_amount {qty_col} NOT NULL DEFAULT 0,
-            commissions_amount {qty_col} NOT NULL DEFAULT 0,
-            net_amount {qty_col} NOT NULL DEFAULT 0,
-            notes TEXT,
-            created_by TEXT NOT NULL DEFAULT '',
-            ts {ts_default}
-        )
-        """)
-
         # LOGS
         _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS logs (
@@ -448,6 +555,134 @@ def init_db():
                 "ALTER TABLE order_lines ADD COLUMN is_missing INTEGER NOT NULL DEFAULT 0",
             ]
         for stmt in alters:
+            try:
+                _safe_exec(cur, stmt)
+            except Exception:
+                pass
+
+                # Sales reports (report vendite) compatibility migrations
+        try:
+            _safe_exec(cur, f"""
+            CREATE TABLE IF NOT EXISTS sales_report_periods (
+                id {id_col},
+                store TEXT NOT NULL,
+                month_key TEXT NOT NULL,
+                label TEXT NOT NULL DEFAULT '',
+                created_by TEXT NOT NULL,
+                ts {ts_default}
+            )
+            """)
+            _safe_exec(cur, f"""
+            CREATE TABLE IF NOT EXISTS sales_report_groups (
+                id {id_col},
+                period_id INTEGER NOT NULL,
+                parent_id INTEGER,
+                name TEXT NOT NULL,
+                base_name TEXT NOT NULL DEFAULT '',
+                amount {qty_col} NOT NULL DEFAULT 0,
+                quantity {qty_col} NOT NULL DEFAULT 0,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_by TEXT NOT NULL,
+                ts {ts_default}
+            )
+            """)
+            _safe_exec(cur, f"""
+            CREATE TABLE IF NOT EXISTS sales_report_name_rules (
+                id {id_col},
+                store TEXT NOT NULL,
+                source_name_norm TEXT NOT NULL,
+                source_name TEXT NOT NULL DEFAULT '',
+                target_group_name TEXT NOT NULL DEFAULT '',
+                target_name TEXT NOT NULL DEFAULT '',
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                created_by TEXT NOT NULL DEFAULT 'system',
+                ts {ts_default}
+            )
+            """)
+            _safe_exec(cur, f"""
+            CREATE TABLE IF NOT EXISTS sales_report_group_models (
+                id {id_col},
+                store TEXT NOT NULL,
+                name TEXT NOT NULL,
+                name_norm TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_by TEXT NOT NULL DEFAULT 'system',
+                ts {ts_default}
+            )
+            """)
+            try:
+                _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_period_store_month ON sales_report_periods(store, month_key)")
+                _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_name_rules_store_source ON sales_report_name_rules(store, source_name_norm)")
+                _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_group_models_store_name ON sales_report_group_models(store, name_norm)")
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+
+        if pg:
+            sales_report_alters = [
+                "ALTER TABLE sales_report_groups ADD COLUMN IF NOT EXISTS base_name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS source_name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS target_group_name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS target_name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS is_deleted INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT 'system'",
+            ]
+        else:
+            sales_report_alters = [
+                "ALTER TABLE sales_report_groups ADD COLUMN base_name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN source_name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN target_group_name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN target_name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE sales_report_name_rules ADD COLUMN created_by TEXT NOT NULL DEFAULT 'system'",
+            ]
+        for stmt in sales_report_alters:
+            try:
+                _safe_exec(cur, stmt)
+            except Exception:
+                pass
+        try:
+            _safe_exec(cur, "UPDATE sales_report_groups SET base_name=name WHERE COALESCE(base_name,'')=''")
+            _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_name_rules_store_source ON sales_report_name_rules(store, source_name_norm)")
+            _safe_exec(cur, "CREATE TABLE IF NOT EXISTS sales_report_group_models (id INTEGER PRIMARY KEY AUTOINCREMENT, store TEXT NOT NULL, name TEXT NOT NULL, name_norm TEXT NOT NULL DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL DEFAULT 'system', ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_group_models_store_name ON sales_report_group_models(store, name_norm)")
+            _safe_exec(cur, "UPDATE sales_report_group_models SET name_norm=LOWER(TRIM(name)) WHERE COALESCE(name_norm,'')=''")
+        except Exception:
+            pass
+
+# Cashflow compatibility migrations: evita errori sui database già esistenti
+        if pg:
+            cash_alters = [
+                "ALTER TABLE cash_entries ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_entries ADD COLUMN IF NOT EXISTS amount DOUBLE PRECISION NOT NULL DEFAULT 0",
+                "ALTER TABLE cash_entries ADD COLUMN IF NOT EXISTS orders_count INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE cash_entries ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_entries ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT 'system'",
+                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS supplier TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS amount DOUBLE PRECISION NOT NULL DEFAULT 0",
+                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_expenses ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT 'system'",
+            ]
+        else:
+            cash_alters = [
+                "ALTER TABLE cash_entries ADD COLUMN payment_method TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_entries ADD COLUMN amount REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE cash_entries ADD COLUMN orders_count INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE cash_entries ADD COLUMN notes TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_entries ADD COLUMN created_by TEXT NOT NULL DEFAULT 'system'",
+                "ALTER TABLE cash_expenses ADD COLUMN category TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_expenses ADD COLUMN supplier TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_expenses ADD COLUMN payment_method TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_expenses ADD COLUMN amount REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE cash_expenses ADD COLUMN notes TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE cash_expenses ADD COLUMN created_by TEXT NOT NULL DEFAULT 'system'",
+            ]
+        for stmt in cash_alters:
             try:
                 _safe_exec(cur, stmt)
             except Exception:

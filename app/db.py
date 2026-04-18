@@ -371,8 +371,22 @@ def init_db():
         )
         """)
 
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS sales_report_group_models (
+            id {id_col},
+            store TEXT NOT NULL,
+            name TEXT NOT NULL,
+            name_norm TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_by TEXT NOT NULL DEFAULT 'system',
+            ts {ts_default}
+        )
+        """)
+
         try:
             _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_period_store_month ON sales_report_periods(store, month_key)")
+            _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_group_models_store_name ON sales_report_group_models(store, name_norm)")
         except Exception:
             pass
 
@@ -585,9 +599,22 @@ def init_db():
                 ts {ts_default}
             )
             """)
+            _safe_exec(cur, f"""
+            CREATE TABLE IF NOT EXISTS sales_report_group_models (
+                id {id_col},
+                store TEXT NOT NULL,
+                name TEXT NOT NULL,
+                name_norm TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_by TEXT NOT NULL DEFAULT 'system',
+                ts {ts_default}
+            )
+            """)
             try:
                 _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_period_store_month ON sales_report_periods(store, month_key)")
                 _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_name_rules_store_source ON sales_report_name_rules(store, source_name_norm)")
+                _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_group_models_store_name ON sales_report_group_models(store, name_norm)")
             except Exception:
                 pass
         except Exception:
@@ -620,6 +647,9 @@ def init_db():
         try:
             _safe_exec(cur, "UPDATE sales_report_groups SET base_name=name WHERE COALESCE(base_name,'')=''")
             _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_name_rules_store_source ON sales_report_name_rules(store, source_name_norm)")
+            _safe_exec(cur, "CREATE TABLE IF NOT EXISTS sales_report_group_models (id INTEGER PRIMARY KEY AUTOINCREMENT, store TEXT NOT NULL, name TEXT NOT NULL, name_norm TEXT NOT NULL DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL DEFAULT 'system', ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_group_models_store_name ON sales_report_group_models(store, name_norm)")
+            _safe_exec(cur, "UPDATE sales_report_group_models SET name_norm=LOWER(TRIM(name)) WHERE COALESCE(name_norm,'')=''")
         except Exception:
             pass
 

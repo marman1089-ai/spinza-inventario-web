@@ -70,7 +70,7 @@
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Importa file report</h3>
-  <div class="muted" style="margin-bottom:10px;">Importi il CSV: ogni riga entra come sottovoce. Se il nome è già conosciuto, viene messo nel gruppo giusto in automatico. Se lo sposti o lo rinomini, il sistema ricorda la scelta anche per gli altri mesi.</div>
+  <div class="muted" style="margin-bottom:10px;">Importi il CSV una volta sola come fai da Dish. Il programma controlla i gruppi principali che hai deciso tu, prova a riconoscere i nomi già imparati e mette in automatico le voci nel gruppo corretto. Se un prodotto nuovo non è ancora conosciuto, puoi spostarlo una volta e dalla volta dopo lo rifà da solo.</div>
   <form method="post" action="/gestionale/report-vendite/import" enctype="multipart/form-data" class="form-grid">
     <input type="hidden" name="month_key" value="{{ selected_month }}">
     <input type="hidden" name="store" value="{{ selected_store }}">
@@ -89,6 +89,17 @@
       <button class="btn" type="submit">Importa file</button>
     </div>
   </form>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Gruppi principali prestabiliti</h3>
+  <div class="tiny" style="margin-bottom:10px;">Questi sono i gruppi fissi che il programma usa ogni volta quando apri un nuovo mese e quando importi il CSV.</div>
+  <div class="row" style="margin-bottom:12px;">
+    {% for g in model_groups %}
+      <span class="pill">{{ g.name }}</span>
+    {% endfor %}
+    {% if not model_groups %}<span class="muted">Ancora nessun gruppo principale fisso.</span>{% endif %}
+  </div>
 </div>
 
 <div class="card" style="margin-top:14px;">
@@ -117,7 +128,11 @@
       <div class="muted" style="margin-bottom:6px;">Quantità</div>
       <input type="number" step="0.01" min="0" name="quantity" value="0">
     </div>
-    <div style="display:flex;align-items:end;">
+    <div style="display:flex;align-items:end;gap:8px;">
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#475569;">
+        <input type="checkbox" name="persist_model" value="1" checked>
+        Usa come gruppo fisso anche nei prossimi mesi
+      </label>
       <button class="btn" type="submit">Salva voce</button>
     </div>
   </form>
