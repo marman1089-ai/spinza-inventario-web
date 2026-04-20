@@ -92,19 +92,26 @@
     <div class="tiny">€ {{ '%.2f'|format(summary.uncategorized_amount or 0) }} ancora non assegnati a un gruppo principale.</div>
   </div>
   <div class="insight">
-    <div class="muted">Reset rapido del mese</div>
-    <div style="font-size:16px;font-weight:800;line-height:1.3;margin-top:6px;">Cancella sottogruppi e valori, ma lascia i gruppi grandi a zero.</div>
-    <form method="post" action="/gestionale/report-vendite/clear-month" onsubmit="return confirm('Svuotare questo mese? I gruppi principali resteranno, tutti i sottogruppi e i valori verranno rimossi.');" style="margin-top:12px;">
-      <input type="hidden" name="month_key" value="{{ selected_month }}">
-      <input type="hidden" name="store" value="{{ selected_store }}">
-      <button class="btn2 danger-soft" type="submit">Svuota mese</button>
-    </form>
+    <div class="muted">Reset report vendite</div>
+    <div style="font-size:16px;font-weight:800;line-height:1.3;margin-top:6px;">Puoi svuotare solo questo mese oppure azzerare tutto il report e ripartire da zero.</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">
+      <form method="post" action="/gestionale/report-vendite/clear-month" onsubmit="return confirm('Svuotare questo mese? I gruppi principali resteranno, tutti i sottogruppi e i valori verranno rimossi.');">
+        <input type="hidden" name="month_key" value="{{ selected_month }}">
+        <input type="hidden" name="store" value="{{ selected_store }}">
+        <button class="btn2 danger-soft" type="submit">Svuota mese</button>
+      </form>
+      <form method="post" action="/gestionale/report-vendite/reset-all" onsubmit="return confirm('Azzerare TUTTO il report vendite di questo negozio? Verranno cancellati mesi, grafici e regole imparate dei sottogruppi. I gruppi principali resteranno disponibili.');">
+        <input type="hidden" name="month_key" value="{{ selected_month }}">
+        <input type="hidden" name="store" value="{{ selected_store }}">
+        <button class="btn2" type="submit" style="border-color:#fecaca;background:#fff7f7;">Azzera tutto report</button>
+      </form>
+    </div>
   </div>
 </div>
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Importa file report</h3>
-  <div class="muted" style="margin-bottom:10px;">Importi il CSV come fai da Dish. Il programma prova a riconoscere i nomi già imparati, mette le voci nei gruppi corretti e quando sposti o rinomini un sottogruppo la regola viene riusata anche nei mesi successivi dello stesso negozio.</div>
+  <div class="muted" style="margin-bottom:10px;">Importi il CSV come fai da Dish. I 7 gruppi fissi sono: Pinze classiche, Pinze speciali, Pinze stagionali, Soft Drink, Alcol Drink, Desert e Delivery. Il programma assegna subito le voci che riconosce, e quando sistemi un sottogruppo la regola viene ricordata anche per i mesi successivi dello stesso negozio.</div>
   <form method="post" action="/gestionale/report-vendite/import" enctype="multipart/form-data" class="form-grid">
     <input type="hidden" name="month_key" value="{{ selected_month }}">
     <input type="hidden" name="store" value="{{ selected_store }}">
@@ -127,7 +134,7 @@
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Gruppi principali prestabiliti</h3>
-  <div class="tiny" style="margin-bottom:10px;">Questi gruppi rimangono disponibili anche quando svuoti un mese. Se sposti dentro o fuori dei sottogruppi, i totali si aggiornano automaticamente.</div>
+  <div class="tiny" style="margin-bottom:10px;">Questi sono i soli gruppi principali fissi del report. Restano sempre disponibili anche quando svuoti o azzeri i mesi. Se sposti dentro o fuori dei sottogruppi, i totali si aggiornano automaticamente.</div>
   <div class="row" style="margin-bottom:12px;">
     {% for g in model_groups %}
       <span class="pill">{{ g.name }}</span>
@@ -137,18 +144,18 @@
 </div>
 
 <div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0;">Aggiungi gruppo o sottogruppo</h3>
+  <h3 style="margin-top:0;">Aggiungi sottogruppo o voce</h3>
   <form method="post" action="/gestionale/report-vendite/voce" class="form-grid">
     <input type="hidden" name="month_key" value="{{ selected_month }}">
     <input type="hidden" name="store" value="{{ selected_store }}">
     <div>
-      <div class="muted" style="margin-bottom:6px;">Nome gruppo</div>
-      <input name="name" placeholder="Es. Bibite, Coca Cola, Pinze classiche" required>
+      <div class="muted" style="margin-bottom:6px;">Nome voce</div>
+      <input name="name" placeholder="Es. Coca Cola, Margherita, Tiramisù" required>
     </div>
     <div>
       <div class="muted" style="margin-bottom:6px;">Gruppo padre</div>
       <select name="parent_id">
-        <option value="">Nessun gruppo padre</option>
+        <option value="">Fuori dai gruppi (decido dopo)</option>
         {% for opt in parent_options %}
         <option value="{{ opt.id }}">{{ opt.label }}</option>
         {% endfor %}
@@ -163,10 +170,6 @@
       <input type="number" step="0.01" min="0" name="quantity" value="0">
     </div>
     <div style="display:flex;align-items:end;gap:8px;flex-wrap:wrap;">
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#475569;">
-        <input type="checkbox" name="persist_model" value="1" checked>
-        Usa come gruppo fisso anche nei prossimi mesi
-      </label>
       <button class="btn" type="submit">Salva voce</button>
     </div>
   </form>
