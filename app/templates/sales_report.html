@@ -4,28 +4,28 @@
 <style>
   .report-top{display:grid;grid-template-columns:1.08fr .92fr;gap:14px}
   .report-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px}
-  .report-card{background:#fff;border:1px solid #ececec;border-radius:22px;padding:18px;box-shadow:0 10px 28px rgba(0,0,0,.05);cursor:pointer;transition:.18s transform,.18s box-shadow;display:flex;flex-direction:column;align-items:center;text-align:center;min-height:250px}
+  .report-card{background:var(--panel);border:1px solid var(--line-soft);border-radius:22px;padding:18px;box-shadow:0 10px 28px rgba(0,0,0,.05);cursor:pointer;transition:.18s transform,.18s box-shadow;display:flex;flex-direction:column;align-items:center;text-align:center;min-height:250px}
   .report-card:hover{transform:translateY(-2px);box-shadow:0 14px 32px rgba(0,0,0,.08)}
-  .ring{width:132px;height:132px;border-radius:50%;display:grid;place-items:center;margin:0 auto 12px auto;background:conic-gradient(#111 calc(var(--pct,0) * 1%), #e9ecef 0)}
-  .ring::before{content:"";width:92px;height:92px;border-radius:50%;background:#fff;display:block;box-shadow:inset 0 0 0 1px #f1f1f1}
+  .ring{width:132px;height:132px;border-radius:50%;display:grid;place-items:center;margin:0 auto 12px auto;background:conic-gradient(var(--text) calc(var(--pct,0) * 1%), var(--line-soft) 0)}
+  .ring::before{content:"";width:92px;height:92px;border-radius:50%;background:var(--panel);display:block;box-shadow:inset 0 0 0 1px var(--soft)}
   .ring-center{position:relative;margin-top:-90px;text-align:center;min-height:88px;display:flex;align-items:center;justify-content:center;flex-direction:column}
   .ring-value{font-size:24px;font-weight:800;line-height:1.05}
-  .ring-sub{font-size:12px;color:#666}
+  .ring-sub{font-size:12px;color:var(--muted)}
   .growth{font-size:13px;font-weight:800;margin-top:4px}
-  .growth.pos{color:#0f8b4c}.growth.neg{color:#c62828}.growth.neutral{color:#8a8a8a}
+  .growth.pos{color:var(--accent-green)}.growth.neg{color:var(--accent-red)}.growth.neutral{color:var(--muted-2)}
   .mode-bar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}
   .mode-switch{display:flex;gap:8px;flex-wrap:wrap}
-  .tree-row{display:grid;grid-template-columns:minmax(180px,1.2fr) .7fr .7fr minmax(180px,.9fr) auto;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid #f0f0f0}
+  .tree-row{display:grid;grid-template-columns:minmax(180px,1.2fr) .7fr .7fr minmax(180px,.9fr) auto;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid var(--soft)}
   .crumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-  .crumb{border:1px solid #ddd;background:#fff;border-radius:999px;padding:8px 12px;cursor:pointer}
+  .crumb{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:8px 12px;cursor:pointer}
   .summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
-  .sum-box{background:#fff;border:1px solid #ececec;border-radius:18px;padding:14px}
-  .tiny{font-size:12px;color:#666}
+  .sum-box{background:var(--panel);border:1px solid var(--line-soft);border-radius:18px;padding:14px}
+  .tiny{font-size:12px;color:var(--muted)}
   .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .hero-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-  .danger-soft{background:#fff1f2;border-color:#fecaca}
+  .danger-soft{background:rgba(244,63,94,.10);border-color:rgba(248,113,113,.34)}
   .insight-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-  .insight{border:1px solid #ececec;border-radius:18px;padding:14px;background:#fff}
+  .insight{border:1px solid var(--line-soft);border-radius:18px;padding:14px;background:var(--panel)}
   @media(max-width:900px){.report-top,.summary-grid,.form-grid,.tree-row,.insight-grid{grid-template-columns:1fr}.ring{width:118px;height:118px}.ring::before{width:82px;height:82px}.ring-center{margin-top:-82px}.mode-bar{align-items:flex-start}}
 </style>
 
@@ -62,8 +62,8 @@
       </div>
     </form>
 
-    {% if import_error %}<div class="err-box" style="margin-top:14px;padding:12px 14px;border-radius:14px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;">{{ import_error.replace('+', ' ') }}</div>{% endif %}
-    {% if import_ok %}<div class="ok-box" style="margin-top:14px;padding:12px 14px;border-radius:14px;background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;">Import completato: {{ import_ok }} voci aggiunte.</div>{% endif %}
+    {% if import_error %}<div class="err-box" style="margin-top:14px;padding:12px 14px;border-radius:14px;background:rgba(239,68,68,.12);border:1px solid rgba(248,113,113,.34);color:var(--accent-red-2);">{{ import_error.replace('+', ' ') }}</div>{% endif %}
+    {% if import_ok %}<div class="ok-box" style="margin-top:14px;padding:12px 14px;border-radius:14px;background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.34);color:var(--accent-emerald-2);">Import completato: {{ import_ok }} voci aggiunte.</div>{% endif %}
     <div class="crumbs" id="crumbs"></div>
   </div>
 
@@ -92,26 +92,19 @@
     <div class="tiny">€ {{ '%.2f'|format(summary.uncategorized_amount or 0) }} ancora non assegnati a un gruppo principale.</div>
   </div>
   <div class="insight">
-    <div class="muted">Reset report vendite</div>
-    <div style="font-size:16px;font-weight:800;line-height:1.3;margin-top:6px;">Puoi svuotare solo questo mese oppure azzerare tutto il report e ripartire da zero.</div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">
-      <form method="post" action="/gestionale/report-vendite/clear-month" onsubmit="return confirm('Svuotare questo mese? I gruppi principali resteranno, tutti i sottogruppi e i valori verranno rimossi.');">
-        <input type="hidden" name="month_key" value="{{ selected_month }}">
-        <input type="hidden" name="store" value="{{ selected_store }}">
-        <button class="btn2 danger-soft" type="submit">Svuota mese</button>
-      </form>
-      <form method="post" action="/gestionale/report-vendite/reset-all" onsubmit="return confirm('Azzerare TUTTO il report vendite di questo negozio? Verranno cancellati mesi, grafici e regole imparate dei sottogruppi. I gruppi principali resteranno disponibili.');">
-        <input type="hidden" name="month_key" value="{{ selected_month }}">
-        <input type="hidden" name="store" value="{{ selected_store }}">
-        <button class="btn2" type="submit" style="border-color:#fecaca;background:#fff7f7;">Azzera tutto report</button>
-      </form>
-    </div>
+    <div class="muted">Reset rapido del mese</div>
+    <div style="font-size:16px;font-weight:800;line-height:1.3;margin-top:6px;">Cancella sottogruppi e valori, ma lascia i gruppi grandi a zero.</div>
+    <form method="post" action="/gestionale/report-vendite/clear-month" onsubmit="return confirm('Svuotare questo mese? I gruppi principali resteranno, tutti i sottogruppi e i valori verranno rimossi.');" style="margin-top:12px;">
+      <input type="hidden" name="month_key" value="{{ selected_month }}">
+      <input type="hidden" name="store" value="{{ selected_store }}">
+      <button class="btn2 danger-soft" type="submit">Svuota mese</button>
+    </form>
   </div>
 </div>
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Importa file report</h3>
-  <div class="muted" style="margin-bottom:10px;">Importi il CSV come fai da Dish. I 7 gruppi fissi sono: Pinze classiche, Pinze speciali, Pinze stagionali, Soft Drink, Alcol Drink, Desert e Delivery. Il programma assegna subito le voci che riconosce, e quando sistemi un sottogruppo la regola viene ricordata anche per i mesi successivi dello stesso negozio.</div>
+  <div class="muted" style="margin-bottom:10px;">Importi il CSV come fai da Dish. Il programma prova a riconoscere i nomi già imparati, mette le voci nei gruppi corretti e quando sposti o rinomini un sottogruppo la regola viene riusata anche nei mesi successivi dello stesso negozio.</div>
   <form method="post" action="/gestionale/report-vendite/import" enctype="multipart/form-data" class="form-grid">
     <input type="hidden" name="month_key" value="{{ selected_month }}">
     <input type="hidden" name="store" value="{{ selected_store }}">
@@ -134,7 +127,7 @@
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Gruppi principali prestabiliti</h3>
-  <div class="tiny" style="margin-bottom:10px;">Questi sono i soli gruppi principali fissi del report. Restano sempre disponibili anche quando svuoti o azzeri i mesi. Se sposti dentro o fuori dei sottogruppi, i totali si aggiornano automaticamente.</div>
+  <div class="tiny" style="margin-bottom:10px;">Questi gruppi rimangono disponibili anche quando svuoti un mese. Se sposti dentro o fuori dei sottogruppi, i totali si aggiornano automaticamente.</div>
   <div class="row" style="margin-bottom:12px;">
     {% for g in model_groups %}
       <span class="pill">{{ g.name }}</span>
@@ -144,18 +137,18 @@
 </div>
 
 <div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0;">Aggiungi sottogruppo o voce</h3>
+  <h3 style="margin-top:0;">Aggiungi gruppo o sottogruppo</h3>
   <form method="post" action="/gestionale/report-vendite/voce" class="form-grid">
     <input type="hidden" name="month_key" value="{{ selected_month }}">
     <input type="hidden" name="store" value="{{ selected_store }}">
     <div>
-      <div class="muted" style="margin-bottom:6px;">Nome voce</div>
-      <input name="name" placeholder="Es. Coca Cola, Margherita, Tiramisù" required>
+      <div class="muted" style="margin-bottom:6px;">Nome gruppo</div>
+      <input name="name" placeholder="Es. Bibite, Coca Cola, Pinze classiche" required>
     </div>
     <div>
       <div class="muted" style="margin-bottom:6px;">Gruppo padre</div>
       <select name="parent_id">
-        <option value="">Fuori dai gruppi (decido dopo)</option>
+        <option value="">Nessun gruppo padre</option>
         {% for opt in parent_options %}
         <option value="{{ opt.id }}">{{ opt.label }}</option>
         {% endfor %}
@@ -170,6 +163,10 @@
       <input type="number" step="0.01" min="0" name="quantity" value="0">
     </div>
     <div style="display:flex;align-items:end;gap:8px;flex-wrap:wrap;">
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);">
+        <input type="checkbox" name="persist_model" value="1" checked>
+        Usa come gruppo fisso anche nei prossimi mesi
+      </label>
       <button class="btn" type="submit">Salva voce</button>
     </div>
   </form>
@@ -223,7 +220,7 @@
             <button class="btn2" type="submit">Rinomina</button>
           </form>
           <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/delete" onsubmit="return confirm('Eliminare questa voce? Se è una voce finale, verrà nascosta anche negli altri mesi.');">
-            <button class="btn2" type="submit" style="border-color:#fecaca;background:#fff1f2;">Elimina</button>
+            <button class="btn2" type="submit" style="border-color:rgba(248,113,113,.34);background:rgba(244,63,94,.10);">Elimina</button>
           </form>
         </div>
       </div>
@@ -241,7 +238,7 @@
   <h3 style="margin-top:0;">Mesi già creati</h3>
   <div class="row">
     {% for p in periods %}
-      <a class="pill" style="text-decoration:none;color:#111;" href="/gestionale/report-vendite?store={{ p.store }}&month_key={{ p.month_key }}">{{ p.label_full }}</a>
+      <a class="pill" style="text-decoration:none;color:var(--text);" href="/gestionale/report-vendite?store={{ p.store }}&month_key={{ p.month_key }}">{{ p.label_full }}</a>
     {% endfor %}
   </div>
 </div>

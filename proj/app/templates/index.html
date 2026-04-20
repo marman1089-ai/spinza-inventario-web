@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% set title = "Spinza Inventario" %}
+{% block content %}
+  <div class="card" style="max-width:520px;margin:20px auto;text-align:center;">
+    <h2 style="margin:0 0 6px 0;">Spinza Inventario</h2>
+    <p class="muted" style="margin-top:0;">Scegli come vuoi entrare.</p>
+
+    <div class="row" style="justify-content:center;margin-top:14px;">
+      <a class="btn" href="/login" style="text-decoration:none;display:inline-block;">🔐 Login</a>
+      <a class="btn" href="/register" style="text-decoration:none;display:inline-block;">🆕 Registrati</a>
+      <a class="btn" href="/admin-login" style="text-decoration:none;display:inline-block;">🛠 Admin</a>
+    </div>
+
+    <p class="muted" style="margin:14px 0 0 0;font-size:13px;">
+      Se è la prima volta, crea un account con “Registrati”.
+    </p>
+  </div>
+{% endblock %}

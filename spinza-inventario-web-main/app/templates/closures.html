@@ -49,7 +49,7 @@
             <tr>
               <td><strong>{{ r.closure_date }}</strong></td>
               {% if active_store == 'ALL' %}<td>{{ stores.get(r.store, r.store) }}</td>{% endif %}
-              <td><a class="pill" href="/chiusure/{{ r.id }}" target="_blank" style="text-decoration:none;color:#111">Apri</a> <span class="muted">{{ r.filename or '' }}</span></td>
+              <td><a class="pill" href="/chiusure/{{ r.id }}" target="_blank" style="text-decoration:none;color:var(--text)">Apri</a> <span class="muted">{{ r.filename or '' }}</span></td>
               <td>{{ r.uploaded_by }}</td>
               <td class="muted">{{ r.ts }}</td>
               <td>

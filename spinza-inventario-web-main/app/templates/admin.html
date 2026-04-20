@@ -8,19 +8,19 @@
         <p class="muted" style="margin:6px 0 0 0;">Gestione dipendenti e funzioni rapide.</p>
       </div>
       <div class="row" style="justify-content:flex-end;">
-        <a class="pill" href="/inventario" style="text-decoration:none;color:#111;">📦 Inventario</a>
-        <a class="pill" href="/logs" style="text-decoration:none;color:#111;">🧾 Log</a>
+        <a class="pill" href="/inventario" style="text-decoration:none;color:var(--text);">📦 Inventario</a>
+        <a class="pill" href="/logs" style="text-decoration:none;color:var(--text);">🧾 Log</a>
       </div>
     </div>
   </div>
 
   {% if msg %}
-    <div class="card" style="margin-bottom:12px;background:#ecfdf5;border:1px solid #bbf7d0;">
+    <div class="card" style="margin-bottom:12px;background:rgba(16,185,129,.12);border:1px solid rgba(34,197,94,.32);">
       {{ msg }}
     </div>
   {% endif %}
   {% if error %}
-    <div class="card" style="margin-bottom:12px;background:#fff1f2;border:1px solid #fecdd3;">
+    <div class="card" style="margin-bottom:12px;background:rgba(244,63,94,.10);border:1px solid rgba(251,113,133,.34);">
       {{ error }}
     </div>
   {% endif %}
@@ -72,9 +72,9 @@
               <td class="muted">{{ u.last_seen_str if u.last_seen_str else "-" }}</td>
               <td>
                 {% if u.online %}
-                  <span class="pill" style="background:#dcfce7;">🟢 Online</span>
+                  <span class="pill" style="background:rgba(34,197,94,.16);">🟢 Online</span>
                 {% else %}
-                  <span class="pill" style="background:#f1f5f9;">⚪ Offline</span>
+                  <span class="pill" style="background:var(--soft);">⚪ Offline</span>
                 {% endif %}
               </td>
               <td style="text-align:right;">

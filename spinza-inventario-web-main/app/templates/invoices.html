@@ -16,7 +16,7 @@
     <div class="muted">Carica una fattura (PDF o foto), imposta <strong>fornitore</strong> e <strong>data</strong>, poi la cerchi velocemente.</div>
 
     <div class="row" style="margin-top:10px;">
-      <a class="pill" href="/fatture/importa-prodotti" style="text-decoration:none;color:#111">➕ Aggiungi prodotti da foto fattura</a>
+      <a class="pill" href="/fatture/importa-prodotti" style="text-decoration:none;color:var(--text)">➕ Aggiungi prodotti da foto fattura</a>
     </div>
 
     <form method="post" action="/fatture/upload" enctype="multipart/form-data" style="margin-top:12px;">
@@ -58,7 +58,7 @@
               <td><strong>{{ r.doc_date }}</strong></td>
               {% if active_store == 'ALL' %}<td>{{ stores.get(r.store, r.store) }}</td>{% endif %}
               <td>{{ r.supplier }}</td>
-              <td><a class="pill" href="/fatture/{{ r.id }}" target="_blank" style="text-decoration:none;color:#111">Apri</a> <span class="muted">{{ r.filename or '' }}</span></td>
+              <td><a class="pill" href="/fatture/{{ r.id }}" target="_blank" style="text-decoration:none;color:var(--text)">Apri</a> <span class="muted">{{ r.filename or '' }}</span></td>
               <td>{{ r.uploaded_by }}</td>
               <td class="muted">{{ r.ts }}</td>
               <td>

@@ -10,7 +10,7 @@
       <div class="danger" style="padding:10px 12px;border-radius:12px;margin:10px 0;">{{ error }}</div>
     {% endif %}
     {% if ok %}
-      <div class="ok" style="padding:10px 12px;border-radius:12px;margin:10px 0;background:#ecfdf5;border:1px solid #bbf7d0;">
+      <div class="ok" style="padding:10px 12px;border-radius:12px;margin:10px 0;background:rgba(16,185,129,.12);border:1px solid rgba(34,197,94,.32);">
         Account creato. Ora puoi fare login.
       </div>
     {% endif %}
@@ -21,7 +21,7 @@
         <input name="password" placeholder="Password" type="password" autocomplete="new-password" required />
         <input name="confirm_password" placeholder="Conferma password" type="password" autocomplete="new-password" required />
         <button class="btn" type="submit">Crea account</button>
-        <a class="pill" href="/select-store" style="text-decoration:none;color:#111;text-align:center;">↩ Cambia inventario</a>
+        <a class="pill" href="/select-store" style="text-decoration:none;color:var(--text);text-align:center;">↩ Cambia inventario</a>
       </div>
     </form>
   </div>

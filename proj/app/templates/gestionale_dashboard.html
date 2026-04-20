@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% set title = "Gestionale" %}
+{% block content %}
+<div class="card">
+  <div class="row" style="justify-content:space-between;align-items:center;">
+    <div>
+      <h2 style="margin:0 0 6px 0">📊 Dashboard gestionale</h2>
+      <div class="muted">Questa è la nuova area centrale del tuo gestionale: numeri, canali, ordini e ticket medio.{% if not can_edit_management %} Vista in sola lettura per manager.{% endif %}</div>
+    </div>
+    <div class="row">
+      <a class="btn2" href="/gestionale/entrate" style="text-decoration:none;display:inline-block;">Apri Entrate</a>
+      <a class="btn2" href="/gestionale/report" style="text-decoration:none;display:inline-block;">Apri Report</a>
+    </div>
+  </div>
+</div>
+
+<div class="row" style="margin-top:14px;">
+  <div class="card" style="flex:1;min-width:180px;"><div class="muted">Incasso oggi</div><div style="font-size:30px;font-weight:800;">€ {{ '%.2f'|format(today_net) }}</div></div>
+  <div class="card" style="flex:1;min-width:180px;"><div class="muted">Ordini oggi</div><div style="font-size:30px;font-weight:800;">{{ today_orders }}</div></div>
+  <div class="card" style="flex:1;min-width:180px;"><div class="muted">Scontrino medio oggi</div><div style="font-size:30px;font-weight:800;">€ {{ '%.2f'|format(today_avg) }}</div></div>
+</div>
+
+<div class="row" style="margin-top:12px;">
+  <div class="card" style="flex:1;min-width:220px;"><div class="muted">Incasso mese</div><div style="font-size:28px;font-weight:800;">€ {{ '%.2f'|format(month_net) }}</div></div>
+  <div class="card" style="flex:1;min-width:220px;"><div class="muted">Ordini mese</div><div style="font-size:28px;font-weight:800;">{{ month_orders }}</div></div>
+  <div class="card" style="flex:1;min-width:220px;"><div class="muted">Scontrino medio mese</div><div style="font-size:28px;font-weight:800;">€ {{ '%.2f'|format(month_avg) }}</div></div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0">Incassi per canale</h3>
+  <table>
+    <thead>
+      <tr><th>Canale</th><th>Incasso</th><th>Ordini</th><th>Media scontrino</th><th>% peso</th></tr>
+    </thead>
+    <tbody>
+      {% for row in channels %}
+      <tr>
+        <td>{{ row.sales_channel }}</td>
+        <td>€ {{ '%.2f'|format(row.net_total) }}</td>
+        <td>{{ row.order_total }}</td>
+        <td>€ {{ '%.2f'|format(row.avg_ticket) }}</td>
+        <td>{{ '%.1f'|format(row.weight) }}%</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="muted">Non ci sono ancora entrate registrate. Inizia da <a href="/gestionale/entrate">Entrate</a>.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0">Ultimi inserimenti</h3>
+  <table>
+    <thead><tr><th>Data</th><th>Sede</th><th>Canale</th><th>Ordini</th><th>Netto</th><th>Metodo</th></tr></thead>
+    <tbody>
+      {% for row in recent %}
+      <tr>
+        <td>{{ row.sale_date }}</td>
+        <td>{{ row.store }}</td>
+        <td>{{ row.sales_channel }}</td>
+        <td>{{ row.order_count }}</td>
+        <td>€ {{ '%.2f'|format(row.net_amount or 0) }}</td>
+        <td>{{ row.payment_method }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">Ancora nessun dato.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

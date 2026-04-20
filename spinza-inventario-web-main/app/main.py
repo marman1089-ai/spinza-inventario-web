@@ -5,7 +5,6 @@ import csv
 import io
 from datetime import date, datetime, timedelta
 import re
-import sqlite3
 
 from fastapi import FastAPI, Request, Form, UploadFile, File
 from .pdf_tools import ensure_pdf, merge_pdfs
@@ -1013,193 +1012,15 @@ DEFAULT_SALES_REPORT_GROUPS = [
     "Pinze classiche",
     "Pinze speciali",
     "Pinze stagionali",
-    "Soft Drink",
-    "Alcol Drink",
-    "Desert",
+    "Soft drink",
+    "Alcol drink",
     "Delivery",
+    "Desert (Dolci)",
 ]
-
-SALES_REPORT_GROUP_ALIASES = {
-    "pinze classiche": "Pinze classiche",
-    "pinze speciali": "Pinze speciali",
-    "pinze stagionali": "Pinze stagionali",
-    "soft drink": "Soft Drink",
-    "soft drinks": "Soft Drink",
-    "alcol drink": "Alcol Drink",
-    "alcol drinks": "Alcol Drink",
-    "alcool drink": "Alcol Drink",
-    "alcool drinks": "Alcol Drink",
-    "desert": "Desert",
-    "dessert": "Desert",
-    "desert (dolci)": "Desert",
-    "dolci": "Desert",
-    "delivery": "Delivery",
-}
-
-SALES_REPORT_EXACT_GROUP_MAP = {
-    "birra artigianale": "Alcol Drink",
-    "vino naturale": "Alcol Drink",
-    "stiramisu": "Desert",
-    "diavola": "Pinze classiche",
-    "diavola delivery": "Delivery",
-    "margherita e bufala": "Pinze classiche",
-    "marinara": "Pinze classiche",
-    "nuda": "Pinze classiche",
-    "buona cavolo": "Pinze speciali",
-    "che cavolo": "Pinze speciali",
-    "miele on tartufo": "Pinze speciali",
-    "nordica": "Pinze speciali",
-    "salsiccia 2.0": "Pinze speciali",
-    "sunday porchetta": "Pinze speciali",
-    "speckiosa": "Pinze speciali",
-    "carciofo crunch": "Pinze stagionali",
-    "fave & pears": "Pinze stagionali",
-    "finocchio": "Pinze stagionali",
-    "fragolina scandal": "Pinze stagionali",
-    "smokd' asparagus": "Pinze stagionali",
-    "wild porcini": "Pinze stagionali",
-    "zucca blue": "Pinze stagionali",
-    "acqua frizzante": "Soft Drink",
-    "acqua naturale": "Soft Drink",
-    "coca cola": "Soft Drink",
-    "limonata": "Soft Drink",
-}
-
-SALES_REPORT_GROUP_KEYWORDS = {
-    "Delivery": ["delivery", "deliveroo", "glovo", "just eat", "justeat"],
-    "Alcol Drink": ["birra", "beer", "vino", "wine", "spritz", "cocktail", "gin", "prosecco", "campari", "aperol", "negroni", "amaro", "vermouth"],
-    "Soft Drink": ["acqua", "coca", "cola", "fanta", "sprite", "limonata", "cedrata", "chinotto", "the ", "tè", "tea", "succo", "tonica", "soda", "soft drink"],
-    "Desert": ["tiramisu", "tiramisù", "dessert", "desert", "dolce", "cheesecake", "brownie", "gelato", "sorbetto", "cookie", "cannolo", "babà", "baba", "panna cotta"],
-}
 
 
 def _sales_name_norm(value: str) -> str:
     return ' '.join((value or '').strip().lower().split())
-
-
-def _canonical_sales_report_group_name(value: str) -> str:
-    norm = _sales_name_norm(value)
-    return SALES_REPORT_GROUP_ALIASES.get(norm, '')
-
-
-def _guess_sales_report_group_for_name(name: str) -> str:
-    norm = _sales_name_norm(name)
-    if not norm:
-        return ''
-    if norm in SALES_REPORT_EXACT_GROUP_MAP:
-        return SALES_REPORT_EXACT_GROUP_MAP[norm]
-    for group_name, keywords in SALES_REPORT_GROUP_KEYWORDS.items():
-        for keyword in keywords:
-            if keyword and keyword in norm:
-                return group_name
-    return ''
-
-
-def _ensure_sales_report_runtime_schema():
-    """Assicura che le tabelle del report vendite esistano anche su DB vecchi o incompleti.
-
-    Utile soprattutto su Render/Supabase quando il deploy aggiorna il codice ma lo
-    schema non è ancora stato creato completamente.
-    """
-    ph = _ph()
-    qty_col = "DOUBLE PRECISION" if using_postgres() else "REAL"
-    ts_default = "TIMESTAMP DEFAULT now()" if using_postgres() else "TEXT DEFAULT (datetime('now'))"
-
-    def _exec(cur, conn, sql: str):
-        try:
-            cur.execute(sql)
-        except Exception:
-            if using_postgres():
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-            raise
-
-    with connect() as conn:
-        cur = conn.cursor()
-        _exec(cur, conn, f"""
-            CREATE TABLE IF NOT EXISTS sales_report_periods (
-                id {"SERIAL PRIMARY KEY" if using_postgres() else "INTEGER PRIMARY KEY AUTOINCREMENT"},
-                store TEXT NOT NULL,
-                month_key TEXT NOT NULL,
-                label TEXT NOT NULL DEFAULT '',
-                created_by TEXT NOT NULL,
-                ts {ts_default}
-            )
-        """)
-        _exec(cur, conn, f"""
-            CREATE TABLE IF NOT EXISTS sales_report_groups (
-                id {"SERIAL PRIMARY KEY" if using_postgres() else "INTEGER PRIMARY KEY AUTOINCREMENT"},
-                period_id INTEGER NOT NULL,
-                parent_id INTEGER,
-                name TEXT NOT NULL,
-                base_name TEXT NOT NULL DEFAULT '',
-                amount {qty_col} NOT NULL DEFAULT 0,
-                quantity {qty_col} NOT NULL DEFAULT 0,
-                sort_order INTEGER NOT NULL DEFAULT 0,
-                created_by TEXT NOT NULL,
-                ts {ts_default}
-            )
-        """)
-        _exec(cur, conn, f"""
-            CREATE TABLE IF NOT EXISTS sales_report_name_rules (
-                id {"SERIAL PRIMARY KEY" if using_postgres() else "INTEGER PRIMARY KEY AUTOINCREMENT"},
-                store TEXT NOT NULL,
-                source_name_norm TEXT NOT NULL,
-                source_name TEXT NOT NULL DEFAULT '',
-                target_group_name TEXT NOT NULL DEFAULT '',
-                target_name TEXT NOT NULL DEFAULT '',
-                is_deleted INTEGER NOT NULL DEFAULT 0,
-                created_by TEXT NOT NULL DEFAULT 'system',
-                ts {ts_default}
-            )
-        """)
-        _exec(cur, conn, f"""
-            CREATE TABLE IF NOT EXISTS sales_report_group_models (
-                id {"SERIAL PRIMARY KEY" if using_postgres() else "INTEGER PRIMARY KEY AUTOINCREMENT"},
-                store TEXT NOT NULL,
-                name TEXT NOT NULL,
-                name_norm TEXT NOT NULL DEFAULT '',
-                sort_order INTEGER NOT NULL DEFAULT 0,
-                is_active INTEGER NOT NULL DEFAULT 1,
-                created_by TEXT NOT NULL DEFAULT 'system',
-                ts {ts_default}
-            )
-        """)
-
-        alters = [
-            "ALTER TABLE sales_report_groups ADD COLUMN IF NOT EXISTS base_name TEXT NOT NULL DEFAULT ''" if using_postgres() else "ALTER TABLE sales_report_groups ADD COLUMN base_name TEXT NOT NULL DEFAULT ''",
-            "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS source_name TEXT NOT NULL DEFAULT ''" if using_postgres() else "ALTER TABLE sales_report_name_rules ADD COLUMN source_name TEXT NOT NULL DEFAULT ''",
-            "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS target_group_name TEXT NOT NULL DEFAULT ''" if using_postgres() else "ALTER TABLE sales_report_name_rules ADD COLUMN target_group_name TEXT NOT NULL DEFAULT ''",
-            "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS target_name TEXT NOT NULL DEFAULT ''" if using_postgres() else "ALTER TABLE sales_report_name_rules ADD COLUMN target_name TEXT NOT NULL DEFAULT ''",
-            "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS is_deleted INTEGER NOT NULL DEFAULT 0" if using_postgres() else "ALTER TABLE sales_report_name_rules ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT 'system'" if using_postgres() else "ALTER TABLE sales_report_name_rules ADD COLUMN created_by TEXT NOT NULL DEFAULT 'system'",
-        ]
-        for stmt in alters:
-            try:
-                _exec(cur, conn, stmt)
-            except Exception:
-                pass
-
-        for stmt in [
-            "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_period_store_month ON sales_report_periods(store, month_key)",
-            "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_name_rules_store_source ON sales_report_name_rules(store, source_name_norm)",
-            "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_group_models_store_name ON sales_report_group_models(store, name_norm)",
-        ]:
-            try:
-                _exec(cur, conn, stmt)
-            except Exception:
-                pass
-
-        try:
-            _exec(cur, conn, "UPDATE sales_report_groups SET base_name=name WHERE COALESCE(base_name,'')=''")
-        except Exception:
-            pass
-        try:
-            _exec(cur, conn, "UPDATE sales_report_group_models SET name_norm=LOWER(TRIM(name)) WHERE COALESCE(name_norm,'')=''")
-        except Exception:
-            pass
 
 
 def _sales_report_model_groups(cur, store: str):
@@ -1236,23 +1057,9 @@ def _delete_sales_report_model_group(cur, store: str, name: str):
 
 
 def _ensure_sales_report_root_models(cur, store: str, username: str = 'system'):
-    ph = _ph()
-    rows = _sales_report_model_groups(cur, store)
-    canonical_by_norm = {_sales_name_norm(name): name for name in DEFAULT_SALES_REPORT_GROUPS}
-
-    for row in rows:
-        current_name = (row.get('name') or '').strip()
-        current_norm = _sales_name_norm(current_name)
-        canonical_name = _canonical_sales_report_group_name(current_name) or canonical_by_norm.get(current_norm, '')
-        if canonical_name:
-            wanted_sort = (DEFAULT_SALES_REPORT_GROUPS.index(canonical_name) + 1) * 10
-            cur.execute(
-                f"UPDATE sales_report_group_models SET name={ph}, name_norm={ph}, sort_order={ph}, is_active=1, created_by={ph} WHERE id={ph}",
-                (canonical_name, _sales_name_norm(canonical_name), wanted_sort, username or 'system', int(row['id']))
-            )
-        else:
-            cur.execute(f"UPDATE sales_report_group_models SET is_active=0 WHERE id={ph}", (int(row['id']),))
-
+    existing = _sales_report_model_groups(cur, store)
+    if existing:
+        return existing
     for idx, label in enumerate(DEFAULT_SALES_REPORT_GROUPS, start=1):
         _upsert_sales_report_model_group(cur, store, label, username=username, sort_order=idx*10, is_active=1)
     return _sales_report_model_groups(cur, store)
@@ -1261,18 +1068,8 @@ def _ensure_sales_report_root_models(cur, store: str, username: str = 'system'):
 def _ensure_sales_report_groups_from_models(cur, period_id: int, store: str, username: str = 'system'):
     ph = _ph()
     models = _ensure_sales_report_root_models(cur, store, username)
-    existing = _dict_rows(cur, f"SELECT id, name, sort_order FROM sales_report_groups WHERE period_id={ph} AND parent_id IS NULL ORDER BY sort_order ASC, id ASC", (int(period_id),))
-    for row in existing:
-        canonical_name = _canonical_sales_report_group_name(row.get('name') or '')
-        if not canonical_name:
-            continue
-        sort_order = (DEFAULT_SALES_REPORT_GROUPS.index(canonical_name) + 1) * 10 if canonical_name in DEFAULT_SALES_REPORT_GROUPS else int(row.get('sort_order') or 0)
-        cur.execute(
-            f"UPDATE sales_report_groups SET name={ph}, base_name=CASE WHEN COALESCE(base_name,'')='' THEN {ph} ELSE base_name END, sort_order={ph} WHERE id={ph}",
-            (canonical_name, canonical_name, sort_order, int(row['id']))
-        )
     existing = _dict_rows(cur, f"SELECT id, name FROM sales_report_groups WHERE period_id={ph} AND parent_id IS NULL ORDER BY sort_order ASC, id ASC", (int(period_id),))
-    existing_norm = {_sales_name_norm(_canonical_sales_report_group_name(r.get('name') or '') or r.get('name') or '') for r in existing}
+    existing_norm = {_sales_name_norm(r.get('name') or '') for r in existing}
     for model in models:
         if _sales_name_norm(model.get('name') or '') in existing_norm:
             continue
@@ -1711,7 +1508,6 @@ def sales_report_page(request: Request, month_key: str = '', store: str = '', im
         selected_store = brand if brand != 'ALL' else 'spinza'
     selected_month = _month_key_from_value(month_key)
 
-    _ensure_sales_report_runtime_schema()
     with connect() as conn:
         cur = conn.cursor()
         period_id = _ensure_sales_report_period(cur, selected_store, selected_month, user.get('username') or 'system')
@@ -1821,7 +1617,6 @@ async def sales_report_import_file(request: Request, upload_file: UploadFile = F
         return RedirectResponse(f'/gestionale/report-vendite?store={store}&month_key={month_key}&import_error={msg}', status_code=HTTP_303_SEE_OTHER)
 
     inserted = 0
-    _ensure_sales_report_runtime_schema()
     with connect() as conn:
         cur = conn.cursor()
         period_id = _ensure_sales_report_period(cur, store, month_key, user.get('username') or 'system')
@@ -1844,10 +1639,6 @@ async def sales_report_import_file(request: Request, upload_file: UploadFile = F
                     continue
                 target_name = (rule.get('target_name') or '').strip() or name
                 target_group_name = (rule.get('target_group_name') or '').strip()
-                if not target_group_name:
-                    target_group_name = _guess_sales_report_group_for_name(name)
-                    if target_group_name:
-                        _upsert_sales_report_rule(cur, store, name, user.get('username') or 'system', target_group_name=target_group_name, target_name=target_name, is_deleted=0)
                 if target_group_name:
                     target_parent = _find_root_group_id_by_name(cur, period_id, target_group_name)
             if target_parent is None:
@@ -1909,37 +1700,6 @@ async def sales_report_clear_month(request: Request):
     return RedirectResponse(f'/gestionale/report-vendite?store={store}&month_key={month_key}', status_code=HTTP_303_SEE_OTHER)
 
 
-@app.post("/gestionale/report-vendite/reset-all")
-async def sales_report_reset_all(request: Request):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse('/', status_code=HTTP_303_SEE_OTHER)
-    if not can_view_management_finance(request, user):
-        return RedirectResponse('/gestionale', status_code=HTTP_303_SEE_OTHER)
-
-    form = await request.form()
-    month_key = _month_key_from_value(str(form.get('month_key') or ''))
-    store = str(form.get('store') or '').strip()
-    if store not in STORES:
-        store = _current_store_scope(request, user)
-        if store == 'ALL':
-            store = request.session.get('active_store') or 'spinza'
-    if not is_admin(request):
-        store = user.get('store') or store
-
-    with connect() as conn:
-        cur = conn.cursor()
-        _ensure_sales_report_root_models(cur, store, user.get('username') or 'system')
-        cur.execute(f"DELETE FROM sales_report_groups WHERE period_id IN (SELECT id FROM sales_report_periods WHERE store={_ph()})", (store,))
-        cur.execute(f"DELETE FROM sales_report_periods WHERE store={_ph()}", (store,))
-        cur.execute(f"DELETE FROM sales_report_name_rules WHERE store={_ph()}", (store,))
-        _log(cur, store=store, username=user['username'], action='DELETE', category='REPORT_VENDITE', name=f'Reset completo report vendite {store}', delta=0)
-        conn.commit()
-
-    return RedirectResponse(f'/gestionale/report-vendite?store={store}&month_key={month_key}', status_code=HTTP_303_SEE_OTHER)
-
-
-
 @app.post("/gestionale/report-vendite/voce")
 async def sales_report_add_group(request: Request):
     user = require_login(request)
@@ -1962,7 +1722,7 @@ async def sales_report_add_group(request: Request):
     parent_raw = str(form.get('parent_id') or '').strip()
     amount = _safe_amount(form.get('amount'), 0.0)
     quantity = _safe_amount(form.get('quantity'), 0.0)
-    persist_model = str(form.get('persist_model') or '').strip() in ('1', 'true', 'on', 'yes')
+    persist_model = str(form.get('persist_model') or '1').strip() in ('1', 'true', 'on', 'yes')
     if not name:
         return RedirectResponse(f"/gestionale/report-vendite?store={store}&month_key={month_key}", status_code=HTTP_303_SEE_OTHER)
     parent_id = int(parent_raw) if parent_raw.isdigit() else None

@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% set title = "Dashboard cassa" %}
+{% block content %}
+<style>
+  .hero{display:grid;grid-template-columns:1.2fr .8fr;gap:14px}
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+  .kpi{border:1px solid var(--line-soft);border-radius:16px;padding:16px;background:var(--panel)}
+  .kpi .v{font-size:30px;font-weight:800;line-height:1.1}
+  .pos{color:var(--accent-emerald)}.neg{color:var(--accent-red)}.neu{color:var(--muted)}
+  .store-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+  .store-card{border:1px solid var(--line-soft);border-radius:18px;padding:16px;background:linear-gradient(180deg,var(--panel) 0%,var(--panel-2) 100%);box-shadow:0 8px 24px rgba(0,0,0,.04);overflow:hidden}
+  .chart-scroll{overflow-x:auto;overflow-y:hidden;padding-bottom:8px;margin-top:12px;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+  .chart-scroll::-webkit-scrollbar{height:8px}
+  .chart-scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:999px}
+  .bars{display:flex;align-items:flex-end;gap:8px;height:190px;padding:14px 4px 0 4px;width:max-content;min-width:100%}
+  .bar-col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:8px;min-width:44px;flex:0 0 44px}
+  .bar{width:22px;border-radius:10px 10px 4px 4px;background:var(--text);box-shadow:0 6px 14px rgba(0,0,0,.10)}
+  .bar.neg{background:var(--muted-2)}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .line{height:10px;border-radius:999px;background:var(--soft);overflow:hidden}
+  .line > div{height:100%;background:var(--text)}
+  @media(max-width:980px){.hero,.kpi-grid,.split{grid-template-columns:1fr}.store-grid{grid-template-columns:1fr}.bar-col{min-width:38px;flex-basis:38px}.bars{height:180px}}
+</style>
+
+<div class="hero">
+  <div class="card">
+    <h2 style="margin:0 0 8px 0;">Dashboard gestionale cassa</h2>
+    <div class="muted">Vista più professionale: confronto percentuale, periodo corrente contro precedente, riepilogo per negozio e ultimi movimenti subito leggibili.</div>
+    <form method="get" action="/gestionale/dashboard" style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;">
+      <div>
+        <div class="muted" style="margin-bottom:6px;">Periodo</div>
+        <select name="period_type">
+          <option value="day" {% if period_meta.type=='day' %}selected{% endif %}>Giorno</option>
+          <option value="week" {% if period_meta.type=='week' %}selected{% endif %}>Settimana</option>
+          <option value="month" {% if period_meta.type=='month' %}selected{% endif %}>Mese</option>
+        </select>
+      </div>
+      <div>
+        <div class="muted" style="margin-bottom:6px;">Data di riferimento</div>
+        <input type="date" name="anchor_date" value="{{ period_meta.anchor }}">
+      </div>
+      <div>
+        <button class="btn" type="submit">Aggiorna</button>
+      </div>
+    </form>
+    <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;">
+      <a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Apri dashboard completa</a>
+      <a href="/gestionale/incassi" class="btn2" style="text-decoration:none;display:inline-block;">Gestisci incassi</a>
+      <a href="/gestionale/uscite" class="btn2" style="text-decoration:none;display:inline-block;">Gestisci uscite</a>
+    </div>
+  </div>
+  <div class="card">
+    <div class="muted">Periodo attuale</div>
+    <div style="font-weight:800;font-size:24px;margin-top:4px;">{{ period_meta.start }} → {{ period_meta.end }}</div>
+    <div class="muted" style="margin-top:10px;">Periodo precedente</div>
+    <div style="font-weight:800;font-size:20px;margin-top:4px;">{{ period_meta.prev_start }} → {{ period_meta.prev_end }}</div>
+    <div style="margin-top:14px;display:grid;gap:10px;">
+      <div>
+        <div class="muted">Crescita incassi</div>
+        <div class="v {% if totals.income_growth_pct > 0 %}pos{% elif totals.income_growth_pct < 0 %}neg{% else %}neu{% endif %}">{{ '%+.1f'|format(totals.income_growth_pct) }}%</div>
+      </div>
+      <div>
+        <div class="muted">Crescita saldo</div>
+        <div class="v {% if totals.net_growth_pct > 0 %}pos{% elif totals.net_growth_pct < 0 %}neg{% else %}neu{% endif %}">{{ '%+.1f'|format(totals.net_growth_pct) }}%</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="kpi-grid" style="margin-top:14px;">
+  <div class="kpi"><div class="muted">Incassi periodo</div><div class="v">€ {{ '%.2f'|format(totals.income_period) }}</div><div class="muted">Prima: € {{ '%.2f'|format(totals.income_previous_period) }}</div></div>
+  <div class="kpi"><div class="muted">Uscite periodo</div><div class="v">€ {{ '%.2f'|format(totals.expense_period) }}</div><div class="muted">Prima: € {{ '%.2f'|format(totals.expense_previous_period) }}</div></div>
+  <div class="kpi"><div class="muted">Saldo periodo</div><div class="v">€ {{ '%.2f'|format(totals.net_period) }}</div><div class="muted">Prima: € {{ '%.2f'|format(totals.net_previous_period) }}</div></div>
+  <div class="kpi"><div class="muted">Movimenti salvati</div><div class="v">{{ totals.entries_count + totals.expenses_count }}</div><div class="muted">Incassi {{ totals.entries_count }} · Uscite {{ totals.expenses_count }}</div></div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Confronto negozi</h3>
+  <div class="muted" style="margin-bottom:12px;">Ogni barra mostra il saldo giornaliero del periodo selezionato. Così capisci subito quale sede sta tenendo meglio il margine operativo.</div>
+  <div class="store-grid">
+    {% for s in compare %}
+    <div class="store-card">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+        <div>
+          <div style="font-size:19px;font-weight:800;">{{ s.label }}</div>
+          <div class="muted">Incassi € {{ '%.2f'|format(s.income_total) }} · Uscite € {{ '%.2f'|format(s.expense_total) }}</div>
+        </div>
+        <div class="pill">Saldo € {{ '%.2f'|format(s.net_total) }}</div>
+      </div>
+      <div style="margin-top:12px;display:grid;gap:8px;">
+        <div>
+          <div class="muted">Incassi / uscite</div>
+          {% set total_abs = (s.income_total + s.expense_total) if (s.income_total + s.expense_total) > 0 else 1 %}
+          <div class="line"><div style="width:{{ '%.1f'|format((s.income_total/total_abs)*100) }}%"></div></div>
+        </div>
+      </div>
+      <div class="chart-scroll">
+      <div class="bars">
+        {% for d in s.days %}
+        <div class="bar-col">
+          <div class="bar {% if not d.positive %}neg{% endif %}" style="height:{{ d.height }}px" title="{{ d.label }} | Incassi € {{ '%.2f'|format(d.income) }} | Uscite € {{ '%.2f'|format(d.expense) }} | Saldo € {{ '%.2f'|format(d.net) }}"></div>
+          <div style="font-size:12px;color:var(--muted);">{{ d.label }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="split" style="margin-top:14px;">
+  <div class="card">
+    <h3 style="margin-top:0;">Ultimi incassi</h3>
+    {% if recent_entries %}
+    <table>
+      <thead><tr><th>Data</th><th>Sede</th><th>Metodo</th><th>Importo</th><th>Note</th></tr></thead>
+      <tbody>
+        {% for r in recent_entries %}
+        <tr>
+          <td>{{ r.flow_date }}</td>
+          <td>{{ stores[r.store] if r.store in stores else r.store }}</td>
+          <td>{{ r.payment_method }}</td>
+          <td><strong>€ {{ '%.2f'|format(r.amount or 0) }}</strong></td>
+          <td>{{ r.notes or '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="muted">Ancora nessun incasso registrato.</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Ultime uscite</h3>
+    {% if recent_expenses %}
+    <table>
+      <thead><tr><th>Data</th><th>Sede</th><th>Categoria</th><th>Importo</th><th>Note</th></tr></thead>
+      <tbody>
+        {% for r in recent_expenses %}
+        <tr>
+          <td>{{ r.flow_date }}</td>
+          <td>{{ stores[r.store] if r.store in stores else r.store }}</td>
+          <td>{{ r.category }}</td>
+          <td><strong>€ {{ '%.2f'|format(r.amount or 0) }}</strong></td>
+          <td>{{ r.notes or '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="muted">Ancora nessuna uscita registrata.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
