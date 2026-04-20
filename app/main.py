@@ -5,6 +5,7 @@ import csv
 import io
 from datetime import date, datetime, timedelta
 import re
+import sqlite3
 
 from fastapi import FastAPI, Request, Form, UploadFile, File
 from .pdf_tools import ensure_pdf, merge_pdfs
@@ -1094,6 +1095,113 @@ def _guess_sales_report_group_for_name(name: str) -> str:
     return ''
 
 
+def _ensure_sales_report_runtime_schema():
+    """Assicura che le tabelle del report vendite esistano anche su DB vecchi o incompleti.
+
+    Utile soprattutto su Render/Supabase quando il deploy aggiorna il codice ma lo
+    schema non è ancora stato creato completamente.
+    """
+    ph = _ph()
+    qty_col = "DOUBLE PRECISION" if using_postgres() else "REAL"
+    ts_default = "TIMESTAMP DEFAULT now()" if using_postgres() else "TEXT DEFAULT (datetime('now'))"
+
+    def _exec(cur, conn, sql: str):
+        try:
+            cur.execute(sql)
+        except Exception:
+            if using_postgres():
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            raise
+
+    with connect() as conn:
+        cur = conn.cursor()
+        _exec(cur, conn, f"""
+            CREATE TABLE IF NOT EXISTS sales_report_periods (
+                id {"SERIAL PRIMARY KEY" if using_postgres() else "INTEGER PRIMARY KEY AUTOINCREMENT"},
+                store TEXT NOT NULL,
+                month_key TEXT NOT NULL,
+                label TEXT NOT NULL DEFAULT '',
+                created_by TEXT NOT NULL,
+                ts {ts_default}
+            )
+        """)
+        _exec(cur, conn, f"""
+            CREATE TABLE IF NOT EXISTS sales_report_groups (
+                id {"SERIAL PRIMARY KEY" if using_postgres() else "INTEGER PRIMARY KEY AUTOINCREMENT"},
+                period_id INTEGER NOT NULL,
+                parent_id INTEGER,
+                name TEXT NOT NULL,
+                base_name TEXT NOT NULL DEFAULT '',
+                amount {qty_col} NOT NULL DEFAULT 0,
+                quantity {qty_col} NOT NULL DEFAULT 0,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_by TEXT NOT NULL,
+                ts {ts_default}
+            )
+        """)
+        _exec(cur, conn, f"""
+            CREATE TABLE IF NOT EXISTS sales_report_name_rules (
+                id {"SERIAL PRIMARY KEY" if using_postgres() else "INTEGER PRIMARY KEY AUTOINCREMENT"},
+                store TEXT NOT NULL,
+                source_name_norm TEXT NOT NULL,
+                source_name TEXT NOT NULL DEFAULT '',
+                target_group_name TEXT NOT NULL DEFAULT '',
+                target_name TEXT NOT NULL DEFAULT '',
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                created_by TEXT NOT NULL DEFAULT 'system',
+                ts {ts_default}
+            )
+        """)
+        _exec(cur, conn, f"""
+            CREATE TABLE IF NOT EXISTS sales_report_group_models (
+                id {"SERIAL PRIMARY KEY" if using_postgres() else "INTEGER PRIMARY KEY AUTOINCREMENT"},
+                store TEXT NOT NULL,
+                name TEXT NOT NULL,
+                name_norm TEXT NOT NULL DEFAULT '',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_by TEXT NOT NULL DEFAULT 'system',
+                ts {ts_default}
+            )
+        """)
+
+        alters = [
+            "ALTER TABLE sales_report_groups ADD COLUMN IF NOT EXISTS base_name TEXT NOT NULL DEFAULT ''" if using_postgres() else "ALTER TABLE sales_report_groups ADD COLUMN base_name TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS source_name TEXT NOT NULL DEFAULT ''" if using_postgres() else "ALTER TABLE sales_report_name_rules ADD COLUMN source_name TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS target_group_name TEXT NOT NULL DEFAULT ''" if using_postgres() else "ALTER TABLE sales_report_name_rules ADD COLUMN target_group_name TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS target_name TEXT NOT NULL DEFAULT ''" if using_postgres() else "ALTER TABLE sales_report_name_rules ADD COLUMN target_name TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS is_deleted INTEGER NOT NULL DEFAULT 0" if using_postgres() else "ALTER TABLE sales_report_name_rules ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE sales_report_name_rules ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT 'system'" if using_postgres() else "ALTER TABLE sales_report_name_rules ADD COLUMN created_by TEXT NOT NULL DEFAULT 'system'",
+        ]
+        for stmt in alters:
+            try:
+                _exec(cur, conn, stmt)
+            except Exception:
+                pass
+
+        for stmt in [
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_period_store_month ON sales_report_periods(store, month_key)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_name_rules_store_source ON sales_report_name_rules(store, source_name_norm)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_group_models_store_name ON sales_report_group_models(store, name_norm)",
+        ]:
+            try:
+                _exec(cur, conn, stmt)
+            except Exception:
+                pass
+
+        try:
+            _exec(cur, conn, "UPDATE sales_report_groups SET base_name=name WHERE COALESCE(base_name,'')=''")
+        except Exception:
+            pass
+        try:
+            _exec(cur, conn, "UPDATE sales_report_group_models SET name_norm=LOWER(TRIM(name)) WHERE COALESCE(name_norm,'')=''")
+        except Exception:
+            pass
+
+
 def _sales_report_model_groups(cur, store: str):
     ph = _ph()
     rows = _dict_rows(cur, f"SELECT id, name, name_norm, sort_order, is_active FROM sales_report_group_models WHERE store={ph} AND COALESCE(is_active,1)=1 ORDER BY sort_order ASC, name ASC, id ASC", (store,))
@@ -1603,6 +1711,7 @@ def sales_report_page(request: Request, month_key: str = '', store: str = '', im
         selected_store = brand if brand != 'ALL' else 'spinza'
     selected_month = _month_key_from_value(month_key)
 
+    _ensure_sales_report_runtime_schema()
     with connect() as conn:
         cur = conn.cursor()
         period_id = _ensure_sales_report_period(cur, selected_store, selected_month, user.get('username') or 'system')
@@ -1712,6 +1821,7 @@ async def sales_report_import_file(request: Request, upload_file: UploadFile = F
         return RedirectResponse(f'/gestionale/report-vendite?store={store}&month_key={month_key}&import_error={msg}', status_code=HTTP_303_SEE_OTHER)
 
     inserted = 0
+    _ensure_sales_report_runtime_schema()
     with connect() as conn:
         cur = conn.cursor()
         period_id = _ensure_sales_report_period(cur, store, month_key, user.get('username') or 'system')
