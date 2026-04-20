@@ -1187,26 +1187,56 @@ def _sales_report_tree(cur, period_id: int):
     ph = _ph()
     rows = _dict_rows(cur, f"SELECT id, period_id, parent_id, name, base_name, amount, quantity, sort_order FROM sales_report_groups WHERE period_id={ph} ORDER BY sort_order ASC, name ASC, id ASC", (int(period_id),))
     by_parent = {}
+    by_id = {}
     for r in rows:
         r['amount'] = float(r.get('amount') or 0)
         r['quantity'] = float(r.get('quantity') or 0)
+        rid = int(r.get('id') or 0)
+        by_id[rid] = r
         pid = r.get('parent_id')
         by_parent.setdefault(pid, []).append(r)
+
+    totals_cache = {}
+
+    def full_totals(row_id: int):
+        row_id = int(row_id)
+        cached = totals_cache.get(row_id)
+        if cached is not None:
+            return cached
+        row = by_id.get(row_id) or {}
+        amount = float(row.get('amount') or 0)
+        quantity = float(row.get('quantity') or 0)
+        for child in by_parent.get(row_id, []):
+            child_amount, child_quantity = full_totals(int(child.get('id') or 0))
+            amount += child_amount
+            quantity += child_quantity
+        totals_cache[row_id] = (amount, quantity)
+        return totals_cache[row_id]
+
+    def sibling_totals_for(parent_id=None):
+        children = by_parent.get(parent_id, [])
+        amount = 0.0
+        quantity = 0.0
+        for child in children:
+            child_amount, child_quantity = full_totals(int(child.get('id') or 0))
+            amount += child_amount
+            quantity += child_quantity
+        return {'amount': amount, 'quantity': quantity}
 
     def build(parent_id=None, sibling_totals=None):
         items = []
         children = by_parent.get(parent_id, [])
-        totals = sibling_totals or {'amount': 0.0, 'quantity': 0.0}
+        totals = sibling_totals or sibling_totals_for(parent_id)
         for idx, child in enumerate(children, start=1):
-            node_children = build(int(child['id']))
+            child_id = int(child['id'])
             own_amount = float(child.get('amount') or 0)
             own_quantity = float(child.get('quantity') or 0)
-            child_amount_total = sum(float(c.get('total_amount') or 0) for c in node_children)
-            child_qty_total = sum(float(c.get('total_quantity') or 0) for c in node_children)
-            total_amount = own_amount + child_amount_total
-            total_quantity = own_quantity + child_qty_total
+            total_amount, total_quantity = full_totals(child_id)
+            child_amount_total = max(0.0, total_amount - own_amount)
+            child_quantity_total = max(0.0, total_quantity - own_quantity)
+            node_children = build(child_id, sibling_totals_for(child_id))
             node = {
-                'id': int(child['id']),
+                'id': child_id,
                 'name': child.get('name') or 'Voce',
                 'base_name': child.get('base_name') or child.get('name') or 'Voce',
                 'amount': own_amount,
@@ -1219,39 +1249,12 @@ def _sales_report_tree(cur, period_id: int):
             node['share_amount'] = round((total_amount / float(totals.get('amount') or 0)) * 100, 1) if float(totals.get('amount') or 0) > 0 else 0.0
             node['share_quantity'] = round((total_quantity / float(totals.get('quantity') or 0)) * 100, 1) if float(totals.get('quantity') or 0) > 0 else 0.0
             node['child_amount_total'] = child_amount_total
-            node['child_quantity_total'] = child_qty_total
+            node['child_quantity_total'] = child_quantity_total
             node['has_children'] = len(node_children) > 0
             items.append(node)
-        if parent_id is None:
-            pass
         return items
 
-    root_children = by_parent.get(None, [])
-    root_totals = {'amount': 0.0, 'quantity': 0.0}
-    for child in root_children:
-        root_totals['amount'] += float(child.get('amount') or 0)
-        root_totals['quantity'] += float(child.get('quantity') or 0)
-        for gc in by_parent.get(int(child['id']), []):
-            # included recursively below via helper
-            pass
-    # compute full totals recursively
-    def subtree_totals(cid):
-        amt = qty = 0.0
-        for item in by_parent.get(cid, []):
-            amt += float(item.get('amount') or 0)
-            qty += float(item.get('quantity') or 0)
-            sub_amt, sub_qty = subtree_totals(int(item['id']))
-            amt += sub_amt
-            qty += sub_qty
-        return amt, qty
-    root_totals = {'amount': 0.0, 'quantity': 0.0}
-    for child in root_children:
-        amt = float(child.get('amount') or 0)
-        qty = float(child.get('quantity') or 0)
-        sub_amt, sub_qty = subtree_totals(int(child['id']))
-        root_totals['amount'] += amt + sub_amt
-        root_totals['quantity'] += qty + sub_qty
-    return build(None, root_totals)
+    return build(None, sibling_totals_for(None))
 
 
 def _sales_report_flat_options(nodes, prefix=''):
