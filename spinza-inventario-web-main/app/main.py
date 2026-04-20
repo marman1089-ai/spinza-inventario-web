@@ -862,9 +862,43 @@ def _build_cash_dashboard(cur, scope_store: str, period_type: str = 'week', anch
         'expenses_count': _fetch_one_int(cur, f"SELECT COUNT(*) FROM cash_expenses WHERE {where_sql}", params),
     }
     totals['net_today'] = totals['income_today'] - totals['expense_today']
+    totals['margin_pct'] = round((totals['net_period'] / income_current) * 100.0, 1) if income_current > 0 else 0.0
+    totals['cost_incidence_pct'] = round((expense_current / income_current) * 100.0, 1) if income_current > 0 else 0.0
 
     recent_entries = _dict_rows(cur, f"SELECT id, flow_date, store, payment_method, amount, notes, ts FROM cash_entries WHERE {where_sql} ORDER BY ts DESC, id DESC LIMIT 10", params)
     recent_expenses = _dict_rows(cur, f"SELECT id, flow_date, store, category, supplier, payment_method, amount, notes, ts FROM cash_expenses WHERE {where_sql} ORDER BY ts DESC, id DESC LIMIT 10", params)
+
+    income_breakdown = _dict_rows(
+        cur,
+        f"SELECT LOWER(TRIM(payment_method)) AS name, COALESCE(SUM(amount),0) AS total FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY LOWER(TRIM(payment_method)) ORDER BY total DESC, name ASC",
+        params + (start_s, end_s),
+    )
+    expense_breakdown = _dict_rows(
+        cur,
+        f"SELECT LOWER(TRIM(category)) AS name, COALESCE(SUM(amount),0) AS total FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY LOWER(TRIM(category)) ORDER BY total DESC, name ASC",
+        params + (start_s, end_s),
+    )
+
+    for idx, row in enumerate(income_breakdown, start=1):
+        row['rank'] = idx
+        row['label'] = (row.get('name') or 'non specificato').strip() or 'non specificato'
+        row['share_pct'] = round((float(row.get('total') or 0) / income_current) * 100.0, 1) if income_current > 0 else 0.0
+    for idx, row in enumerate(expense_breakdown, start=1):
+        row['rank'] = idx
+        row['label'] = (row.get('name') or 'non specificata').strip() or 'non specificata'
+        row['share_pct'] = round((float(row.get('total') or 0) / expense_current) * 100.0, 1) if expense_current > 0 else 0.0
+
+    top_income = income_breakdown[0] if income_breakdown else {'label': 'Nessuno', 'total': 0.0, 'share_pct': 0.0}
+    top_expense = expense_breakdown[0] if expense_breakdown else {'label': 'Nessuna', 'total': 0.0, 'share_pct': 0.0}
+    insights = {
+        'top_income_method': top_income,
+        'top_expense_category': top_expense,
+        'income_breakdown': income_breakdown[:6],
+        'expense_breakdown': expense_breakdown[:6],
+        'income_methods_count': len(income_breakdown),
+        'expense_categories_count': len(expense_breakdown),
+    }
+
     period_meta = {
         'type': period_type,
         'anchor': anchor_day.isoformat(),
@@ -874,7 +908,7 @@ def _build_cash_dashboard(cur, scope_store: str, period_type: str = 'week', anch
         'prev_end': prev_end_s,
         'label': 'giorno' if period_type == 'day' else ('settimana' if period_type == 'week' else 'mese'),
     }
-    return compare, totals, recent_entries, recent_expenses, period_meta
+    return compare, totals, recent_entries, recent_expenses, period_meta, insights
 
 
 def _build_store_period_chart(cur, store: str, period_type: str = 'week', anchor_s: str = ''):
@@ -1410,7 +1444,7 @@ def gestionale_home(request: Request, period_type: str = 'week', anchor_date: st
             """
             recent_docs = [dict(r) for r in cur.execute(sql, (store, store, store)).fetchall()]
 
-        compare, totals, recent_entries, recent_expenses, period_meta = _build_cash_dashboard(cur, store, period_type, anchor_date)
+        compare, totals, recent_entries, recent_expenses, period_meta, insights = _build_cash_dashboard(cur, store, period_type, anchor_date)
 
     return render(
         "gestionale_home.html",
@@ -1425,6 +1459,7 @@ def gestionale_home(request: Request, period_type: str = 'week', anchor_date: st
         recent_expenses=recent_expenses,
         period_meta=period_meta,
         can_view_finance=can_view_finance,
+        insights=insights,
     )
 
 
@@ -1442,7 +1477,7 @@ def gestionale_dashboard(request: Request, period_type: str = 'week', anchor_dat
     active_store = request.session.get("active_store") if is_admin(request) else None
     with connect() as conn:
         cur = conn.cursor()
-        compare, totals, recent_entries, recent_expenses, period_meta = _build_cash_dashboard(cur, brand, period_type, anchor_date)
+        compare, totals, recent_entries, recent_expenses, period_meta, insights = _build_cash_dashboard(cur, brand, period_type, anchor_date)
     return render(
         "cashflow_dashboard.html",
         user=user,
@@ -1454,6 +1489,7 @@ def gestionale_dashboard(request: Request, period_type: str = 'week', anchor_dat
         recent_entries=recent_entries,
         recent_expenses=recent_expenses,
         stores=STORES,
+        insights=insights,
     )
 
 
@@ -1484,10 +1520,47 @@ def sales_report_page(request: Request, month_key: str = '', store: str = '', im
         previous_tree = _sales_report_tree(cur, int(prev_period_row['id'])) if prev_period_row else []
         previous_map = _sales_tree_value_map(previous_tree)
         tree = _annotate_sales_tree_growth(tree, previous_map)
-        top_amount = sum(float(x.get('amount') or 0) for x in tree)
-        top_qty = sum(float(x.get('quantity') or 0) for x in tree)
+        top_amount = sum(float(x.get('total_amount') or 0) for x in tree)
+        top_qty = sum(float(x.get('total_quantity') or 0) for x in tree)
+        prev_amount = sum(float(x.get('total_amount') or 0) for x in previous_tree)
+        prev_qty = sum(float(x.get('total_quantity') or 0) for x in previous_tree)
+        top_group = max(tree, key=lambda x: float(x.get('total_amount') or 0), default=None)
+        leaf_count = 0
+        uncategorized_count = 0
+        uncategorized_amount = 0.0
+        uncategorized_quantity = 0.0
+
+        def walk(nodes, depth=0):
+            nonlocal leaf_count, uncategorized_count, uncategorized_amount, uncategorized_quantity
+            for node in nodes or []:
+                children = node.get('children') or []
+                if children:
+                    walk(children, depth + 1)
+                else:
+                    leaf_count += 1
+                    if depth == 0:
+                        uncategorized_count += 1
+                        uncategorized_amount += float(node.get('total_amount') or 0)
+                        uncategorized_quantity += float(node.get('total_quantity') or 0)
+
+        walk(tree)
         parent_options = _sales_report_flat_options(tree)
         model_groups = _sales_report_model_groups(cur, selected_store)
+        summary = {
+            'amount': top_amount,
+            'quantity': top_qty,
+            'previous_amount': prev_amount,
+            'previous_quantity': prev_qty,
+            'amount_growth_pct': _pct_change_value(top_amount, prev_amount),
+            'quantity_growth_pct': _pct_change_value(top_qty, prev_qty),
+            'top_group_name': (top_group.get('name') if top_group else 'Nessun gruppo'),
+            'top_group_amount': float(top_group.get('total_amount') or 0) if top_group else 0.0,
+            'top_group_share_pct': round((float(top_group.get('total_amount') or 0) / top_amount) * 100.0, 1) if top_group and top_amount > 0 else 0.0,
+            'leaf_count': leaf_count,
+            'uncategorized_count': uncategorized_count,
+            'uncategorized_amount': uncategorized_amount,
+            'uncategorized_quantity': uncategorized_quantity,
+        }
 
     period['store_label'] = _store_label(period.get('store'))
     return render(
@@ -1506,6 +1579,7 @@ def sales_report_page(request: Request, month_key: str = '', store: str = '', im
         tree=tree,
         chart_tree_json=json.dumps(tree),
         totals={'amount': top_amount, 'quantity': top_qty},
+        summary=summary,
         import_ok=import_ok,
         import_error=import_error,
     )
@@ -1584,6 +1658,46 @@ async def sales_report_import_file(request: Request, upload_file: UploadFile = F
         conn.commit()
 
     return RedirectResponse(f'/gestionale/report-vendite?store={store}&month_key={month_key}&import_ok={inserted}', status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/gestionale/report-vendite/clear-month")
+async def sales_report_clear_month(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse('/', status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse('/gestionale', status_code=HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    month_key = _month_key_from_value(str(form.get('month_key') or ''))
+    store = str(form.get('store') or '').strip()
+    if store not in STORES:
+        store = _current_store_scope(request, user)
+        if store == 'ALL':
+            store = request.session.get('active_store') or 'spinza'
+    if not is_admin(request):
+        store = user.get('store') or store
+
+    with connect() as conn:
+        cur = conn.cursor()
+        period_id = _ensure_sales_report_period(cur, store, month_key, user.get('username') or 'system')
+        _ensure_sales_report_groups_from_models(cur, period_id, store, user.get('username') or 'system')
+        root_rows = _dict_rows(cur, f"SELECT id FROM sales_report_groups WHERE period_id={_ph()} AND parent_id IS NULL", (period_id,))
+        root_ids = [int(r['id']) for r in root_rows]
+        if root_ids:
+            placeholders = ','.join([_ph()] * len(root_ids))
+            cur.execute(
+                f"DELETE FROM sales_report_groups WHERE period_id={_ph()} AND parent_id IS NOT NULL AND id NOT IN ({placeholders})",
+                (period_id, *root_ids),
+            )
+        else:
+            cur.execute(f"DELETE FROM sales_report_groups WHERE period_id={_ph()}", (period_id,))
+            _ensure_sales_report_groups_from_models(cur, period_id, store, user.get('username') or 'system')
+        cur.execute(f"UPDATE sales_report_groups SET amount=0, quantity=0 WHERE period_id={_ph()} AND parent_id IS NULL", (period_id,))
+        _log(cur, store=store, username=user['username'], action='DELETE', category='REPORT_VENDITE', name=f'Svuotato report vendite {month_key}', delta=0)
+        conn.commit()
+
+    return RedirectResponse(f'/gestionale/report-vendite?store={store}&month_key={month_key}', status_code=HTTP_303_SEE_OTHER)
 
 
 @app.post("/gestionale/report-vendite/voce")

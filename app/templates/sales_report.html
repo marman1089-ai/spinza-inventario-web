@@ -2,7 +2,7 @@
 {% set title = "Report vendite" %}
 {% block content %}
 <style>
-  .report-top{display:grid;grid-template-columns:1.05fr .95fr;gap:14px}
+  .report-top{display:grid;grid-template-columns:1.08fr .92fr;gap:14px}
   .report-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px}
   .report-card{background:#fff;border:1px solid #ececec;border-radius:22px;padding:18px;box-shadow:0 10px 28px rgba(0,0,0,.05);cursor:pointer;transition:.18s transform,.18s box-shadow;display:flex;flex-direction:column;align-items:center;text-align:center;min-height:250px}
   .report-card:hover{transform:translateY(-2px);box-shadow:0 14px 32px rgba(0,0,0,.08)}
@@ -10,14 +10,23 @@
   .ring::before{content:"";width:92px;height:92px;border-radius:50%;background:#fff;display:block;box-shadow:inset 0 0 0 1px #f1f1f1}
   .ring-center{position:relative;margin-top:-90px;text-align:center;min-height:88px;display:flex;align-items:center;justify-content:center;flex-direction:column}
   .ring-value{font-size:24px;font-weight:800;line-height:1.05}
-  .ring-sub{font-size:12px;color:#666}.growth{font-size:13px;font-weight:800;margin-top:4px}.growth.pos{color:#0f8b4c}.growth.neg{color:#c62828}.growth.neutral{color:#8a8a8a}.mode-bar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}.mode-switch{display:flex;gap:8px;flex-wrap:wrap}.tree-row{display:grid;grid-template-columns:minmax(180px,1.2fr) .7fr .7fr minmax(180px,.9fr) auto;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid #f0f0f0}
+  .ring-sub{font-size:12px;color:#666}
+  .growth{font-size:13px;font-weight:800;margin-top:4px}
+  .growth.pos{color:#0f8b4c}.growth.neg{color:#c62828}.growth.neutral{color:#8a8a8a}
+  .mode-bar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+  .mode-switch{display:flex;gap:8px;flex-wrap:wrap}
+  .tree-row{display:grid;grid-template-columns:minmax(180px,1.2fr) .7fr .7fr minmax(180px,.9fr) auto;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid #f0f0f0}
   .crumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
   .crumb{border:1px solid #ddd;background:#fff;border-radius:999px;padding:8px 12px;cursor:pointer}
-  .summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  .summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
   .sum-box{background:#fff;border:1px solid #ececec;border-radius:18px;padding:14px}
-    .tiny{font-size:12px;color:#666}
+  .tiny{font-size:12px;color:#666}
   .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  @media(max-width:900px){.report-top,.summary-grid,.form-grid,.tree-row{grid-template-columns:1fr}.ring{width:118px;height:118px}.ring::before{width:82px;height:82px}.ring-center{margin-top:-82px}.mode-bar{align-items:flex-start}}
+  .hero-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .danger-soft{background:#fff1f2;border-color:#fecaca}
+  .insight-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  .insight{border:1px solid #ececec;border-radius:18px;padding:14px;background:#fff}
+  @media(max-width:900px){.report-top,.summary-grid,.form-grid,.tree-row,.insight-grid{grid-template-columns:1fr}.ring{width:118px;height:118px}.ring::before{width:82px;height:82px}.ring-center{margin-top:-82px}.mode-bar{align-items:flex-start}}
 </style>
 
 <div class="report-top">
@@ -25,9 +34,9 @@
     <div class="row" style="justify-content:space-between;align-items:center;">
       <div>
         <h2 style="margin:0 0 6px 0;">📈 Report delle vendite</h2>
-        <div class="muted">Carichi il mese, importi il file anche in modo disordinato e il sistema prova a metterlo nei gruppi giusti in automatico.</div>
+        <div class="muted">Carichi il CSV anche in modo disordinato, poi sistemi una volta sola i sottogruppi e il gestionale se lo ricorda. In più adesso puoi svuotare un mese intero senza perdere i gruppi principali.</div>
       </div>
-      <div class="row">
+      <div class="hero-actions">
         <a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Gestionale</a>
         <a href="/gestionale/incassi" class="btn2" style="text-decoration:none;display:inline-block;">Incassi</a>
       </div>
@@ -48,12 +57,14 @@
           {% endfor %}
         </select>
       </div>
-      <div style="display:flex;align-items:end;gap:10px;">
+      <div style="display:flex;align-items:end;gap:10px;flex-wrap:wrap;">
         <button class="btn" type="submit">Apri report</button>
       </div>
     </form>
 
-    {% if import_error %}<div class="err-box" style="margin-top:14px;padding:12px 14px;border-radius:14px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;">{{ import_error.replace('+', ' ') }}</div>{% endif %}{% if import_ok %}<div class="ok-box" style="margin-top:14px;padding:12px 14px;border-radius:14px;background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;">Import completato: {{ import_ok }} voci aggiunte.</div>{% endif %}<div class="crumbs" id="crumbs"></div>
+    {% if import_error %}<div class="err-box" style="margin-top:14px;padding:12px 14px;border-radius:14px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;">{{ import_error.replace('+', ' ') }}</div>{% endif %}
+    {% if import_ok %}<div class="ok-box" style="margin-top:14px;padding:12px 14px;border-radius:14px;background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;">Import completato: {{ import_ok }} voci aggiunte.</div>{% endif %}
+    <div class="crumbs" id="crumbs"></div>
   </div>
 
   <div class="card">
@@ -61,16 +72,39 @@
     <div style="font-size:28px;font-weight:800;margin-top:4px;">{{ selected_month_label }}</div>
     <div class="muted" style="margin-top:4px;">{{ stores[selected_store] }}</div>
     <div class="summary-grid" style="margin-top:14px;">
-      <div class="sum-box"><div class="muted">Totale soldi</div><div style="font-size:28px;font-weight:800;">€ {{ '%.2f'|format(totals.amount or 0) }}</div></div>
-      <div class="sum-box"><div class="muted">Totale quantità</div><div style="font-size:28px;font-weight:800;">{{ '%.2f'|format(totals.quantity or 0) }}</div></div>
-      <div class="sum-box"><div class="muted">Confronto</div><div style="font-size:16px;font-weight:800;margin-top:10px;">vs mese scorso</div></div>
+      <div class="sum-box"><div class="muted">Totale soldi</div><div style="font-size:28px;font-weight:800;">€ {{ '%.2f'|format(summary.amount or 0) }}</div><div class="tiny">Mese prima: € {{ '%.2f'|format(summary.previous_amount or 0) }}</div></div>
+      <div class="sum-box"><div class="muted">Totale quantità</div><div style="font-size:28px;font-weight:800;">{{ '%.2f'|format(summary.quantity or 0) }}</div><div class="tiny">Mese prima: {{ '%.2f'|format(summary.previous_quantity or 0) }}</div></div>
+      <div class="sum-box"><div class="muted">Crescita soldi</div>{% set g = summary.amount_growth_pct %}<div class="growth {% if g is none %}neutral{% elif g >= 0 %}pos{% else %}neg{% endif %}" style="font-size:26px;">{% if g is none %}Nuovo{% else %}{{ '%+.1f'|format(g) }}%{% endif %}</div><div class="tiny">Confronto con il mese scorso</div></div>
+      <div class="sum-box"><div class="muted">Gruppo migliore</div><div style="font-size:18px;font-weight:800;line-height:1.2;">{{ summary.top_group_name }}</div><div class="tiny" style="margin-top:8px;">€ {{ '%.2f'|format(summary.top_group_amount or 0) }} · {{ '%.1f'|format(summary.top_group_share_pct or 0) }}%</div></div>
     </div>
+  </div>
+</div>
+
+<div class="insight-grid" style="margin-top:14px;">
+  <div class="insight">
+    <div class="muted">Voci finali nel mese</div>
+    <div style="font-size:28px;font-weight:800;">{{ summary.leaf_count }}</div>
+    <div class="tiny">Ti fa capire quante righe reali stai gestendo.</div>
+  </div>
+  <div class="insight">
+    <div class="muted">Fuori dai gruppi</div>
+    <div style="font-size:28px;font-weight:800;">{{ summary.uncategorized_count }}</div>
+    <div class="tiny">€ {{ '%.2f'|format(summary.uncategorized_amount or 0) }} ancora non assegnati a un gruppo principale.</div>
+  </div>
+  <div class="insight">
+    <div class="muted">Reset rapido del mese</div>
+    <div style="font-size:16px;font-weight:800;line-height:1.3;margin-top:6px;">Cancella sottogruppi e valori, ma lascia i gruppi grandi a zero.</div>
+    <form method="post" action="/gestionale/report-vendite/clear-month" onsubmit="return confirm('Svuotare questo mese? I gruppi principali resteranno, tutti i sottogruppi e i valori verranno rimossi.');" style="margin-top:12px;">
+      <input type="hidden" name="month_key" value="{{ selected_month }}">
+      <input type="hidden" name="store" value="{{ selected_store }}">
+      <button class="btn2 danger-soft" type="submit">Svuota mese</button>
+    </form>
   </div>
 </div>
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Importa file report</h3>
-  <div class="muted" style="margin-bottom:10px;">Importi il CSV una volta sola come fai da Dish. Il programma controlla i gruppi principali che hai deciso tu, prova a riconoscere i nomi già imparati e mette in automatico le voci nel gruppo corretto. Se un prodotto nuovo non è ancora conosciuto, puoi spostarlo una volta e dalla volta dopo lo rifà da solo.</div>
+  <div class="muted" style="margin-bottom:10px;">Importi il CSV come fai da Dish. Il programma prova a riconoscere i nomi già imparati, mette le voci nei gruppi corretti e quando sposti o rinomini un sottogruppo la regola viene riusata anche nei mesi successivi dello stesso negozio.</div>
   <form method="post" action="/gestionale/report-vendite/import" enctype="multipart/form-data" class="form-grid">
     <input type="hidden" name="month_key" value="{{ selected_month }}">
     <input type="hidden" name="store" value="{{ selected_store }}">
@@ -93,7 +127,7 @@
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Gruppi principali prestabiliti</h3>
-  <div class="tiny" style="margin-bottom:10px;">Questi sono i gruppi fissi che il programma usa ogni volta quando apri un nuovo mese e quando importi il CSV.</div>
+  <div class="tiny" style="margin-bottom:10px;">Questi gruppi rimangono disponibili anche quando svuoti un mese. Se sposti dentro o fuori dei sottogruppi, i totali si aggiornano automaticamente.</div>
   <div class="row" style="margin-bottom:12px;">
     {% for g in model_groups %}
       <span class="pill">{{ g.name }}</span>
@@ -109,7 +143,7 @@
     <input type="hidden" name="store" value="{{ selected_store }}">
     <div>
       <div class="muted" style="margin-bottom:6px;">Nome gruppo</div>
-      <input name="name" placeholder="Es. Bibite, Coca Cola, Pizze classiche" required>
+      <input name="name" placeholder="Es. Bibite, Coca Cola, Pinze classiche" required>
     </div>
     <div>
       <div class="muted" style="margin-bottom:6px;">Gruppo padre</div>
@@ -128,7 +162,7 @@
       <div class="muted" style="margin-bottom:6px;">Quantità</div>
       <input type="number" step="0.01" min="0" name="quantity" value="0">
     </div>
-    <div style="display:flex;align-items:end;gap:8px;">
+    <div style="display:flex;align-items:end;gap:8px;flex-wrap:wrap;">
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#475569;">
         <input type="checkbox" name="persist_model" value="1" checked>
         Usa come gruppo fisso anche nei prossimi mesi
@@ -142,6 +176,7 @@
   <div class="mode-bar">
     <div>
       <h3 style="margin:0;">Vista interattiva</h3>
+      <div class="tiny" style="margin-top:4px;">Clicca una card per entrare nel dettaglio del gruppo.</div>
     </div>
     <div class="mode-switch">
       <button type="button" class="btn2" id="toggleMoneyTop" onclick="setMode('amount')">Prezzo</button>
@@ -154,7 +189,7 @@
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Struttura salvata</h3>
-  <div class="tiny" style="margin-bottom:10px;">Qui puoi sistemare le voci importate. Quando sposti, rinomini o elimini una voce finale, la regola viene ricordata e si applica anche agli altri mesi dello stesso negozio.</div>
+  <div class="tiny" style="margin-bottom:10px;">Qui sistemi le voci importate. Quando sposti, rinomini o elimini una voce finale, la regola viene ricordata e si applica anche agli altri mesi dello stesso negozio.</div>
   {% macro render_rows(nodes, depth=0) %}
     {% for n in nodes %}
       <div class="tree-row">
@@ -234,7 +269,7 @@ function growthHtml(node){
 }
 
 function nodeValue(node){
-  return currentMode === 'amount' ? Number(node.amount || 0) : Number(node.quantity || 0);
+  return currentMode === 'amount' ? Number(node.amount || node.total_amount || 0) : Number(node.quantity || node.total_quantity || 0);
 }
 
 function nodeShare(node){
@@ -300,7 +335,7 @@ function renderCards(){
     card.innerHTML = `
       <div class="ring" style="--pct:${Math.max(0, Math.min(100, nodeShare(node)))}"></div>
       <div class="ring-center">
-        <div class="ring-value">${fmt(nodeValue(node))}</div>
+        <div class="ring-value">${fmt(currentMode === 'amount' ? node.total_amount : node.total_quantity)}</div>
         <div class="ring-sub">${nodeShare(node).toFixed(1)}% del totale visibile</div>
         ${growthHtml(node)}
       </div>
