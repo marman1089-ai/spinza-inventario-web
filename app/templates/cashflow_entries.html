@@ -32,7 +32,11 @@
 </div>
 
 {% if import_error %}
-<div class="err-box">{{ import_error.replace('+', ' ') }}</div>
+<div class="err-box">{{ import_error }}</div>
+{% endif %}
+
+{% if imported_entries or imported_expenses %}
+<div class="ok-box">Import completato: <strong>{{ imported_entries }}</strong> incassi{% if imported_expenses %} e <strong>{{ imported_expenses }}</strong> uscite{% endif %} salvati.</div>
 {% endif %}
 
 {% if can_edit_management %}
@@ -74,6 +78,43 @@
 
     <div style="margin-top:14px;">
       <button class="btn" type="submit">Salva incasso</button>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+{% if can_edit_management %}
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Importa incassi da file</h3>
+  <div class="muted" style="margin-bottom:10px;">Carica un TXT o CSV nel formato giorno per giorno come il tuo. Riconosce data, POS, Cash, Deliveroo, Glovo e Just Eat. Se vuoi, può importare anche le righe spesa.</div>
+  <form method="post" action="/gestionale/incassi/import-txt" enctype="multipart/form-data">
+    <div class="row" style="align-items:flex-start;">
+      <div style="flex:1;min-width:260px;">
+        <div style="font-weight:800;margin-bottom:8px;">File</div>
+        <input type="file" name="import_file" accept=".txt,.csv,text/plain">
+      </div>
+      <div style="flex:1;min-width:260px;">
+        <div style="font-weight:800;margin-bottom:8px;">Negozio di fallback</div>
+        <select name="fallback_store">
+          {% for key, label in stores.items() %}
+            {% if brand == 'ALL' or brand == key %}
+            <option value="{{ key }}" {% if active_store==key or (brand==key and brand!='ALL') %}selected{% endif %}>{{ label }}</option>
+            {% endif %}
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:12px;">
+      <div style="font-weight:800;margin-bottom:8px;">Oppure incolla il testo</div>
+      <textarea name="import_text" rows="7" placeholder="Esempio:&#10;01/12/25&#10;Pos 249€&#10;Cash 55€&#10;Glovo 57€" style="width:100%;min-height:160px;"></textarea>
+    </div>
+    <div class="row" style="margin-top:12px;align-items:center;">
+      <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="replace_existing_dates" checked> Sovrascrivi gli stessi giorni già presenti</label>
+      <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="import_expenses"> Importa anche le uscite trovate nel file</label>
+    </div>
+    <div class="tiny" style="margin-top:10px;">Se nel file trovi il nome del negozio lo userò automaticamente. Altrimenti userò il negozio selezionato qui sopra.</div>
+    <div style="margin-top:14px;">
+      <button class="btn" type="submit">Importa file</button>
     </div>
   </form>
 </div>

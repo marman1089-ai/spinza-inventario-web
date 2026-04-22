@@ -5,6 +5,7 @@ import csv
 import io
 from datetime import date, datetime, timedelta
 import re
+from urllib.parse import quote_plus, unquote_plus
 
 from fastapi import FastAPI, Request, Form, UploadFile, File
 from .pdf_tools import ensure_pdf, merge_pdfs
@@ -659,6 +660,59 @@ def _insert_cash_entry_compat(cur, store: str, flow_date: str, payment_method: s
     sql = f"INSERT INTO cash_entries({', '.join(ordered_cols)}) VALUES({placeholders})"
     params = tuple(values[c] for c in ordered_cols)
     cur.execute(sql, params)
+
+
+def _insert_cash_expense_compat(cur, store: str, flow_date: str, category: str, supplier: str, payment_method: str, amount: float, notes: str, created_by: str):
+    cols = _existing_columns(cur, 'cash_expenses')
+    if not cols:
+        cols = {'store', 'flow_date', 'category', 'supplier', 'payment_method', 'amount', 'notes', 'created_by'}
+    values = {
+        'store': store,
+        'flow_date': flow_date,
+        'category': category or 'import txt',
+        'supplier': supplier or '',
+        'payment_method': payment_method or '',
+        'amount': float(amount or 0),
+        'notes': notes or '',
+        'created_by': created_by or 'system',
+    }
+    ordered_cols = [c for c in ['store', 'flow_date', 'category', 'supplier', 'payment_method', 'amount', 'notes', 'created_by'] if c in cols]
+    if not ordered_cols:
+        raise RuntimeError('cash_expenses table not available')
+    placeholders = ','.join([_ph()] * len(ordered_cols))
+    sql = f"INSERT INTO cash_expenses({', '.join(ordered_cols)}) VALUES({placeholders})"
+    params = tuple(values[c] for c in ordered_cols)
+    cur.execute(sql, params)
+
+
+def _decode_uploaded_text(raw_bytes: bytes):
+    payload = raw_bytes or b''
+    for encoding in ('utf-8-sig', 'utf-8', 'cp1252', 'latin-1'):
+        try:
+            return payload.decode(encoding)
+        except Exception:
+            continue
+    return payload.decode('utf-8', errors='ignore')
+
+
+def _is_truthy(value) -> bool:
+    return str(value or '').strip().lower() in {'1', 'true', 'on', 'yes', 'si', 'sì'}
+
+
+def _join_unique_notes(parts, max_len: int = 700):
+    out = []
+    seen = set()
+    for part in parts or []:
+        clean = re.sub(r'\s+', ' ', str(part or '').strip())
+        if not clean:
+            continue
+        key = clean.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(clean)
+    joined = ' | '.join(out)
+    return joined[:max_len].strip()
 
 
 def _parse_flexible_amount(text: str):
@@ -1936,6 +1990,7 @@ def sales_report_delete_group(request: Request, group_id: int):
 
 @app.get("/gestionale/incassi", response_class=HTMLResponse)
 def cash_entries_page(request: Request, flow_date: str = '', payment_method: str = 'ALL', period_type: str = 'week', anchor_date: str = '', imported_entries: int = 0, imported_expenses: int = 0, import_error: str = ''):
+    import_error = unquote_plus(str(import_error or '')).strip()
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -2033,8 +2088,115 @@ async def cash_entries_create(request: Request):
 
 @app.post("/gestionale/incassi/import-txt")
 async def cash_entries_import_txt(request: Request):
-    require_login(request)
-    return RedirectResponse('/gestionale/incassi?import_error=Import+TXT+disattivato', status_code=HTTP_303_SEE_OTHER)
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse('/gestionale', status_code=HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    upload = form.get('import_file')
+    pasted_text = str(form.get('import_text') or '').strip()
+    include_expenses = _is_truthy(form.get('import_expenses'))
+    replace_existing_dates = _is_truthy(form.get('replace_existing_dates'))
+
+    fallback_store = str(form.get('fallback_store') or '').strip()
+    if fallback_store not in STORES:
+        fallback_store = (request.session.get('active_store') if is_admin(request) else user.get('store')) or 'spinza'
+    if fallback_store not in STORES:
+        fallback_store = 'spinza'
+
+    raw_text = pasted_text
+    filename = ''
+    if not raw_text and getattr(upload, 'filename', ''):
+        try:
+            raw_bytes = await upload.read()
+            raw_text = _decode_uploaded_text(raw_bytes)
+            filename = str(getattr(upload, 'filename', '') or '').strip()
+        except Exception as e:
+            msg = quote_plus(f'File non leggibile: {e}')
+            return RedirectResponse(f'/gestionale/incassi?import_error={msg}', status_code=HTTP_303_SEE_OTHER)
+
+    if not raw_text.strip():
+        msg = quote_plus('Carica un file TXT/CSV oppure incolla il testo da importare.')
+        return RedirectResponse(f'/gestionale/incassi?import_error={msg}', status_code=HTTP_303_SEE_OTHER)
+
+    try:
+        blocks = _parse_import_txt_blocks(raw_text, fallback_store)
+    except Exception as e:
+        msg = quote_plus(f'Errore durante la lettura del file: {e}')
+        return RedirectResponse(f'/gestionale/incassi?import_error={msg}', status_code=HTTP_303_SEE_OTHER)
+
+    if not blocks:
+        msg = quote_plus('Non ho trovato giornate valide nel file. Controlla che ci siano date tipo 01/12/25 e righe come Pos 249€ o Cash 55€.')
+        return RedirectResponse(f'/gestionale/incassi?import_error={msg}', status_code=HTTP_303_SEE_OTHER)
+
+    if not is_admin(request):
+        forced_store = user.get('store') or fallback_store
+        for block in blocks:
+            block['store'] = forced_store
+
+    imported_entries = 0
+    imported_expenses = 0
+    try:
+        with connect() as conn:
+            cur = conn.cursor()
+            ph = _ph()
+
+            if replace_existing_dates:
+                unique_days = sorted({((b.get('store') or fallback_store), str(b.get('date') or '')) for b in blocks if b.get('date')})
+                for store_key, flow_date in unique_days:
+                    cur.execute(f"DELETE FROM cash_entries WHERE store={ph} AND flow_date={ph}", (store_key, flow_date))
+                    if include_expenses:
+                        cur.execute(f"DELETE FROM cash_expenses WHERE store={ph} AND flow_date={ph}", (store_key, flow_date))
+
+            for block in blocks:
+                flow_date = str(block.get('date') or '').strip()
+                store_key = str(block.get('store') or fallback_store).strip()
+                if not flow_date:
+                    continue
+                if store_key not in STORES:
+                    store_key = fallback_store
+
+                block_notes = _join_unique_notes(block.get('notes') or [])
+                incomes = block.get('incomes') or []
+                expenses = block.get('expenses') or []
+
+                for income in incomes:
+                    payment_method = str(income.get('payment_method') or '').strip().lower()
+                    amount = _safe_amount(income.get('amount'), 0.0)
+                    if not payment_method or amount <= 0:
+                        continue
+                    raw_line = str(income.get('raw') or '').strip()
+                    entry_notes = _join_unique_notes([block_notes, raw_line if ('(' in raw_line or ' x ' in raw_line.lower()) else ''])
+                    _ensure_payment_method(cur, payment_method, user['username'])
+                    _insert_cash_entry_compat(cur, store_key, flow_date, payment_method, amount, entry_notes, user['username'])
+                    _log(cur, store=store_key, username=user['username'], action='CREATE', category='CASSA', name=f"Import TXT {flow_date} - {payment_method}", delta=float(amount or 0))
+                    imported_entries += 1
+
+                if include_expenses:
+                    for expense in expenses:
+                        amount = _safe_amount(expense.get('amount'), 0.0)
+                        if amount <= 0:
+                            continue
+                        raw_line = str(expense.get('raw') or '').strip()
+                        supplier = str(expense.get('name') or raw_line or 'Import TXT').strip()[:120]
+                        expense_notes = _join_unique_notes([raw_line, block_notes])
+                        _insert_cash_expense_compat(cur, store_key, flow_date, 'import txt', supplier, '', amount, expense_notes, user['username'])
+                        _log(cur, store=store_key, username=user['username'], action='CREATE', category='USCITE', name=f"Import TXT {flow_date} - {supplier}", delta=float(amount or 0))
+                        imported_expenses += 1
+    except Exception as e:
+        msg = quote_plus(f'Import fallito: {e}')
+        return RedirectResponse(f'/gestionale/incassi?import_error={msg}', status_code=HTTP_303_SEE_OTHER)
+
+    if imported_entries == 0 and imported_expenses == 0:
+        msg = quote_plus('File letto, ma non ho trovato importi validi da salvare.')
+        return RedirectResponse(f'/gestionale/incassi?import_error={msg}', status_code=HTTP_303_SEE_OTHER)
+
+    query = f'/gestionale/incassi?imported_entries={imported_entries}&imported_expenses={imported_expenses}'
+    if filename and blocks:
+        query += f'&anchor_date={quote_plus(str(blocks[-1].get("date") or ""))}'
+    return RedirectResponse(query, status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/gestionale/uscite", response_class=HTMLResponse)
