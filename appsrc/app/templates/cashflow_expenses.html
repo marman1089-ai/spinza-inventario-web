@@ -2,6 +2,12 @@
 {% set title = "Uscite" %}
 {% block content %}
 <style>
+  .toolbar{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:end}
+  .period-form{display:grid;grid-template-columns:1.2fr .9fr auto;gap:10px;align-items:end}
+  .arrow-btn{display:grid;place-items:center;text-decoration:none;font-size:24px;font-weight:800;width:54px;height:54px;border-radius:16px;border:1px solid var(--line-soft);background:var(--panel-2);color:var(--text)}
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+  .kpi{border:1px solid var(--line-soft);border-radius:18px;padding:14px;background:var(--panel)}
+  .big{font-size:28px;font-weight:800;line-height:1.05}
   .chart-scroll{overflow-x:auto;overflow-y:hidden;padding-bottom:8px;margin-top:12px;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
   .chart-scroll::-webkit-scrollbar{height:8px}
   .chart-scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:999px}
@@ -9,19 +15,129 @@
   .day-box{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:8px;flex:0 0 56px;min-width:56px}
   .triple{display:flex;align-items:flex-end;gap:6px;height:162px}
   .cbar{width:14px;border-radius:8px 8px 4px 4px;box-shadow:0 6px 12px rgba(0,0,0,.08)}
-  @media(max-width:900px){.day-box{min-width:50px;flex-basis:50px}}
-  .income{background:var(--text)}.expense{background:var(--line)}.net{background:var(--muted)}
+  .income{background:linear-gradient(180deg, rgba(56,189,248,.95) 0%, rgba(37,99,235,.78) 100%)}
+  .expense{background:linear-gradient(180deg, rgba(248,113,113,.92) 0%, rgba(220,38,38,.72) 100%)}
+  .net.pos{background:linear-gradient(180deg, rgba(59,130,246,.95) 0%, rgba(37,99,235,.74) 100%)}
+  .net.neg{background:linear-gradient(180deg, rgba(248,113,113,.92) 0%, rgba(185,28,28,.72) 100%)}
+  @media(max-width:900px){.toolbar,.period-form,.kpi-grid{grid-template-columns:1fr}.day-box{min-width:50px;flex-basis:50px}.arrow-btn{width:100%;height:48px}}
 </style>
+
 <div class="card">
   <div class="row" style="justify-content:space-between;align-items:center;">
     <div>
       <h2 style="margin:0 0 6px 0;">💸 Uscite</h2>
-      <div class="muted">Inserisci ogni uscita una per una, con categoria, fornitore e metodo di pagamento.</div>
+      <div class="muted">Prima guardi il periodo e lo storico, poi sotto inserisci le nuove spese.</div>
     </div>
     <div class="row">
-      <a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Dashboard</a>
-      <a href="/gestionale/incassi" class="btn2" style="text-decoration:none;display:inline-block;">Vai agli incassi</a>
+      <a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Home gestionale</a>
+      <a href="/gestionale/incassi" class="btn2" style="text-decoration:none;display:inline-block;">Incassi</a>
     </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <div class="toolbar">
+    <a class="arrow-btn" href="{{ nav_prev_url }}">‹</a>
+    <form method="get" action="/gestionale/uscite" class="period-form">
+      <div>
+        <div class="muted" style="margin-bottom:6px;">Mese</div>
+        <select name="month_key">
+          {% for opt in month_options %}
+            <option value="{{ opt.key }}" {% if opt.key == selected_month %}selected{% endif %}>{{ opt.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <div class="muted" style="margin-bottom:6px;">Vista</div>
+        <select name="period_type">
+          <option value="month" {% if selected_period_type=='month' %}selected{% endif %}>Mese</option>
+          <option value="week" {% if selected_period_type=='week' %}selected{% endif %}>Settimana</option>
+          <option value="day" {% if selected_period_type=='day' %}selected{% endif %}>Giorno</option>
+        </select>
+      </div>
+      <div style="display:flex;align-items:end;gap:10px;flex-wrap:wrap;">
+        <input type="hidden" name="anchor_date" value="{{ selected_anchor_date }}">
+        <input type="hidden" name="flow_date" value="{{ selected_date }}">
+        <input type="hidden" name="category" value="{{ selected_category }}">
+        <button class="btn" type="submit">Aggiorna</button>
+      </div>
+    </form>
+    <a class="arrow-btn" href="{{ nav_next_url }}">›</a>
+  </div>
+  <div class="muted" style="margin-top:12px;">Periodo analizzato: <strong>{{ page_period_meta.start }}</strong> → <strong>{{ page_period_meta.end }}</strong> · {{ stores[chart_store] }}</div>
+</div>
+
+<div class="kpi-grid" style="margin-top:14px;">
+  <div class="kpi"><div class="muted">Incassi {{ page_period_meta.label }}</div><div class="big">€ {{ '%.2f'|format(page_totals.income_period or 0) }}</div></div>
+  <div class="kpi"><div class="muted">Uscite {{ page_period_meta.label }}</div><div class="big">€ {{ '%.2f'|format(page_totals.expense_period or 0) }}</div></div>
+  <div class="kpi"><div class="muted">Saldo {{ page_period_meta.label }}</div><div class="big">€ {{ '%.2f'|format(page_totals.net_period or 0) }}</div></div>
+  <div class="kpi"><div class="muted">Totale filtrato tabella</div><div class="big">€ {{ '%.2f'|format(total_amount) }}</div></div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Grafico {{ selected_period_type }} {{ stores[chart_store] }}</h3>
+  <div class="muted">Lo stesso periodo mostra incassi, uscite e saldo così capisci subito il peso delle spese.</div>
+  <div class="chart-scroll">
+    <div class="chart-wrap">
+      {% for d in chart_rows %}
+      <div class="day-box">
+        <div class="triple">
+          <div class="cbar income" style="height:{{ d.income_h }}px" title="Incassi € {{ '%.2f'|format(d.income) }}"></div>
+          <div class="cbar expense" style="height:{{ d.expense_h }}px" title="Uscite € {{ '%.2f'|format(d.expense) }}"></div>
+          <div class="cbar net {% if d.positive %}pos{% else %}neg{% endif %}" style="height:{{ d.net_h }}px" title="Saldo € {{ '%.2f'|format(d.net) }}"></div>
+        </div>
+        <div style="font-size:12px;color:var(--muted);">{{ d.label }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Filtri storico</h3>
+  <form method="get" action="/gestionale/uscite" class="row">
+    <input type="hidden" name="month_key" value="{{ selected_month }}">
+    <input type="hidden" name="period_type" value="{{ selected_period_type }}">
+    <input type="hidden" name="anchor_date" value="{{ selected_anchor_date }}">
+    <input type="date" name="flow_date" value="{{ selected_date }}">
+    <select name="category">
+      <option value="ALL">Tutte le categorie</option>
+      {% for c in categories %}<option value="{{ c }}" {% if selected_category==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+    </select>
+    <button class="btn2" type="submit">Filtra</button>
+    <a class="btn2" href="/gestionale/uscite?month_key={{ selected_month }}&period_type={{ selected_period_type }}&anchor_date={{ selected_anchor_date }}" style="text-decoration:none;display:inline-block;">Reset filtri</a>
+  </form>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Storico uscite</h3>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Data</th><th>Sede</th><th>Categoria</th><th>Fornitore</th><th>Metodo</th><th>Importo</th><th>Note</th><th>Creata da</th>{% if can_edit_management %}<th>Azione</th>{% endif %}</tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.flow_date }}</td>
+          <td>{{ stores[r.store] if r.store in stores else r.store }}</td>
+          <td>{{ r.category }}</td>
+          <td>{{ r.supplier or '-' }}</td>
+          <td>{{ r.payment_method or '-' }}</td>
+          <td><strong>€ {{ '%.2f'|format(r.amount or 0) }}</strong></td>
+          <td>{{ r.notes or '-' }}</td>
+          <td>{{ r.created_by }}</td>
+          {% if can_edit_management %}
+          <td>
+            <form method="post" action="/gestionale/uscite/{{ r.id }}/delete" onsubmit="return confirm('Eliminare questa uscita?');" style="margin:0;">
+              <button class="btn2" type="submit" style="border-color:rgba(248,113,113,.34);background:rgba(244,63,94,.10);">Elimina</button>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="muted">Ancora nessuna uscita registrata.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
 </div>
 
@@ -48,71 +164,4 @@
   </form>
 </div>
 {% endif %}
-
-<div class="row" style="margin-top:14px;">
-  <div class="card" style="flex:1;min-width:220px;"><div class="muted">Totale filtrato</div><div style="font-size:30px;font-weight:800;">€ {{ '%.2f'|format(total_amount) }}</div></div>
-  <div class="card" style="flex:1;min-width:220px;"><div class="muted">Negozio grafico</div><div style="font-size:22px;font-weight:800;">{{ stores[chart_store] }}</div></div>
-</div>
-
-<div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0;">Filtri</h3>
-  <form method="get" action="/gestionale/uscite" class="row">
-    <input type="date" name="flow_date" value="{{ selected_date }}">
-    <select name="category">
-      <option value="ALL">Tutte le categorie</option>
-      {% for c in categories %}<option value="{{ c }}" {% if selected_category==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
-    </select>
-    <button class="btn2" type="submit">Filtra</button>
-    <a class="btn2" href="/gestionale/uscite" style="text-decoration:none;display:inline-block;">Reset</a>
-  </form>
-</div>
-
-<div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0;">Grafico settimanale {{ stores[chart_store] }}</h3>
-  <div class="muted">Stesso grafico della cassa: incassi, uscite e saldo della settimana del negozio selezionato.</div>
-  <div class="chart-scroll">
-  <div class="chart-wrap">
-    {% for d in chart_rows %}
-    <div class="day-box">
-      <div class="triple">
-        <div class="cbar income" style="height:{{ d.income_h }}px" title="Incassi € {{ '%.2f'|format(d.income) }}"></div>
-        <div class="cbar expense" style="height:{{ d.expense_h }}px" title="Uscite € {{ '%.2f'|format(d.expense) }}"></div>
-        <div class="cbar net" style="height:{{ d.net_h }}px" title="Saldo € {{ '%.2f'|format(d.net) }}"></div>
-      </div>
-      <div style="font-size:12px;color:var(--muted);">{{ d.label }}</div>
-    </div>
-    {% endfor %}
-  </div>
-  </div>
-</div>
-
-<div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0;">Storico uscite</h3>
-  <table>
-    <thead><tr><th>Data</th><th>Sede</th><th>Categoria</th><th>Fornitore</th><th>Metodo</th><th>Importo</th><th>Note</th><th>Creata da</th>{% if can_edit_management %}<th>Azione</th>{% endif %}</tr></thead>
-    <tbody>
-      {% for r in rows %}
-      <tr>
-        <td>{{ r.flow_date }}</td>
-        <td>{{ stores[r.store] if r.store in stores else r.store }}</td>
-        <td>{{ r.category }}</td>
-        <td>{{ r.supplier or '-' }}</td>
-        <td>{{ r.payment_method or '-' }}</td>
-        <td><strong>€ {{ '%.2f'|format(r.amount or 0) }}</strong></td>
-        <td>{{ r.notes or '-' }}</td>
-        <td>{{ r.created_by }}</td>
-        {% if can_edit_management %}
-        <td>
-          <form method="post" action="/gestionale/uscite/{{ r.id }}/delete" onsubmit="return confirm('Eliminare questa uscita?');" style="margin:0;">
-            <button class="btn2" type="submit" style="border-color:rgba(248,113,113,.34);background:rgba(244,63,94,.10);">Elimina</button>
-          </form>
-        </td>
-        {% endif %}
-      </tr>
-      {% else %}
-      <tr><td colspan="9" class="muted">Ancora nessuna uscita registrata.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
 {% endblock %}

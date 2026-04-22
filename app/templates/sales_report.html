@@ -103,6 +103,21 @@
 </div>
 
 <div class="card" style="margin-top:14px;">
+  <div class="mode-bar">
+    <div>
+      <h3 style="margin:0;">Vista interattiva</h3>
+      <div class="tiny" style="margin-top:4px;">Clicca una card per entrare nel dettaglio del gruppo.</div>
+    </div>
+    <div class="mode-switch">
+      <button type="button" class="btn2" id="toggleMoneyTop" onclick="setMode('amount')">Prezzo</button>
+      <button type="button" class="btn2" id="toggleQtyTop" onclick="setMode('quantity')">Quantità</button>
+    </div>
+  </div>
+  <div id="emptyState" class="muted" style="margin-top:14px;display:none;">Non hai ancora inserito voci per questo mese.</div>
+  <div id="reportCards" class="report-grid" style="margin-top:14px;"></div>
+</div>
+
+<div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Importa file report</h3>
   <div class="muted" style="margin-bottom:10px;">Importi il CSV come fai da Dish. Il programma prova a riconoscere i nomi già imparati, mette le voci nei gruppi corretti e quando sposti o rinomini un sottogruppo la regola viene riusata anche nei mesi successivi dello stesso negozio.</div>
   <form method="post" action="/gestionale/report-vendite/import" enctype="multipart/form-data" class="form-grid">
@@ -170,21 +185,6 @@
       <button class="btn" type="submit">Salva voce</button>
     </div>
   </form>
-</div>
-
-<div class="card" style="margin-top:14px;">
-  <div class="mode-bar">
-    <div>
-      <h3 style="margin:0;">Vista interattiva</h3>
-      <div class="tiny" style="margin-top:4px;">Clicca una card per entrare nel dettaglio del gruppo.</div>
-    </div>
-    <div class="mode-switch">
-      <button type="button" class="btn2" id="toggleMoneyTop" onclick="setMode('amount')">Prezzo</button>
-      <button type="button" class="btn2" id="toggleQtyTop" onclick="setMode('quantity')">Quantità</button>
-    </div>
-  </div>
-  <div id="emptyState" class="muted" style="margin-top:14px;display:none;">Non hai ancora inserito voci per questo mese.</div>
-  <div id="reportCards" class="report-grid" style="margin-top:14px;"></div>
 </div>
 
 <div class="card" style="margin-top:14px;">

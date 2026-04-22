@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>{{ title or "Inventario" }}</title>
+  <title>{{ title or 'Gestionale' }}</title>
   {# brand: 'spinza' | 'reburger_camaldoli' | 'reburger_palazzuolo' | 'ALL' #}
   {% set _brand = brand or (user.store if user and user.store) or '' %}
   {% if _brand == 'spinza' %}
@@ -368,14 +368,14 @@
       {% elif _brand.startswith('reburger') %}
         <img src="/static/logo_reburger.png" alt="Reburger"/>
       {% else %}
-        <strong style="font-size:18px;letter-spacing:.02em">Inventari</strong>
+        <strong style="font-size:18px;letter-spacing:.02em">Gestionale</strong>
       {% endif %}
     </div>
     {% if user %}
       <div class="user-line pill" style="width:max-content;max-width:100%;">
         👤 {{ user.username }}
         {% if user.store_label %} • {{ user.store_label }}{% endif %}
-        {% if user.role == 'admin' %} • admin{% endif %}
+        {% if user.role %} • {{ user.role }}{% endif %}
       </div>
     {% endif %}
   </div>
@@ -384,26 +384,34 @@
     <button class="menu-btn" type="button" onclick="openMobileMenu()">☰ Menu</button>
 
     <nav class="top-menu" aria-label="Menu">
-      <a href="/select-area" class="pill" style="text-decoration:none;color:var(--text)">🏠 Home</a>
-      <a href="/select-inventory-area" class="pill" style="text-decoration:none;color:var(--text)">📦 Inventario</a>
-      <a href="/gestionale/dashboard" class="pill" style="text-decoration:none;color:var(--text)">📊 Gestionale</a>
-      <a href="/gestionale/entrate" class="pill" style="text-decoration:none;color:var(--text)">💶 Entrate</a>
-      <a href="/gestionale/uscite" class="pill" style="text-decoration:none;color:var(--text)">💸 Uscite</a>
-      <a href="/gestionale/cassa" class="pill" style="text-decoration:none;color:var(--text)">💼 Cassa</a>
-      <a href="/gestionale/report" class="pill" style="text-decoration:none;color:var(--text)">📈 Report</a>
-      <a href="/chiusure" class="pill" style="text-decoration:none;color:var(--text)">📸 Chiusure</a>
-      <a href="/fatture" class="pill" style="text-decoration:none;color:var(--text)">🧾 Fatture</a>
-      <a href="/updates" class="pill" style="text-decoration:none;color:var(--text)">🆕 Novità</a>
-      <a href="/spese-secondarie" class="pill" style="text-decoration:none;color:var(--text)">💸 Spese secondarie</a>
-      <details class="nav-dd" id="navLogistica">
-        <summary class="pill" style="text-decoration:none;color:var(--text)">🚚 Logistica</summary>
+      <a href="/workspace" class="pill" style="text-decoration:none;color:var(--text)">🏠 Home</a>
+      <details class="nav-dd" id="navGestionale">
+        <summary class="pill" style="text-decoration:none;color:var(--text)">📊 Gestionale</summary>
         <div class="nav-dd-panel">
+          <a href="/gestionale">📊 Home gestionale</a>
+          {% if user.role == 'admin' %}
+            <a href="/gestionale/incassi">💶 Incassi</a>
+            <a href="/gestionale/uscite">💸 Uscite</a>
+            <a href="/gestionale/report-vendite">📈 Report vendite</a>
+          {% endif %}
+          <a href="/fatture">🧾 Fatture</a>
+          <a href="/chiusure">📸 Chiusure</a>
+          <a href="/spese-secondarie">💸 Spese secondarie</a>
+        </div>
+      </details>
+      <details class="nav-dd" id="navInventario">
+        <summary class="pill" style="text-decoration:none;color:var(--text)">📦 Inventario</summary>
+        <div class="nav-dd-panel">
+          <a href="/inventario-home">📦 Home inventario</a>
+          <a href="/select-area?area=bibite">🥤 Bibite</a>
+          <a href="/select-area?area=prodotti">🍽️ Prodotti</a>
           <a href="/ordini">🚚 Ordini da fare</a>
           <a href="/ordinati">📦 Ordini in corso</a>
           <a href="/storico-ordini">🗂️ Storico ordini</a>
           <a href="/scambi">🔁 Scambi tra negozi</a>
         </div>
       </details>
+      <a href="/updates" class="pill" style="text-decoration:none;color:var(--text)">🆕 Novità</a>
       <a href="/profile" class="pill" style="text-decoration:none;color:var(--text)">⚙️ Profilo</a>
 
       {% if user.role == 'admin' %}
@@ -436,26 +444,35 @@
       <button class="btn2" type="button" onclick="closeMobileMenu()" style="border-radius:999px">Chiudi ✕</button>
     </div>
     <div class="menu-body">
-      <div class="section">Sezioni</div>
-      <a href="/select-area" onclick="closeMobileMenu()">🏠 Home</a>
-      <a href="/select-inventory-area" onclick="closeMobileMenu()">📦 Inventario</a>
-      <a href="/gestionale/dashboard" onclick="closeMobileMenu()">📊 Gestionale</a>
-      <a href="/gestionale/entrate" onclick="closeMobileMenu()">💶 Entrate</a>
-      <a href="/gestionale/uscite" onclick="closeMobileMenu()">💸 Uscite</a>
-      <a href="/gestionale/cassa" onclick="closeMobileMenu()">💼 Cassa</a>
-      <a href="/gestionale/report" onclick="closeMobileMenu()">📈 Report</a>
-      <a href="/chiusure" onclick="closeMobileMenu()">📸 Chiusure</a>
-      <a href="/fatture" onclick="closeMobileMenu()">🧾 Fatture</a>
-      <a href="/updates" onclick="closeMobileMenu()">🆕 Novità</a>
-      <a href="/spese-secondarie" onclick="closeMobileMenu()">💸 Spese secondarie</a>
+      <div class="section">Home</div>
+      <a href="/workspace" onclick="closeMobileMenu()">🏠 Home</a>
 
-      <div class="section">Logistica</div>
+      <div class="section">Gestionale</div>
       <div class="sub">
+        <a href="/gestionale" onclick="closeMobileMenu()">📊 Home gestionale</a>
+        {% if user.role == 'admin' %}
+          <a href="/gestionale/incassi" onclick="closeMobileMenu()">💶 Incassi</a>
+          <a href="/gestionale/uscite" onclick="closeMobileMenu()">💸 Uscite</a>
+          <a href="/gestionale/report-vendite" onclick="closeMobileMenu()">📈 Report vendite</a>
+        {% endif %}
+        <a href="/fatture" onclick="closeMobileMenu()">🧾 Fatture</a>
+        <a href="/chiusure" onclick="closeMobileMenu()">📸 Chiusure</a>
+        <a href="/spese-secondarie" onclick="closeMobileMenu()">💸 Spese secondarie</a>
+      </div>
+
+      <div class="section">Inventario</div>
+      <div class="sub">
+        <a href="/inventario-home" onclick="closeMobileMenu()">📦 Home inventario</a>
+        <a href="/select-area?area=bibite" onclick="closeMobileMenu()">🥤 Bibite</a>
+        <a href="/select-area?area=prodotti" onclick="closeMobileMenu()">🍽️ Prodotti</a>
         <a href="/ordini" onclick="closeMobileMenu()">🚚 Ordini da fare</a>
         <a href="/ordinati" onclick="closeMobileMenu()">📦 Ordini in corso</a>
         <a href="/storico-ordini" onclick="closeMobileMenu()">🗂️ Storico ordini</a>
         <a href="/scambi" onclick="closeMobileMenu()">🔁 Scambi tra negozi</a>
       </div>
+
+      <div class="section">Altro</div>
+      <a href="/updates" onclick="closeMobileMenu()">🆕 Novità</a>
 
       <div class="section">Account</div>
       <a href="/profile" onclick="closeMobileMenu()">⚙️ Profilo</a>
@@ -517,23 +534,20 @@
     if(e.key === 'Escape') closeMobileMenu();
   });
 
-  // Desktop dropdown: chiudi Logistica cliccando fuori o scegliendo una voce
+  // Desktop dropdown: chiudi i menu cliccando fuori o scegliendo una voce
   (function(){
-    const dd = document.getElementById('navLogistica');
-    if(!dd) return;
-
-    document.addEventListener('click', function(ev){
-      // se clicco fuori dal dropdown, chiudo
-      if(dd.hasAttribute('open') && !dd.contains(ev.target)){
-        dd.removeAttribute('open');
-      }
-    });
-
-    dd.addEventListener('click', function(ev){
-      const a = ev.target && ev.target.closest ? ev.target.closest('a') : null;
-      if(a){
-        dd.removeAttribute('open');
-      }
+    ['navGestionale','navInventario'].forEach(function(id){
+      const dd = document.getElementById(id);
+      if(!dd) return;
+      document.addEventListener('click', function(ev){
+        if(dd.hasAttribute('open') && !dd.contains(ev.target)){
+          dd.removeAttribute('open');
+        }
+      });
+      dd.addEventListener('click', function(ev){
+        const a = ev.target && ev.target.closest ? ev.target.closest('a') : null;
+        if(a){ dd.removeAttribute('open'); }
+      });
     });
   })();
 </script>

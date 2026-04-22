@@ -2,6 +2,12 @@
 {% set title = "Incassi" %}
 {% block content %}
 <style>
+  .toolbar{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:end}
+  .period-form{display:grid;grid-template-columns:1.2fr .9fr auto;gap:10px;align-items:end}
+  .arrow-btn{display:grid;place-items:center;text-decoration:none;font-size:24px;font-weight:800;width:54px;height:54px;border-radius:16px;border:1px solid var(--line-soft);background:var(--panel-2);color:var(--text)}
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+  .kpi{border:1px solid var(--line-soft);border-radius:18px;padding:14px;background:var(--panel)}
+  .big{font-size:28px;font-weight:800;line-height:1.05}
   .chart-scroll{overflow-x:auto;overflow-y:hidden;padding-bottom:8px;margin-top:12px;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
   .chart-scroll::-webkit-scrollbar{height:8px}
   .chart-scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:999px}
@@ -9,31 +15,152 @@
   .day-box{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:8px;flex:0 0 56px;min-width:56px}
   .triple{display:flex;align-items:flex-end;gap:6px;height:162px}
   .cbar{width:14px;border-radius:8px 8px 4px 4px;box-shadow:0 6px 12px rgba(0,0,0,.08)}
-  .income{background:var(--text)}.expense{background:var(--line)}.net{background:var(--muted)}
+  .income{background:linear-gradient(180deg, rgba(56,189,248,.95) 0%, rgba(37,99,235,.78) 100%)}
+  .expense{background:linear-gradient(180deg, rgba(248,113,113,.92) 0%, rgba(220,38,38,.72) 100%)}
+  .net.pos{background:linear-gradient(180deg, rgba(59,130,246,.95) 0%, rgba(37,99,235,.74) 100%)}
+  .net.neg{background:linear-gradient(180deg, rgba(248,113,113,.92) 0%, rgba(185,28,28,.72) 100%)}
   .entry-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
   .method-card{border:1px solid var(--line-soft);border-radius:14px;padding:12px;background:var(--panel-2)}
   .custom-row{display:grid;grid-template-columns:1.2fr .8fr;gap:10px;margin-top:10px}
   .ok-box,.err-box{padding:12px 14px;border-radius:14px;margin-top:14px}
   .ok-box{background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.34);color:var(--accent-emerald-2)}
   .err-box{background:rgba(239,68,68,.12);border:1px solid rgba(248,113,113,.34);color:var(--accent-red-2)}
-  @media(max-width:900px){.entry-grid,.custom-row{grid-template-columns:1fr}.day-box{min-width:50px;flex-basis:50px}}
+  @media(max-width:900px){.entry-grid,.custom-row,.toolbar,.period-form,.kpi-grid{grid-template-columns:1fr}.day-box{min-width:50px;flex-basis:50px}.arrow-btn{width:100%;height:48px}}
 </style>
+
 <div class="card">
   <div class="row" style="justify-content:space-between;align-items:center;">
     <div>
       <h2 style="margin:0 0 6px 0;">💶 Incassi</h2>
-      <div class="muted">Inserimento giornaliero professionale: niente numero ordini, più spazio alle note e salvataggio più stabile dei dati.</div>
+      <div class="muted">Prima vedi i dati del periodo, poi sotto trovi l’inserimento e l’importazione.</div>
     </div>
     <div class="row">
-      <a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Dashboard</a>
-      <a href="/gestionale/uscite" class="btn2" style="text-decoration:none;display:inline-block;">Vai alle uscite</a>
+      <a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Home gestionale</a>
+      <a href="/gestionale/uscite" class="btn2" style="text-decoration:none;display:inline-block;">Uscite</a>
     </div>
   </div>
 </div>
 
-{% if import_error %}
-<div class="err-box">{{ import_error.replace('+', ' ') }}</div>
-{% endif %}
+{% if import_error %}<div class="err-box">{{ import_error }}</div>{% endif %}
+{% if imported_entries or imported_expenses %}<div class="ok-box">Import completato: <strong>{{ imported_entries }}</strong> incassi{% if imported_expenses %} e <strong>{{ imported_expenses }}</strong> uscite{% endif %} salvati.</div>{% endif %}
+
+<div class="card" style="margin-top:14px;">
+  <div class="toolbar">
+    <a class="arrow-btn" href="{{ nav_prev_url }}">‹</a>
+    <form method="get" action="/gestionale/incassi" class="period-form">
+      <div>
+        <div class="muted" style="margin-bottom:6px;">Mese</div>
+        <select name="month_key">
+          {% for opt in month_options %}
+            <option value="{{ opt.key }}" {% if opt.key == selected_month %}selected{% endif %}>{{ opt.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <div class="muted" style="margin-bottom:6px;">Vista</div>
+        <select name="period_type">
+          <option value="month" {% if selected_period_type=='month' %}selected{% endif %}>Mese</option>
+          <option value="week" {% if selected_period_type=='week' %}selected{% endif %}>Settimana</option>
+          <option value="day" {% if selected_period_type=='day' %}selected{% endif %}>Giorno</option>
+        </select>
+      </div>
+      <div style="display:flex;align-items:end;gap:10px;flex-wrap:wrap;">
+        <input type="hidden" name="anchor_date" value="{{ selected_anchor_date }}">
+        <input type="hidden" name="flow_date" value="{{ selected_date }}">
+        <input type="hidden" name="payment_method" value="{{ selected_payment }}">
+        <button class="btn" type="submit">Aggiorna</button>
+      </div>
+    </form>
+    <a class="arrow-btn" href="{{ nav_next_url }}">›</a>
+  </div>
+  <div class="muted" style="margin-top:12px;">Periodo analizzato: <strong>{{ page_period_meta.start }}</strong> → <strong>{{ page_period_meta.end }}</strong> · {{ stores[chart_store] }}</div>
+</div>
+
+<div class="kpi-grid" style="margin-top:14px;">
+  <div class="kpi"><div class="muted">Incassi {{ page_period_meta.label }}</div><div class="big">€ {{ '%.2f'|format(page_totals.income_period or 0) }}</div></div>
+  <div class="kpi"><div class="muted">Uscite {{ page_period_meta.label }}</div><div class="big">€ {{ '%.2f'|format(page_totals.expense_period or 0) }}</div></div>
+  <div class="kpi"><div class="muted">Saldo {{ page_period_meta.label }}</div><div class="big">€ {{ '%.2f'|format(page_totals.net_period or 0) }}</div></div>
+  <div class="kpi"><div class="muted">Totale filtrato tabella</div><div class="big">€ {{ '%.2f'|format(total_amount) }}</div></div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Grafico {{ selected_period_type }} {{ stores[chart_store] }}</h3>
+  <div class="muted">Per ogni giorno vedi incassi, uscite e saldo del periodo scelto.</div>
+  <div class="chart-scroll">
+    <div class="chart-wrap">
+      {% for d in chart_rows %}
+      <div class="day-box">
+        <div class="triple">
+          <div class="cbar income" style="height:{{ d.income_h }}px" title="Incassi € {{ '%.2f'|format(d.income) }}"></div>
+          <div class="cbar expense" style="height:{{ d.expense_h }}px" title="Uscite € {{ '%.2f'|format(d.expense) }}"></div>
+          <div class="cbar net {% if d.positive %}pos{% else %}neg{% endif %}" style="height:{{ d.net_h }}px" title="Saldo € {{ '%.2f'|format(d.net) }}"></div>
+        </div>
+        <div style="font-size:12px;color:var(--muted);">{{ d.label }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Filtri storico</h3>
+  <form method="get" action="/gestionale/incassi" class="row">
+    <input type="hidden" name="month_key" value="{{ selected_month }}">
+    <input type="hidden" name="period_type" value="{{ selected_period_type }}">
+    <input type="hidden" name="anchor_date" value="{{ selected_anchor_date }}">
+    <input type="date" name="flow_date" value="{{ selected_date }}">
+    <select name="payment_method">
+      <option value="ALL">Tutti i metodi</option>
+      {% for p in payments %}<option value="{{ p }}" {% if selected_payment==p %}selected{% endif %}>{{ p }}</option>{% endfor %}
+    </select>
+    <button class="btn2" type="submit">Filtra</button>
+    <a class="btn2" href="/gestionale/incassi?month_key={{ selected_month }}&period_type={{ selected_period_type }}&anchor_date={{ selected_anchor_date }}" style="text-decoration:none;display:inline-block;">Reset filtri</a>
+  </form>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Storico incassi</h3>
+  <div class="muted" style="margin-bottom:10px;">Le giornate con la stessa data vengono raggruppate in una riga, con una colonna per ogni metodo.</div>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Data</th><th>Sede</th>
+          {% for method in history_methods %}<th style="text-transform:capitalize;">{{ method }}</th>{% endfor %}
+          <th>Totale</th><th>Note</th><th>Creato da</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in grouped_rows %}
+        <tr>
+          <td>{{ row.flow_date }}</td>
+          <td>{{ stores[row.store] if row.store in stores else row.store }}</td>
+          {% for method in history_methods %}
+          {% set cell = row.methods.get(method) %}
+          <td>
+            {% if cell and cell.amount > 0 %}
+              <div><strong>€ {{ '%.2f'|format(cell.amount or 0) }}</strong></div>
+              {% if can_edit_management %}
+                {% for entry in cell.entries %}
+                <form method="post" action="/gestionale/incassi/{{ entry.id }}/delete" onsubmit="return confirm('Eliminare questo incasso?');" style="margin:6px 0 0 0;">
+                  <button class="btn2" type="submit" style="border-color:rgba(248,113,113,.34);background:rgba(244,63,94,.10);padding:4px 8px;">Elimina</button>
+                </form>
+                {% endfor %}
+              {% endif %}
+            {% else %}-{% endif %}
+          </td>
+          {% endfor %}
+          <td><strong>€ {{ '%.2f'|format(row.row_total or 0) }}</strong></td>
+          <td>{{ row.notes_text }}</td>
+          <td>{{ row.created_by_text }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="{{ 6 + (history_methods|length) }}" class="muted">Ancora nessun incasso registrato.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
 
 {% if can_edit_management %}
 <div class="card" style="margin-top:14px;">
@@ -72,17 +199,46 @@
       <button class="btn2" type="button" onclick="addCustomMethod()" style="margin-top:10px;">+ Aggiungi metodo di pagamento</button>
     </div>
 
-    <div style="margin-top:14px;">
-      <button class="btn" type="submit">Salva incasso</button>
-    </div>
+    <div style="margin-top:14px;"><button class="btn" type="submit">Salva incasso</button></div>
   </form>
 </div>
-{% endif %}
 
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Importa incassi da file</h3>
+  <div class="muted" style="margin-bottom:10px;">Carica un TXT o CSV nel tuo formato. Riconosce data, POS, Cash, Deliveroo, Glovo e Just Eat. Può importare anche le uscite trovate nel file.</div>
+  <form method="post" action="/gestionale/incassi/import-txt" enctype="multipart/form-data">
+    <div class="row" style="align-items:flex-start;">
+      <div style="flex:1;min-width:260px;">
+        <div style="font-weight:800;margin-bottom:8px;">File</div>
+        <input type="file" name="import_file" accept=".txt,.csv,text/plain">
+      </div>
+      <div style="flex:1;min-width:260px;">
+        <div style="font-weight:800;margin-bottom:8px;">Negozio di fallback</div>
+        <select name="fallback_store">
+          {% for key, label in stores.items() %}
+            {% if brand == 'ALL' or brand == key %}
+            <option value="{{ key }}" {% if active_store==key or (brand==key and brand!='ALL') %}selected{% endif %}>{{ label }}</option>
+            {% endif %}
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:12px;">
+      <div style="font-weight:800;margin-bottom:8px;">Oppure incolla il testo</div>
+      <textarea name="import_text" rows="7" placeholder="Esempio:&#10;01/12/25&#10;Pos 249€&#10;Cash 55€&#10;Glovo 57€" style="width:100%;min-height:160px;"></textarea>
+    </div>
+    <div class="row" style="margin-top:12px;align-items:center;">
+      <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="replace_existing_dates" checked> Sovrascrivi gli stessi giorni già presenti</label>
+      <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="import_expenses"> Importa anche le uscite trovate nel file</label>
+    </div>
+    <div class="tiny" style="margin-top:10px;">Se nel file trovi il nome del negozio lo userò automaticamente. Altrimenti userò il negozio selezionato qui sopra.</div>
+    <div style="margin-top:14px;"><button class="btn" type="submit">Importa file</button></div>
+  </form>
+</div>
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Metodi di pagamento configurati</h3>
-  <div class="muted" style="margin-bottom:10px;">Puoi togliere i metodi extra che hai creato per errore. I metodi base restano fissi.</div>
+  <div class="muted" style="margin-bottom:10px;">Puoi eliminare solo i metodi extra creati per errore. I metodi base restano fissi.</div>
   <div class="row">
     {% for method in available_payment_methods %}
       <div class="method-card" style="min-width:180px;">
@@ -99,94 +255,7 @@
     {% endfor %}
   </div>
 </div>
-
-<div class="row" style="margin-top:14px;">
-  <div class="card" style="flex:1;min-width:220px;"><div class="muted">Totale filtrato</div><div style="font-size:30px;font-weight:800;">€ {{ '%.2f'|format(total_amount) }}</div></div>
-  <div class="card" style="flex:1;min-width:220px;"><div class="muted">Negozio grafico</div><div style="font-size:22px;font-weight:800;">{{ stores[chart_store] }}</div></div>
-  <div class="card" style="flex:1;min-width:220px;"><div class="muted">Note</div><div style="font-size:15px;font-weight:700;line-height:1.4;">Ora le anomalie rimangono salvate direttamente su ogni giornata.</div></div>
-</div>
-
-<div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0;">Filtri</h3>
-  <form method="get" action="/gestionale/incassi" class="row">
-    <input type="date" name="flow_date" value="{{ selected_date }}">
-    <select name="payment_method">
-      <option value="ALL">Tutti i metodi</option>
-      {% for p in payments %}<option value="{{ p }}" {% if selected_payment==p %}selected{% endif %}>{{ p }}</option>{% endfor %}
-    </select>
-    <select name="period_type">
-      <option value="day" {% if selected_period_type=='day' %}selected{% endif %}>Grafico giorno</option>
-      <option value="week" {% if selected_period_type=='week' %}selected{% endif %}>Grafico settimana</option>
-      <option value="month" {% if selected_period_type=='month' %}selected{% endif %}>Grafico mese</option>
-    </select>
-    <input type="date" name="anchor_date" value="{{ selected_anchor_date }}">
-    <button class="btn2" type="submit">Filtra</button>
-    <a class="btn2" href="/gestionale/incassi" style="text-decoration:none;display:inline-block;">Reset</a>
-  </form>
-</div>
-
-<div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0;">Grafico {{ selected_period_type }} {{ stores[chart_store] }}</h3>
-  <div class="muted">Per ogni giorno vedi incassi, uscite e saldo. Il grafico si aggiorna con i dati che inserisci.</div>
-  <div class="chart-scroll">
-  <div class="chart-wrap">
-    {% for d in chart_rows %}
-    <div class="day-box">
-      <div class="triple">
-        <div class="cbar income" style="height:{{ d.income_h }}px" title="Incassi € {{ '%.2f'|format(d.income) }}"></div>
-        <div class="cbar expense" style="height:{{ d.expense_h }}px" title="Uscite € {{ '%.2f'|format(d.expense) }}"></div>
-        <div class="cbar net" style="height:{{ d.net_h }}px" title="Saldo € {{ '%.2f'|format(d.net) }}"></div>
-      </div>
-      <div style="font-size:12px;color:var(--muted);">{{ d.label }}</div>
-    </div>
-    {% endfor %}
-  </div>
-  </div>
-</div>
-
-<div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0;">Storico incassi</h3>
-  <div class="muted" style="margin-bottom:10px;">Se più incassi hanno la stessa data, ora li vedi nella stessa riga con una colonna per ogni metodo.</div>
-  <div style="overflow-x:auto;">
-  <table>
-    <thead>
-      <tr>
-        <th>Data</th><th>Sede</th>
-        {% for method in history_methods %}<th style="text-transform:capitalize;">{{ method }}</th>{% endfor %}
-        <th>Totale</th><th>Note</th><th>Creato da</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in grouped_rows %}
-      <tr>
-        <td>{{ row.flow_date }}</td>
-        <td>{{ stores[row.store] if row.store in stores else row.store }}</td>
-        {% for method in history_methods %}
-        {% set cell = row.methods.get(method) %}
-        <td>
-          {% if cell and cell.amount > 0 %}
-            <div><strong>€ {{ '%.2f'|format(cell.amount or 0) }}</strong></div>
-            {% if can_edit_management %}
-              {% for entry in cell.entries %}
-              <form method="post" action="/gestionale/incassi/{{ entry.id }}/delete" onsubmit="return confirm('Eliminare questo incasso?');" style="margin:6px 0 0 0;">
-                <button class="btn2" type="submit" style="border-color:rgba(248,113,113,.34);background:rgba(244,63,94,.10);padding:4px 8px;">Elimina</button>
-              </form>
-              {% endfor %}
-            {% endif %}
-          {% else %}-{% endif %}
-        </td>
-        {% endfor %}
-        <td><strong>€ {{ '%.2f'|format(row.row_total or 0) }}</strong></td>
-        <td>{{ row.notes_text }}</td>
-        <td>{{ row.created_by_text }}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="{{ 6 + (history_methods|length) }}" class="muted">Ancora nessun incasso registrato.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
-</div>
+{% endif %}
 
 <script>
 function addCustomMethod(){

@@ -5,7 +5,7 @@ import csv
 import io
 from datetime import date, datetime, timedelta
 import re
-from urllib.parse import quote_plus, unquote_plus
+from urllib.parse import quote_plus, unquote_plus, urlencode
 
 from fastapi import FastAPI, Request, Form, UploadFile, File
 from .pdf_tools import ensure_pdf, merge_pdfs
@@ -961,6 +961,8 @@ def _build_cash_dashboard(cur, scope_store: str, period_type: str = 'week', anch
         'prev_start': prev_start_s,
         'prev_end': prev_end_s,
         'label': 'giorno' if period_type == 'day' else ('settimana' if period_type == 'week' else 'mese'),
+        'month_key': start_s[:7],
+        'range_label': _period_range_label(period_type, start_d, end_d),
     }
     return compare, totals, recent_entries, recent_expenses, period_meta, insights
 
@@ -996,6 +998,190 @@ def _build_store_period_chart(cur, store: str, period_type: str = 'week', anchor
         r['net_h'] = max(8, int((abs(r['net'])/max_amount)*130)) if r['net'] else 8
         r['positive'] = r['net'] >= 0
     return rows
+
+
+def _parse_date_safe(raw: str, fallback: date | None = None) -> date:
+    fallback = fallback or date.today()
+    try:
+        return datetime.strptime(str(raw or '').strip(), '%Y-%m-%d').date()
+    except Exception:
+        return fallback
+
+
+def _shift_anchor_date(period_type: str, anchor_day: date, direction: int) -> date:
+    direction = -1 if int(direction) < 0 else 1
+    kind = (period_type or 'month').lower()
+    if kind == 'day':
+        return anchor_day + timedelta(days=direction)
+    if kind == 'week':
+        return anchor_day + timedelta(days=7 * direction)
+    base = anchor_day.replace(day=1)
+    month = base.month + direction
+    year = base.year
+    while month < 1:
+        month += 12
+        year -= 1
+    while month > 12:
+        month -= 12
+        year += 1
+    return date(year, month, 1)
+
+
+def _period_range_label(period_type: str, start_d: date, end_d: date) -> str:
+    kind = (period_type or 'month').lower()
+    if kind == 'month':
+        return _month_label(start_d.strftime('%Y-%m'))
+    if kind == 'day':
+        return start_d.strftime('%d/%m/%Y')
+    same_year = start_d.year == end_d.year
+    left = start_d.strftime('%d/%m')
+    right = end_d.strftime('%d/%m/%Y' if not same_year else '%d/%m')
+    return f'{left} → {right}'
+
+
+def _resolve_period_state(period_type: str = 'month', month_key: str = '', anchor_date: str = '', nav: str = ''):
+    kind = (period_type or 'month').lower()
+    if kind not in {'day', 'week', 'month'}:
+        kind = 'month'
+    selected_month = _month_key_from_value(month_key or anchor_date or _today_str())
+    month_start = _parse_date_safe(selected_month + '-01', date.today().replace(day=1))
+    anchor_day = _parse_date_safe(anchor_date, month_start)
+    nav = (nav or '').strip().lower()
+    if nav in {'prev', 'next'}:
+        anchor_day = _shift_anchor_date(kind, anchor_day, -1 if nav == 'prev' else 1)
+        selected_month = anchor_day.strftime('%Y-%m')
+    elif anchor_day.strftime('%Y-%m') != selected_month:
+        anchor_day = month_start
+    if kind == 'month':
+        anchor_day = anchor_day.replace(day=1)
+        selected_month = anchor_day.strftime('%Y-%m')
+    return kind, selected_month, anchor_day
+
+
+def _query_url(path: str, **params) -> str:
+    clean = {}
+    for key, value in params.items():
+        if value is None:
+            continue
+        if isinstance(value, str) and value == '':
+            continue
+        clean[key] = value
+    query = urlencode(clean)
+    return f'{path}?{query}' if query else path
+
+
+def _month_options_for_scope(cur, scope_store: str, selected_month: str = ''):
+    months = {selected_month or date.today().strftime('%Y-%m'), date.today().strftime('%Y-%m')}
+    where_sql, params = _cash_scope_where(scope_store)
+    for table_name in ('cash_entries', 'cash_expenses'):
+        rows = _dict_rows(cur, f"SELECT flow_date FROM {table_name} WHERE {where_sql} ORDER BY flow_date DESC", params)
+        for row in rows:
+            flow_date = str(row.get('flow_date') or '').strip()
+            if len(flow_date) >= 7:
+                months.add(flow_date[:7])
+    ph = _ph()
+    if scope_store == 'ALL':
+        report_rows = _dict_rows(cur, 'SELECT month_key FROM sales_report_periods ORDER BY month_key DESC', ())
+    else:
+        report_rows = _dict_rows(cur, f'SELECT month_key FROM sales_report_periods WHERE store={ph} ORDER BY month_key DESC', (scope_store,))
+    for row in report_rows:
+        key = str(row.get('month_key') or '').strip()
+        if len(key) == 7:
+            months.add(key)
+    if months:
+        first_key = min(months)
+        last_key = max(months)
+        first_d = _parse_date_safe(first_key + '-01', date.today().replace(month=1, day=1)).replace(day=1)
+        last_d = _parse_date_safe(last_key + '-01', date.today().replace(month=12, day=1)).replace(day=1)
+    else:
+        today = date.today()
+        first_d = today.replace(month=1, day=1)
+        last_d = today.replace(month=12, day=1)
+    if first_d.year == last_d.year:
+        first_d = first_d.replace(month=1, day=1)
+        last_d = last_d.replace(month=12, day=1)
+    options = []
+    cursor = first_d
+    safety = 0
+    while cursor <= last_d and safety < 120:
+        key = cursor.strftime('%Y-%m')
+        options.append({'key': key, 'label': _month_label(key)})
+        safety += 1
+        if cursor.month == 12:
+            cursor = date(cursor.year + 1, 1, 1)
+        else:
+            cursor = date(cursor.year, cursor.month + 1, 1)
+    options.sort(key=lambda x: x['key'], reverse=True)
+    return options[:60]
+
+
+def _build_scope_period_chart(cur, scope_store: str, period_type: str = 'week', anchor_s: str = ''):
+    anchor_day = _parse_date_safe(anchor_s, date.today())
+    period_type, start_d, end_d = _period_bounds(period_type, anchor_day)
+    ph = _ph()
+    where_sql, params = _cash_scope_where(scope_store)
+    start_s = start_d.isoformat()
+    end_s = end_d.isoformat()
+    entries = _dict_rows(cur, f"SELECT flow_date, SUM(amount) AS total FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date ORDER BY flow_date ASC", params + (start_s, end_s))
+    expenses = _dict_rows(cur, f"SELECT flow_date, SUM(amount) AS total FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date ORDER BY flow_date ASC", params + (start_s, end_s))
+    by_entry = {str(r['flow_date']): float(r.get('total') or 0) for r in entries}
+    by_expense = {str(r['flow_date']): float(r.get('total') or 0) for r in expenses}
+    rows = []
+    max_amount = 1.0
+    days_count = (end_d - start_d).days + 1
+    for i in range(days_count):
+        d = start_d + timedelta(days=i)
+        ds = d.isoformat()
+        inc = by_entry.get(ds, 0.0)
+        usc = by_expense.get(ds, 0.0)
+        net = inc - usc
+        max_amount = max(max_amount, inc, usc, abs(net))
+        rows.append({'date': ds, 'label': d.strftime('%d/%m'), 'income': inc, 'expense': usc, 'net': net})
+    for r in rows:
+        r['income_h'] = max(8, int((r['income'] / max_amount) * 130)) if r['income'] else 8
+        r['expense_h'] = max(8, int((r['expense'] / max_amount) * 130)) if r['expense'] else 8
+        r['net_h'] = max(8, int((abs(r['net']) / max_amount) * 130)) if r['net'] else 8
+        r['positive'] = r['net'] >= 0
+    return rows
+
+
+def _sales_month_overview(cur, store: str, month_key: str):
+    selected_store = (store or 'spinza').strip()
+    if selected_store not in STORES:
+        selected_store = 'spinza'
+    selected_month = _month_key_from_value(month_key)
+    ph = _ph()
+    row = cur.execute(f'SELECT id FROM sales_report_periods WHERE store={ph} AND month_key={ph}', (selected_store, selected_month)).fetchone()
+    tree = _sales_report_tree(cur, int(row['id'])) if row else []
+    groups = sorted(tree, key=lambda x: float(x.get('total_amount') or 0), reverse=True)[:7]
+    total = sum(float(g.get('total_amount') or 0) for g in groups)
+    palette = ['#2563eb', '#38bdf8', '#8b5cf6', '#14b8a6', '#22c55e', '#f59e0b', '#ef4444']
+    out = []
+    cursor = 0.0
+    segments = []
+    for idx, group in enumerate(groups):
+        value = float(group.get('total_amount') or 0)
+        share = (value / total * 100.0) if total > 0 else 0.0
+        color = palette[idx % len(palette)]
+        out.append({
+            'name': group.get('name') or f'Gruppo {idx+1}',
+            'total_amount': value,
+            'share_pct': round(share, 1),
+            'color': color,
+        })
+        next_cursor = cursor + share
+        segments.append(f'{color} {cursor:.2f}% {next_cursor:.2f}%')
+        cursor = next_cursor
+    pie_style = 'conic-gradient(' + ', '.join(segments) + ')' if segments else 'conic-gradient(rgba(148,163,184,.22) 0 100%)'
+    return {
+        'store': selected_store,
+        'store_label': _store_label(selected_store),
+        'month_key': selected_month,
+        'month_label': _month_label(selected_month),
+        'groups': out,
+        'total_amount': total,
+        'pie_style': pie_style,
+    }
 
 
 def _month_key_from_value(raw: str) -> str:
@@ -1437,7 +1623,7 @@ def workspace_home(request: Request):
 
 
 @app.get("/gestionale", response_class=HTMLResponse)
-def gestionale_home(request: Request, period_type: str = 'week', anchor_date: str = ''):
+def gestionale_home(request: Request, period_type: str = 'month', anchor_date: str = '', month_key: str = '', nav: str = ''):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -1446,6 +1632,8 @@ def gestionale_home(request: Request, period_type: str = 'week', anchor_date: st
     active_store = request.session.get("active_store") if is_admin(request) else None
     can_view_finance = can_view_management_finance(request, user)
     store = brand
+    period_type, selected_month, anchor_day = _resolve_period_state(period_type, month_key, anchor_date, nav)
+    anchor_s = anchor_day.isoformat()
     ph = _ph()
     stats = {
         "fatture": 0,
@@ -1464,7 +1652,6 @@ def gestionale_home(request: Request, period_type: str = 'week', anchor_date: st
             stats["spese"] = _fetch_one_int(cur, "SELECT COUNT(*) FROM secondary_expenses", ())
             stats["ordini_aperti"] = _fetch_one_int(cur, "SELECT COUNT(*) FROM orders WHERE status='in_corso'", ())
             stats["coda_ordini"] = _fetch_one_int(cur, "SELECT COUNT(*) FROM order_queue", ())
-
             sql = """
                 SELECT 'Fattura' AS tipo, supplier AS descrizione, doc_date AS data_doc, uploaded_by, ts
                 FROM invoices_docs
@@ -1484,7 +1671,6 @@ def gestionale_home(request: Request, period_type: str = 'week', anchor_date: st
             stats["spese"] = _fetch_one_int(cur, f"SELECT COUNT(*) FROM secondary_expenses WHERE store={ph}", (store,))
             stats["ordini_aperti"] = _fetch_one_int(cur, f"SELECT COUNT(*) FROM orders WHERE store={ph} AND status='in_corso'", (store,))
             stats["coda_ordini"] = _fetch_one_int(cur, f"SELECT COUNT(*) FROM order_queue WHERE store={ph}", (store,))
-
             sql = f"""
                 SELECT * FROM (
                     SELECT 'Fattura' AS tipo, supplier AS descrizione, doc_date AS data_doc, uploaded_by, ts
@@ -1501,7 +1687,16 @@ def gestionale_home(request: Request, period_type: str = 'week', anchor_date: st
             """
             recent_docs = [dict(r) for r in cur.execute(sql, (store, store, store)).fetchall()]
 
-        compare, totals, recent_entries, recent_expenses, period_meta, insights = _build_cash_dashboard(cur, store, period_type, anchor_date)
+        compare, totals, recent_entries, recent_expenses, period_meta, insights = _build_cash_dashboard(cur, store, period_type, anchor_s)
+        period_rows = _build_scope_period_chart(cur, store, period_type, anchor_s)
+        month_options = _month_options_for_scope(cur, store, selected_month)
+        sales_store = store if store != 'ALL' else (active_store or 'spinza')
+        sales_overview = _sales_month_overview(cur, sales_store, selected_month)
+
+    prev_anchor = _shift_anchor_date(period_type, anchor_day, -1).isoformat()
+    next_anchor = _shift_anchor_date(period_type, anchor_day, 1).isoformat()
+    nav_prev_url = _query_url('/gestionale', period_type=period_type, month_key=_month_key_from_value(prev_anchor), anchor_date=prev_anchor)
+    nav_next_url = _query_url('/gestionale', period_type=period_type, month_key=_month_key_from_value(next_anchor), anchor_date=next_anchor)
 
     return render(
         "gestionale_home.html",
@@ -1517,37 +1712,18 @@ def gestionale_home(request: Request, period_type: str = 'week', anchor_date: st
         period_meta=period_meta,
         can_view_finance=can_view_finance,
         insights=insights,
+        month_options=month_options,
+        selected_month=selected_month,
+        period_rows=period_rows,
+        sales_overview=sales_overview,
+        nav_prev_url=nav_prev_url,
+        nav_next_url=nav_next_url,
     )
-
-
 
 
 @app.get("/gestionale/dashboard", response_class=HTMLResponse)
-def gestionale_dashboard(request: Request, period_type: str = 'week', anchor_date: str = ''):
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    if not can_view_management_finance(request, user):
-        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
-
-    brand = _current_store_scope(request, user)
-    active_store = request.session.get("active_store") if is_admin(request) else None
-    with connect() as conn:
-        cur = conn.cursor()
-        compare, totals, recent_entries, recent_expenses, period_meta, insights = _build_cash_dashboard(cur, brand, period_type, anchor_date)
-    return render(
-        "cashflow_dashboard.html",
-        user=user,
-        brand=brand,
-        active_store=active_store,
-        compare=compare,
-        totals=totals,
-        period_meta=period_meta,
-        recent_entries=recent_entries,
-        recent_expenses=recent_expenses,
-        stores=STORES,
-        insights=insights,
-    )
+def gestionale_dashboard(request: Request, period_type: str = 'month', anchor_date: str = '', month_key: str = ''):
+    return RedirectResponse(_query_url('/gestionale', period_type=period_type, anchor_date=anchor_date, month_key=month_key), status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/gestionale/report-vendite", response_class=HTMLResponse)
@@ -1989,7 +2165,7 @@ def sales_report_delete_group(request: Request, group_id: int):
 
 
 @app.get("/gestionale/incassi", response_class=HTMLResponse)
-def cash_entries_page(request: Request, flow_date: str = '', payment_method: str = 'ALL', period_type: str = 'week', anchor_date: str = '', imported_entries: int = 0, imported_expenses: int = 0, import_error: str = ''):
+def cash_entries_page(request: Request, flow_date: str = '', payment_method: str = 'ALL', period_type: str = 'month', anchor_date: str = '', month_key: str = '', nav: str = '', imported_entries: int = 0, imported_expenses: int = 0, import_error: str = ''):
     import_error = unquote_plus(str(import_error or '')).strip()
     user = require_login(request)
     if not user:
@@ -1999,6 +2175,8 @@ def cash_entries_page(request: Request, flow_date: str = '', payment_method: str
     brand = _current_store_scope(request, user)
     active_store = request.session.get("active_store") if is_admin(request) else None
     can_edit_management = user.get('role') in ('admin', 'manager', 'staff')
+    period_type, selected_month, anchor_day = _resolve_period_state(period_type, month_key, anchor_date, nav)
+    anchor_s = anchor_day.isoformat()
     where_sql, params = _cash_scope_where(brand)
     ph = _ph()
     sql = f"SELECT id, flow_date, store, payment_method, amount, notes, created_by FROM cash_entries WHERE {where_sql}"
@@ -2010,21 +2188,30 @@ def cash_entries_page(request: Request, flow_date: str = '', payment_method: str
         sql += f" AND payment_method={ph}"
         qparams.append(payment_method)
     sql += " ORDER BY ts DESC, id DESC"
+    chart_store = brand if brand != 'ALL' else (active_store or 'spinza')
     with connect() as conn:
         cur = conn.cursor()
         rows = _dict_rows(cur, sql, tuple(qparams))
         payments = [r['payment_method'] for r in _dict_rows(cur, f"SELECT DISTINCT payment_method FROM cash_entries WHERE {where_sql} ORDER BY payment_method ASC", params) if r.get('payment_method')]
         available_payment_methods = _load_cash_payment_methods(cur)
         history_methods, grouped_rows = _group_cash_rows_by_date(rows, available_payment_methods)
-        chart_rows = _build_store_period_chart(cur, brand if brand != 'ALL' else (active_store or 'spinza'), period_type, anchor_date)
+        chart_rows = _build_store_period_chart(cur, chart_store, period_type, anchor_s)
+        _, page_totals, _, _, period_meta, _ = _build_cash_dashboard(cur, chart_store, period_type, anchor_s)
+        month_options = _month_options_for_scope(cur, brand, selected_month)
         total_amount = sum(float(r.get('amount') or 0) for r in rows)
+    prev_anchor = _shift_anchor_date(period_type, anchor_day, -1).isoformat()
+    next_anchor = _shift_anchor_date(period_type, anchor_day, 1).isoformat()
+    nav_prev_url = _query_url('/gestionale/incassi', flow_date=flow_date, payment_method=payment_method, period_type=period_type, month_key=_month_key_from_value(prev_anchor), anchor_date=prev_anchor)
+    nav_next_url = _query_url('/gestionale/incassi', flow_date=flow_date, payment_method=payment_method, period_type=period_type, month_key=_month_key_from_value(next_anchor), anchor_date=next_anchor)
     return render(
         "cashflow_entries.html",
         user=user, brand=brand, active_store=active_store, stores=STORES,
         can_edit_management=can_edit_management, rows=rows, today=date.today().isoformat(),
         selected_date=flow_date, selected_payment=payment_method, payments=payments,
-        total_amount=total_amount, chart_rows=chart_rows, chart_store=(brand if brand != 'ALL' else (active_store or 'spinza')), imported_entries=imported_entries, imported_expenses=imported_expenses, import_error=import_error,
-        available_payment_methods=available_payment_methods, history_methods=history_methods, grouped_rows=grouped_rows, selected_period_type=period_type, selected_anchor_date=(anchor_date or date.today().isoformat()),
+        total_amount=total_amount, chart_rows=chart_rows, chart_store=chart_store, imported_entries=imported_entries, imported_expenses=imported_expenses, import_error=import_error,
+        available_payment_methods=available_payment_methods, history_methods=history_methods, grouped_rows=grouped_rows, selected_period_type=period_type, selected_anchor_date=anchor_s,
+        page_period_meta=period_meta, page_totals=page_totals, month_options=month_options, selected_month=selected_month,
+        nav_prev_url=nav_prev_url, nav_next_url=nav_next_url,
     )
 
 
@@ -2200,7 +2387,7 @@ async def cash_entries_import_txt(request: Request):
 
 
 @app.get("/gestionale/uscite", response_class=HTMLResponse)
-def cash_expenses_page(request: Request, flow_date: str = "", category: str = "ALL"):
+def cash_expenses_page(request: Request, flow_date: str = "", category: str = "ALL", period_type: str = 'month', anchor_date: str = '', month_key: str = '', nav: str = ''):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -2209,6 +2396,8 @@ def cash_expenses_page(request: Request, flow_date: str = "", category: str = "A
     brand = _current_store_scope(request, user)
     active_store = request.session.get("active_store") if is_admin(request) else None
     can_edit_management = user.get('role') in ('admin', 'manager', 'staff')
+    period_type, selected_month, anchor_day = _resolve_period_state(period_type, month_key, anchor_date, nav)
+    anchor_s = anchor_day.isoformat()
     where_sql, params = _cash_scope_where(brand)
     ph = _ph()
     sql = f"SELECT id, flow_date, store, category, supplier, payment_method, amount, notes, created_by FROM cash_expenses WHERE {where_sql}"
@@ -2220,18 +2409,27 @@ def cash_expenses_page(request: Request, flow_date: str = "", category: str = "A
         sql += f" AND category={ph}"
         qparams.append(category)
     sql += " ORDER BY ts DESC, id DESC"
+    chart_store = brand if brand != 'ALL' else (active_store or 'spinza')
     with connect() as conn:
         cur = conn.cursor()
         rows = _dict_rows(cur, sql, tuple(qparams))
         categories = [r['category'] for r in _dict_rows(cur, f"SELECT DISTINCT category FROM cash_expenses WHERE {where_sql} ORDER BY category ASC", params) if r.get('category')]
-        chart_rows = _build_store_period_chart(cur, brand if brand != 'ALL' else (active_store or 'spinza'))
+        chart_rows = _build_store_period_chart(cur, chart_store, period_type, anchor_s)
+        _, page_totals, _, _, period_meta, _ = _build_cash_dashboard(cur, chart_store, period_type, anchor_s)
+        month_options = _month_options_for_scope(cur, brand, selected_month)
         total_amount = sum(float(r.get('amount') or 0) for r in rows)
+    prev_anchor = _shift_anchor_date(period_type, anchor_day, -1).isoformat()
+    next_anchor = _shift_anchor_date(period_type, anchor_day, 1).isoformat()
+    nav_prev_url = _query_url('/gestionale/uscite', flow_date=flow_date, category=category, period_type=period_type, month_key=_month_key_from_value(prev_anchor), anchor_date=prev_anchor)
+    nav_next_url = _query_url('/gestionale/uscite', flow_date=flow_date, category=category, period_type=period_type, month_key=_month_key_from_value(next_anchor), anchor_date=next_anchor)
     return render(
         "cashflow_expenses.html",
         user=user, brand=brand, active_store=active_store, stores=STORES,
         can_edit_management=can_edit_management, rows=rows, today=date.today().isoformat(),
         selected_date=flow_date, selected_category=category, categories=categories,
-        total_amount=total_amount, chart_rows=chart_rows, chart_store=(brand if brand != 'ALL' else (active_store or 'spinza')),
+        total_amount=total_amount, chart_rows=chart_rows, chart_store=chart_store,
+        selected_period_type=period_type, selected_anchor_date=anchor_s, page_period_meta=period_meta, page_totals=page_totals,
+        month_options=month_options, selected_month=selected_month, nav_prev_url=nav_prev_url, nav_next_url=nav_next_url,
     )
 
 
