@@ -42,7 +42,7 @@
       <div>
         <h2 style="margin:0 0 6px 0;">📊 Home gestionale</h2>
         {% if can_view_finance %}
-          <div class="muted">Appena entri vedi subito che periodo stai guardando, come stanno andando incassi, uscite, saldo e cosa stai vendendo di più.</div>
+          <div class="muted">Appena entri vedi il periodo, i totali principali, l'andamento rispetto al periodo prima e cosa stai vendendo di più.</div>
         {% else %}
           <div class="muted">Vista generale documentale e operativa. La parte economica resta visibile solo ai profili autorizzati.</div>
         {% endif %}
@@ -65,7 +65,7 @@
     <div class="row" style="margin-top:12px;">
       <div class="pill">Margine {{ '%.1f'|format(totals.margin_pct or 0) }}%</div>
       <div class="pill">Peso costi {{ '%.1f'|format(totals.cost_incidence_pct or 0) }}%</div>
-      <div class="pill">Mese dati {{ selected_month }}</div>
+      <div class="pill">Store {{ sales_overview.store_label }}</div>
     </div>
     {% endif %}
   </div>
@@ -100,6 +100,32 @@
     <a class="arrow-btn" href="{{ nav_next_url }}">›</a>
   </div>
   <div class="muted" style="margin-top:12px;">Stai guardando: <strong>{{ period_meta.start }}</strong> → <strong>{{ period_meta.end }}</strong></div>
+</div>
+
+<div class="kpi-grid" style="margin-bottom:14px;">
+  <div class="kpi"><div class="muted">Totale incassi</div><div class="big">€ {{ '%.2f'|format(totals.income_period or 0) }}</div><div class="muted" style="margin-top:8px;">{{ summary_labels.current }}</div></div>
+  <div class="kpi"><div class="muted">Totale spese</div><div class="big">€ {{ '%.2f'|format(totals.expense_period or 0) }}</div><div class="muted" style="margin-top:8px;">{{ summary_labels.current }}</div></div>
+  <div class="kpi"><div class="muted">Margine</div><div class="big">€ {{ '%.2f'|format(totals.net_period or 0) }}</div><div class="muted" style="margin-top:8px;">{{ '%.1f'|format(totals.margin_pct or 0) }}% sugli incassi</div></div>
+  <div class="kpi"><div class="muted">Confronto margine</div><div class="big">€ {{ '%.2f'|format(totals.net_previous_period or 0) }}</div><div class="muted" style="margin-top:8px;">{{ summary_labels.previous }}</div></div>
+</div>
+
+<div class="split-grid" style="margin-bottom:14px;">
+  <div class="card">
+    <h3 style="margin-top:0;">{{ summary_labels.current }}</h3>
+    <div class="mini-list">
+      <div class="mini-item"><div class="muted">Incassi</div><div class="big" style="font-size:24px;">€ {{ '%.2f'|format(totals.income_period or 0) }}</div></div>
+      <div class="mini-item"><div class="muted">Spese</div><div class="big" style="font-size:24px;">€ {{ '%.2f'|format(totals.expense_period or 0) }}</div></div>
+      <div class="mini-item"><div class="muted">Margine</div><div class="big" style="font-size:24px;">€ {{ '%.2f'|format(totals.net_period or 0) }}</div><div class="muted" style="margin-top:6px;">Metodo più forte: {{ insights.top_income_method.label|capitalize }} · € {{ '%.2f'|format(insights.top_income_method.total or 0) }}</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0;">{{ summary_labels.previous }}</h3>
+    <div class="mini-list">
+      <div class="mini-item"><div class="muted">Incassi</div><div class="big" style="font-size:24px;">€ {{ '%.2f'|format(totals.income_previous_period or 0) }}</div><div class="delta {% if totals.income_growth_pct > 0 %}pos{% elif totals.income_growth_pct < 0 %}neg{% else %}neu{% endif %}" style="margin-top:6px;">{{ '%+.1f'|format(totals.income_growth_pct or 0) }}%</div></div>
+      <div class="mini-item"><div class="muted">Spese</div><div class="big" style="font-size:24px;">€ {{ '%.2f'|format(totals.expense_previous_period or 0) }}</div><div class="delta {% if totals.expense_growth_pct < 0 %}pos{% elif totals.expense_growth_pct > 0 %}neg{% else %}neu{% endif %}" style="margin-top:6px;">{{ '%+.1f'|format(totals.expense_growth_pct or 0) }}%</div></div>
+      <div class="mini-item"><div class="muted">Margine</div><div class="big" style="font-size:24px;">€ {{ '%.2f'|format(totals.net_previous_period or 0) }}</div><div class="delta {% if totals.net_growth_pct > 0 %}pos{% elif totals.net_growth_pct < 0 %}neg{% else %}neu{% endif %}" style="margin-top:6px;">{{ '%+.1f'|format(totals.net_growth_pct or 0) }}%</div></div>
+    </div>
+  </div>
 </div>
 
 <div class="chart-grid" style="margin-bottom:14px;">
@@ -189,13 +215,6 @@
     </div>
   </div>
 </div>
-
-<div class="kpi-grid" style="margin-bottom:14px;">
-  <div class="kpi"><div class="muted">Incassi di oggi</div><div class="big">€ {{ '%.2f'|format(totals.income_today or 0) }}</div></div>
-  <div class="kpi"><div class="muted">Uscite di oggi</div><div class="big">€ {{ '%.2f'|format(totals.expense_today or 0) }}</div></div>
-  <div class="kpi"><div class="muted">Metodo più forte</div><div style="font-size:18px;font-weight:800;">{{ insights.top_income_method.label|capitalize }}</div><div class="muted">€ {{ '%.2f'|format(insights.top_income_method.total or 0) }}</div></div>
-  <div class="kpi"><div class="muted">Costo più pesante</div><div style="font-size:18px;font-weight:800;">{{ insights.top_expense_category.label|capitalize }}</div><div class="muted">€ {{ '%.2f'|format(insights.top_expense_category.total or 0) }}</div></div>
-</div>
 {% endif %}
 
 <div class="doc-grid" style="margin-bottom:14px;">
@@ -206,60 +225,22 @@
   <div class="kpi"><div class="muted">Coda ordini</div><div class="big">{{ stats.coda_ordini }}</div></div>
 </div>
 
-<div class="split-grid">
-  {% if can_view_finance %}
-  <div class="card">
-    <h3 style="margin-top:0;">Ultimi incassi salvati</h3>
-    <div class="mini-list">
-      {% for row in recent_entries %}
-      <div class="mini-item">
-        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
-          <strong>{{ row.flow_date }}</strong>
-          <span>€ {{ '%.2f'|format(row.amount or 0) }}</span>
-        </div>
-        <div class="muted" style="margin-top:6px;">{{ row.payment_method }} · {{ row.store }}</div>
-        {% if row.notes %}<div class="muted" style="margin-top:6px;">{{ row.notes }}</div>{% endif %}
+{% if not can_view_finance %}
+<div class="card" style="grid-column:1 / -1;">
+  <h3 style="margin-top:0;">Ultimi documenti</h3>
+  <div class="mini-list">
+    {% for row in recent_docs %}
+    <div class="mini-item">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+        <strong>{{ row.tipo }}</strong>
+        <span>{{ row.data_doc or '-' }}</span>
       </div>
-      {% else %}
-      <div class="muted">Ancora nessun incasso registrato.</div>
-      {% endfor %}
+      <div class="muted" style="margin-top:6px;">{{ row.descrizione or '—' }}{% if row.uploaded_by %} · {{ row.uploaded_by }}{% endif %}</div>
     </div>
+    {% else %}
+    <div class="muted">Ancora nessun documento caricato.</div>
+    {% endfor %}
   </div>
-
-  <div class="card">
-    <h3 style="margin-top:0;">Ultime uscite salvate</h3>
-    <div class="mini-list">
-      {% for row in recent_expenses %}
-      <div class="mini-item">
-        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
-          <strong>{{ row.flow_date }}</strong>
-          <span>€ {{ '%.2f'|format(row.amount or 0) }}</span>
-        </div>
-        <div class="muted" style="margin-top:6px;">{{ row.category }}{% if row.supplier %} · {{ row.supplier }}{% endif %}</div>
-        {% if row.notes %}<div class="muted" style="margin-top:6px;">{{ row.notes }}</div>{% endif %}
-      </div>
-      {% else %}
-      <div class="muted">Ancora nessuna uscita registrata.</div>
-      {% endfor %}
-    </div>
-  </div>
-  {% else %}
-  <div class="card" style="grid-column:1 / -1;">
-    <h3 style="margin-top:0;">Ultimi documenti</h3>
-    <div class="mini-list">
-      {% for row in recent_docs %}
-      <div class="mini-item">
-        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
-          <strong>{{ row.tipo }}</strong>
-          <span>{{ row.data_doc or '-' }}</span>
-        </div>
-        <div class="muted" style="margin-top:6px;">{{ row.descrizione or '—' }}{% if row.uploaded_by %} · {{ row.uploaded_by }}{% endif %}</div>
-      </div>
-      {% else %}
-      <div class="muted">Ancora nessun documento caricato.</div>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
 </div>
+{% endif %}
 {% endblock %}

@@ -45,7 +45,11 @@
     <form method="get" action="/gestionale/report-vendite" style="margin-top:14px;" class="form-grid">
       <div>
         <div class="muted" style="margin-bottom:6px;">Mese report</div>
-        <input type="month" name="month_key" value="{{ selected_month }}">
+        <select name="month_key">
+  {% for opt in month_options %}
+  <option value="{{ opt.key }}" {% if opt.key == selected_month %}selected{% endif %}>{{ opt.label }}</option>
+  {% endfor %}
+</select>
       </div>
       <div>
         <div class="muted" style="margin-bottom:6px;">Negozio</div>

@@ -25,14 +25,23 @@
   .ok-box,.err-box{padding:12px 14px;border-radius:14px;margin-top:14px}
   .ok-box{background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.34);color:var(--accent-emerald-2)}
   .err-box{background:rgba(239,68,68,.12);border:1px solid rgba(248,113,113,.34);color:var(--accent-red-2)}
-  @media(max-width:900px){.entry-grid,.custom-row,.toolbar,.period-form,.kpi-grid{grid-template-columns:1fr}.day-box{min-width:50px;flex-basis:50px}.arrow-btn{width:100%;height:48px}}
+  .split-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .pie-wrap{display:grid;grid-template-columns:180px 1fr;gap:16px;align-items:center}
+  .pie{width:180px;height:180px;border-radius:50%;background:rgba(148,163,184,.16);display:grid;place-items:center;margin:auto;position:relative}
+  .pie::after{content:"";width:112px;height:112px;border-radius:50%;background:var(--panel);box-shadow:inset 0 0 0 1px var(--soft)}
+  .pie-center{position:absolute;text-align:center;z-index:1}
+  .pie-center .value{font-size:24px;font-weight:800}
+  .legend{display:grid;gap:10px}
+  .legend-row{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center}
+  .swatch{width:11px;height:11px;border-radius:999px}
+  @media(max-width:900px){.entry-grid,.custom-row,.toolbar,.period-form,.kpi-grid,.split-grid,.pie-wrap{grid-template-columns:1fr}.day-box{min-width:50px;flex-basis:50px}.arrow-btn{width:100%;height:48px}}
 </style>
 
 <div class="card">
   <div class="row" style="justify-content:space-between;align-items:center;">
     <div>
       <h2 style="margin:0 0 6px 0;">💶 Incassi</h2>
-      <div class="muted">Prima vedi i dati del periodo, poi sotto trovi l’inserimento e l’importazione.</div>
+      <div class="muted">Prima vedi da dove arrivano i soldi nel periodo scelto, poi sotto trovi storico, inserimento e importazione.</div>
     </div>
     <div class="row">
       <a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Home gestionale</a>
@@ -78,8 +87,8 @@
 
 <div class="kpi-grid" style="margin-top:14px;">
   <div class="kpi"><div class="muted">Incassi {{ page_period_meta.label }}</div><div class="big">€ {{ '%.2f'|format(page_totals.income_period or 0) }}</div></div>
-  <div class="kpi"><div class="muted">Uscite {{ page_period_meta.label }}</div><div class="big">€ {{ '%.2f'|format(page_totals.expense_period or 0) }}</div></div>
   <div class="kpi"><div class="muted">Saldo {{ page_period_meta.label }}</div><div class="big">€ {{ '%.2f'|format(page_totals.net_period or 0) }}</div></div>
+  <div class="kpi"><div class="muted">Metodo più forte</div><div class="big" style="font-size:22px;">{{ page_insights.top_income_method.label|capitalize }}</div><div class="muted" style="margin-top:8px;">€ {{ '%.2f'|format(page_insights.top_income_method.total or 0) }}</div></div>
   <div class="kpi"><div class="muted">Totale filtrato tabella</div><div class="big">€ {{ '%.2f'|format(total_amount) }}</div></div>
 </div>
 
@@ -97,6 +106,50 @@
         </div>
         <div style="font-size:12px;color:var(--muted);">{{ d.label }}</div>
       </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="split-grid" style="margin-top:14px;">
+  <div class="card">
+    <h3 style="margin-top:0;">Da dove arrivano i soldi</h3>
+    <div class="pie-wrap">
+      <div class="pie" style="background:{{ income_pie_style }};">
+        <div class="pie-center">
+          <div class="value">€ {{ '%.0f'|format(income_pie_total or 0) }}</div>
+          <div class="muted">{{ page_period_meta.range_label }}</div>
+        </div>
+      </div>
+      <div class="legend">
+        {% for row in income_breakdown %}
+        <div class="legend-row">
+          <span class="swatch" style="background:{{ row.color }};"></span>
+          <div>
+            <div style="font-weight:700;text-transform:capitalize;">{{ row.label }}</div>
+            <div class="muted">{{ '%.1f'|format(row.share_pct or 0) }}%</div>
+          </div>
+          <div style="font-weight:700;">€ {{ '%.2f'|format(row.total or 0) }}</div>
+        </div>
+        {% else %}
+        <div class="muted">Nessun incasso nel periodo selezionato.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0;">Percentuali precise per metodo</h3>
+    <div class="legend">
+      {% for row in income_breakdown %}
+      <div class="method-card">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+          <strong style="text-transform:capitalize;">{{ row.label }}</strong>
+          <span>{{ '%.1f'|format(row.share_pct or 0) }}%</span>
+        </div>
+        <div class="muted" style="margin-top:8px;">€ {{ '%.2f'|format(row.total or 0) }} · {{ row.rank }}° metodo del periodo</div>
+      </div>
+      {% else %}
+      <div class="muted">Appena inserisci i dati qui vedrai subito i pesi reali dei vari canali.</div>
       {% endfor %}
     </div>
   </div>
@@ -175,59 +228,46 @@
           {% endif %}
         {% endfor %}
       </select>
-      <input name="notes" placeholder="Note giornaliere / anomalie / dettagli" style="min-width:260px;flex:1;">
+      <input name="notes" placeholder="Note giornaliere" style="min-width:260px;flex:1;">
     </div>
 
     <div class="entry-grid">
       {% for method in available_payment_methods %}
       <div class="method-card">
-        <div style="font-weight:800;text-transform:capitalize;margin-bottom:8px;">{{ method }}</div>
+        <div style="font-weight:700;text-transform:capitalize;">{{ method }}</div>
+        <div class="muted" style="margin:6px 0 10px 0;">Importo di questo metodo</div>
         <input type="hidden" name="method_name" value="{{ method }}">
-        <input type="number" step="0.01" min="0" name="amount_value" placeholder="Importo €" value="0">
+        <input type="number" step="0.01" min="0" name="amount_value" value="0">
       </div>
       {% endfor %}
     </div>
 
-    <div style="margin-top:14px;">
-      <div style="font-weight:800;margin-bottom:8px;">Metodi extra personalizzati</div>
-      <div id="custom-methods">
-        <div class="custom-row">
-          <input name="custom_method_name" placeholder="Nuovo metodo, es. POS 2">
-          <input type="number" step="0.01" min="0" name="custom_method_amount" placeholder="Importo €" value="0">
-        </div>
-      </div>
-      <button class="btn2" type="button" onclick="addCustomMethod()" style="margin-top:10px;">+ Aggiungi metodo di pagamento</button>
+    <div class="custom-row">
+      <input name="custom_method_name" placeholder="Nuovo metodo di pagamento (facoltativo)">
+      <input type="number" step="0.01" min="0" name="custom_method_amount" placeholder="Importo €">
     </div>
 
-    <div style="margin-top:14px;"><button class="btn" type="submit">Salva incasso</button></div>
+    <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn" type="submit">Salva incasso</button>
+    </div>
   </form>
 </div>
 
 <div class="card" style="margin-top:14px;">
-  <h3 style="margin-top:0;">Importa incassi da file</h3>
-  <div class="muted" style="margin-bottom:10px;">Carica un TXT o CSV nel tuo formato. Riconosce data, POS, Cash, Deliveroo, Glovo e Just Eat. Può importare anche le uscite trovate nel file.</div>
-  <form method="post" action="/gestionale/incassi/import-txt" enctype="multipart/form-data">
-    <div class="row" style="align-items:flex-start;">
-      <div style="flex:1;min-width:260px;">
-        <div style="font-weight:800;margin-bottom:8px;">File</div>
-        <input type="file" name="import_file" accept=".txt,.csv,text/plain">
-      </div>
-      <div style="flex:1;min-width:260px;">
-        <div style="font-weight:800;margin-bottom:8px;">Negozio di fallback</div>
-        <select name="fallback_store">
-          {% for key, label in stores.items() %}
-            {% if brand == 'ALL' or brand == key %}
-            <option value="{{ key }}" {% if active_store==key or (brand==key and brand!='ALL') %}selected{% endif %}>{{ label }}</option>
-            {% endif %}
-          {% endfor %}
-        </select>
-      </div>
+  <h3 style="margin-top:0;">Importa incassi da file testo</h3>
+  <div class="muted" style="margin-bottom:10px;">Puoi importare un file .txt con le giornate e, se presenti, anche le uscite nello stesso file.</div>
+  <form method="post" action="/gestionale/incassi/importa-file" enctype="multipart/form-data">
+    <div class="row">
+      <select name="store">
+        {% for key, label in stores.items() %}
+          {% if brand == 'ALL' or brand == key %}
+          <option value="{{ key }}" {% if active_store==key or (brand==key and brand!='ALL') %}selected{% endif %}>{{ label }}</option>
+          {% endif %}
+        {% endfor %}
+      </select>
+      <input type="file" name="upload_file" accept=".txt,.csv" required>
     </div>
-    <div style="margin-top:12px;">
-      <div style="font-weight:800;margin-bottom:8px;">Oppure incolla il testo</div>
-      <textarea name="import_text" rows="7" placeholder="Esempio:&#10;01/12/25&#10;Pos 249€&#10;Cash 55€&#10;Glovo 57€" style="width:100%;min-height:160px;"></textarea>
-    </div>
-    <div class="row" style="margin-top:12px;align-items:center;">
+    <div class="row" style="margin-top:10px;">
       <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="replace_existing_dates" checked> Sovrascrivi gli stessi giorni già presenti</label>
       <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="import_expenses"> Importa anche le uscite trovate nel file</label>
     </div>
@@ -238,32 +278,11 @@
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Metodi di pagamento configurati</h3>
-  <div class="muted" style="margin-bottom:10px;">Puoi eliminare solo i metodi extra creati per errore. I metodi base restano fissi.</div>
   <div class="row">
     {% for method in available_payment_methods %}
-      <div class="method-card" style="min-width:180px;">
-        <div style="font-weight:800;text-transform:capitalize;">{{ method }}</div>
-        {% if method not in ['contanti', 'pos', 'deliveroo', 'glovo', 'just eat'] %}
-        <form method="post" action="/gestionale/payment-methods/delete" onsubmit="return confirm('Eliminare questo metodo dalla schermata incassi?');" style="margin-top:10px;">
-          <input type="hidden" name="method_name" value="{{ method }}">
-          <button class="btn2" type="submit" style="border-color:rgba(248,113,113,.34);background:rgba(244,63,94,.10);">Elimina opzione</button>
-        </form>
-        {% else %}
-        <div class="tiny" style="margin-top:10px;">Metodo base</div>
-        {% endif %}
-      </div>
+      <span class="pill" style="text-transform:capitalize;">{{ method }}</span>
     {% endfor %}
   </div>
 </div>
 {% endif %}
-
-<script>
-function addCustomMethod(){
-  const wrap = document.getElementById('custom-methods');
-  const row = document.createElement('div');
-  row.className = 'custom-row';
-  row.innerHTML = '<input name="custom_method_name" placeholder="Nuovo metodo, es. POS 2"><input type="number" step="0.01" min="0" name="custom_method_amount" placeholder="Importo €" value="0">';
-  wrap.appendChild(row);
-}
-</script>
 {% endblock %}

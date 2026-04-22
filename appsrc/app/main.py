@@ -837,6 +837,199 @@ def _parse_import_txt_blocks(raw_text: str, fallback_store: str = 'spinza'):
     close_current()
     return blocks
 
+
+
+PALETTE_DARK = [
+    '#38bdf8', '#2563eb', '#818cf8', '#f59e0b', '#ef4444', '#14b8a6', '#a855f7', '#22c55e', '#f97316', '#eab308'
+]
+
+
+def _build_conic_gradient(rows, total: float, value_key: str = 'total', palette: list[str] | None = None, empty_color: str = 'rgba(148,163,184,.18)'):
+    palette = palette or PALETTE_DARK
+    total = float(total or 0)
+    if total <= 0 or not rows:
+        return empty_color
+    cursor = 0.0
+    segments = []
+    for idx, row in enumerate(rows):
+        value = float(row.get(value_key) or 0)
+        if value <= 0:
+            continue
+        share = (value / total) * 100.0
+        color = row.get('color') or palette[idx % len(palette)]
+        row['color'] = color
+        end = min(100.0, cursor + share)
+        segments.append(f"{color} {cursor:.2f}% {end:.2f}%")
+        cursor = end
+    if cursor < 100.0:
+        segments.append(f"{empty_color} {cursor:.2f}% 100%")
+    return 'conic-gradient(' + ', '.join(segments) + ')'
+
+
+def _scope_period_label(period_type: str, previous: bool = False) -> str:
+    kind = (period_type or 'month').lower()
+    labels = {
+        'month': ('Questo mese', 'Mese scorso'),
+        'week': ('Questa settimana', 'Settimana precedente'),
+        'day': ('Questo giorno', 'Giorno precedente'),
+    }
+    pair = labels.get(kind, labels['month'])
+    return pair[1] if previous else pair[0]
+
+
+def _normalize_signature(value: str) -> str:
+    raw = re.sub(r'[^a-z0-9]+', ' ', str(value or '').lower())
+    return re.sub(r'\s+', ' ', raw).strip()
+
+
+def _title_case_words(value: str) -> str:
+    value = str(value or '').strip()
+    if not value:
+        return ''
+    return ' '.join(part[:1].upper() + part[1:] for part in value.split())
+
+
+def _expense_family(row) -> str:
+    text = ' '.join([
+        str(row.get('category') or ''),
+        str(row.get('supplier') or ''),
+        str(row.get('notes') or ''),
+    ]).lower()
+    if any(k in text for k in ['stipend', 'salari', 'personale', 'dipendent', 'busta paga']):
+        return 'Personale'
+    if any(k in text for k in ['affitto', 'rent', 'locazione', 'canone', 'abbon', 'qonto', 'software', 'licenza']):
+        return 'Canoni e abbonamenti'
+    if any(k in text for k in ['luce', 'gas', 'acqua', 'enel', 'utenz', 'telefono', 'internet', 'tim', 'wind', 'iliad', 'energia']):
+        return 'Utenze'
+    if any(k in text for k in ['nexi', 'commission', 'banca', 'bonifico', 'pos', 'interessi']):
+        return 'Servizi finanziari'
+    if any(k in text for k in ['social', 'ads', 'marketing', 'pubblic', 'meta', 'instagram', 'google']):
+        return 'Marketing'
+    if any(k in text for k in ['commercialist', 'consulent', 'inps', 'iva', 'tari', 'imu', 'tassa', 'f24']):
+        return 'Tasse e consulenze'
+    if any(k in text for k in ['metro', 'fornit', 'forno', 'carrefour', 'food', 'bevande', 'bibite', 'ingredient', 'materie']):
+        return 'Fornitori e materie prime'
+    if any(k in text for k in ['ripar', 'manut', 'attrezz', 'guasto', 'tecnic']):
+        return 'Manutenzioni'
+    if any(k in text for k in ['delivery', 'glovo', 'deliveroo', 'just eat', 'logistic', 'trasporto', 'benzina', 'carburante']):
+        return 'Logistica'
+    category = str(row.get('category') or '').strip()
+    return _title_case_words(category) if category else 'Varie'
+
+
+def _expense_is_fixed(label: str, family: str) -> bool:
+    text = f"{label} {family}".lower()
+    return any(k in text for k in ['affitto', 'canone', 'abbon', 'stipend', 'personale', 'commercialist', 'consulent', 'nexi', 'qonto', 'internet', 'telefono', 'luce', 'gas', 'acqua'])
+
+
+def _expense_signature(row) -> tuple[str, str, str]:
+    category = str(row.get('category') or '').strip()
+    supplier = str(row.get('supplier') or '').strip()
+    notes = str(row.get('notes') or '').strip()
+    family = _expense_family(row)
+    preferred = supplier or category or notes or 'Spesa varia'
+    label = preferred
+    if supplier and category and _normalize_signature(supplier) != _normalize_signature(category):
+        label = f'{supplier} · {category}'
+    elif category and not supplier:
+        label = category
+    elif supplier:
+        label = supplier
+    if not label:
+        label = 'Spesa varia'
+    signature = _normalize_signature(f'{supplier} {category}') or _normalize_signature(label) or 'spesa varia'
+    return signature, label, family
+
+
+def _build_expense_overview(cur, scope_store: str, period_type: str = 'month', anchor_s: str = ''):
+    anchor_day = _parse_date_safe(anchor_s, date.today())
+    period_type, start_d, end_d = _period_bounds(period_type, anchor_day)
+    start_s = start_d.isoformat()
+    end_s = end_d.isoformat()
+    where_sql, params = _cash_scope_where(scope_store)
+    ph = _ph()
+    rows = _dict_rows(cur, f"SELECT flow_date, store, category, supplier, payment_method, amount, notes FROM cash_expenses WHERE {where_sql} ORDER BY flow_date ASC, id ASC", params)
+
+    family_map = {}
+    period_map = {}
+    all_map = {}
+    total_period = 0.0
+
+    for row in rows:
+        amount = float(row.get('amount') or 0)
+        if amount <= 0:
+            continue
+        flow_date = str(row.get('flow_date') or '')
+        month_key = flow_date[:7] if len(flow_date) >= 7 else ''
+        sig, label, family = _expense_signature(row)
+
+        slot = all_map.setdefault(sig, {
+            'label': label,
+            'family': family,
+            'months': set(),
+            'total_all': 0.0,
+            'count_all': 0,
+        })
+        slot['total_all'] += amount
+        slot['count_all'] += 1
+        if month_key:
+            slot['months'].add(month_key)
+
+        if start_s <= flow_date <= end_s:
+            total_period += amount
+            fam = family_map.setdefault(family, {'name': family, 'total': 0.0, 'count': 0})
+            fam['total'] += amount
+            fam['count'] += 1
+
+            grp = period_map.setdefault(sig, {
+                'label': label,
+                'family': family,
+                'total': 0.0,
+                'count': 0,
+            })
+            grp['total'] += amount
+            grp['count'] += 1
+
+    family_rows = sorted(family_map.values(), key=lambda x: (-float(x.get('total') or 0), x.get('name') or ''))
+    for idx, row in enumerate(family_rows):
+        row['share_pct'] = round((float(row.get('total') or 0) / total_period) * 100.0, 1) if total_period > 0 else 0.0
+        row['color'] = PALETTE_DARK[idx % len(PALETTE_DARK)]
+    family_pie_style = _build_conic_gradient(family_rows, total_period)
+
+    routine_rows = []
+    recurring_rows = []
+    for sig, item in period_map.items():
+        meta = all_map.get(sig, {})
+        months_count = len(meta.get('months') or set())
+        record = {
+            'label': item.get('label') or 'Spesa varia',
+            'family': item.get('family') or 'Varie',
+            'total': float(item.get('total') or 0),
+            'count': int(item.get('count') or 0),
+            'months_count': months_count,
+            'avg_monthly': round((float(meta.get('total_all') or 0) / months_count), 2) if months_count else 0.0,
+            'is_fixed': _expense_is_fixed(item.get('label') or '', item.get('family') or ''),
+        }
+        record['share_pct'] = round((record['total'] / total_period) * 100.0, 1) if total_period > 0 else 0.0
+        routine_rows.append(record)
+        if months_count >= 2 or record['is_fixed']:
+            recurring_rows.append(record.copy())
+
+    routine_rows.sort(key=lambda x: (-x['total'], x['label']))
+    recurring_rows.sort(key=lambda x: (-x['total'], x['label']))
+
+    return {
+        'period_total': total_period,
+        'family_rows': family_rows,
+        'family_pie_style': family_pie_style,
+        'recurring_rows': recurring_rows[:10],
+        'routine_rows': routine_rows[:14],
+        'recurring_total': round(sum(x['total'] for x in recurring_rows), 2),
+        'routine_grouped_total': round(sum(x['total'] for x in routine_rows), 2),
+        'recurring_count': len(recurring_rows),
+        'routine_count': len(routine_rows),
+    }
+
 def _build_cash_dashboard(cur, scope_store: str, period_type: str = 'week', anchor_s: str = ''):
     anchor_day = date.today()
     if anchor_s:
@@ -1623,6 +1816,8 @@ def workspace_home(request: Request):
 
 
 @app.get("/gestionale", response_class=HTMLResponse)
+
+
 def gestionale_home(request: Request, period_type: str = 'month', anchor_date: str = '', month_key: str = '', nav: str = ''):
     user = require_login(request)
     if not user:
@@ -1698,6 +1893,11 @@ def gestionale_home(request: Request, period_type: str = 'month', anchor_date: s
     nav_prev_url = _query_url('/gestionale', period_type=period_type, month_key=_month_key_from_value(prev_anchor), anchor_date=prev_anchor)
     nav_next_url = _query_url('/gestionale', period_type=period_type, month_key=_month_key_from_value(next_anchor), anchor_date=next_anchor)
 
+    summary_labels = {
+        'current': _scope_period_label(period_type, previous=False),
+        'previous': _scope_period_label(period_type, previous=True),
+    }
+
     return render(
         "gestionale_home.html",
         user=user,
@@ -1718,7 +1918,9 @@ def gestionale_home(request: Request, period_type: str = 'month', anchor_date: s
         sales_overview=sales_overview,
         nav_prev_url=nav_prev_url,
         nav_next_url=nav_next_url,
+        summary_labels=summary_labels,
     )
+
 
 
 @app.get("/gestionale/dashboard", response_class=HTMLResponse)
@@ -1727,6 +1929,8 @@ def gestionale_dashboard(request: Request, period_type: str = 'month', anchor_da
 
 
 @app.get("/gestionale/report-vendite", response_class=HTMLResponse)
+
+
 def sales_report_page(request: Request, month_key: str = '', store: str = '', import_ok: int = 0, import_error: str = ''):
     user = require_login(request)
     if not user:
@@ -1779,6 +1983,7 @@ def sales_report_page(request: Request, month_key: str = '', store: str = '', im
         walk(tree)
         parent_options = _sales_report_flat_options(tree)
         model_groups = _sales_report_model_groups(cur, selected_store)
+        month_options = _month_options_for_scope(cur, selected_store, selected_month)
         summary = {
             'amount': top_amount,
             'quantity': top_qty,
@@ -1807,6 +2012,7 @@ def sales_report_page(request: Request, month_key: str = '', store: str = '', im
         selected_month_label=_month_label(selected_month),
         period=period,
         periods=periods,
+        month_options=month_options,
         parent_options=parent_options,
         model_groups=model_groups,
         tree=tree,
@@ -1816,6 +2022,7 @@ def sales_report_page(request: Request, month_key: str = '', store: str = '', im
         import_ok=import_ok,
         import_error=import_error,
     )
+
 
 
 @app.post("/gestionale/report-vendite/import")
@@ -2165,6 +2372,8 @@ def sales_report_delete_group(request: Request, group_id: int):
 
 
 @app.get("/gestionale/incassi", response_class=HTMLResponse)
+
+
 def cash_entries_page(request: Request, flow_date: str = '', payment_method: str = 'ALL', period_type: str = 'month', anchor_date: str = '', month_key: str = '', nav: str = '', imported_entries: int = 0, imported_expenses: int = 0, import_error: str = ''):
     import_error = unquote_plus(str(import_error or '')).strip()
     user = require_login(request)
@@ -2196,9 +2405,12 @@ def cash_entries_page(request: Request, flow_date: str = '', payment_method: str
         available_payment_methods = _load_cash_payment_methods(cur)
         history_methods, grouped_rows = _group_cash_rows_by_date(rows, available_payment_methods)
         chart_rows = _build_store_period_chart(cur, chart_store, period_type, anchor_s)
-        _, page_totals, _, _, period_meta, _ = _build_cash_dashboard(cur, chart_store, period_type, anchor_s)
+        _, page_totals, _, _, period_meta, page_insights = _build_cash_dashboard(cur, chart_store, period_type, anchor_s)
         month_options = _month_options_for_scope(cur, brand, selected_month)
         total_amount = sum(float(r.get('amount') or 0) for r in rows)
+        income_breakdown = [dict(x) for x in (page_insights.get('income_breakdown') or [])]
+        income_pie_total = float(page_totals.get('income_period') or 0)
+        income_pie_style = _build_conic_gradient(income_breakdown, income_pie_total)
     prev_anchor = _shift_anchor_date(period_type, anchor_day, -1).isoformat()
     next_anchor = _shift_anchor_date(period_type, anchor_day, 1).isoformat()
     nav_prev_url = _query_url('/gestionale/incassi', flow_date=flow_date, payment_method=payment_method, period_type=period_type, month_key=_month_key_from_value(prev_anchor), anchor_date=prev_anchor)
@@ -2211,8 +2423,10 @@ def cash_entries_page(request: Request, flow_date: str = '', payment_method: str
         total_amount=total_amount, chart_rows=chart_rows, chart_store=chart_store, imported_entries=imported_entries, imported_expenses=imported_expenses, import_error=import_error,
         available_payment_methods=available_payment_methods, history_methods=history_methods, grouped_rows=grouped_rows, selected_period_type=period_type, selected_anchor_date=anchor_s,
         page_period_meta=period_meta, page_totals=page_totals, month_options=month_options, selected_month=selected_month,
-        nav_prev_url=nav_prev_url, nav_next_url=nav_next_url,
+        nav_prev_url=nav_prev_url, nav_next_url=nav_next_url, page_insights=page_insights,
+        income_breakdown=income_breakdown, income_pie_total=income_pie_total, income_pie_style=income_pie_style,
     )
+
 
 
 @app.post("/gestionale/incassi")
@@ -2387,6 +2601,8 @@ async def cash_entries_import_txt(request: Request):
 
 
 @app.get("/gestionale/uscite", response_class=HTMLResponse)
+
+
 def cash_expenses_page(request: Request, flow_date: str = "", category: str = "ALL", period_type: str = 'month', anchor_date: str = '', month_key: str = '', nav: str = ''):
     user = require_login(request)
     if not user:
@@ -2415,9 +2631,10 @@ def cash_expenses_page(request: Request, flow_date: str = "", category: str = "A
         rows = _dict_rows(cur, sql, tuple(qparams))
         categories = [r['category'] for r in _dict_rows(cur, f"SELECT DISTINCT category FROM cash_expenses WHERE {where_sql} ORDER BY category ASC", params) if r.get('category')]
         chart_rows = _build_store_period_chart(cur, chart_store, period_type, anchor_s)
-        _, page_totals, _, _, period_meta, _ = _build_cash_dashboard(cur, chart_store, period_type, anchor_s)
+        _, page_totals, _, _, period_meta, page_insights = _build_cash_dashboard(cur, chart_store, period_type, anchor_s)
         month_options = _month_options_for_scope(cur, brand, selected_month)
         total_amount = sum(float(r.get('amount') or 0) for r in rows)
+        expense_overview = _build_expense_overview(cur, chart_store, period_type, anchor_s)
     prev_anchor = _shift_anchor_date(period_type, anchor_day, -1).isoformat()
     next_anchor = _shift_anchor_date(period_type, anchor_day, 1).isoformat()
     nav_prev_url = _query_url('/gestionale/uscite', flow_date=flow_date, category=category, period_type=period_type, month_key=_month_key_from_value(prev_anchor), anchor_date=prev_anchor)
@@ -2430,7 +2647,9 @@ def cash_expenses_page(request: Request, flow_date: str = "", category: str = "A
         total_amount=total_amount, chart_rows=chart_rows, chart_store=chart_store,
         selected_period_type=period_type, selected_anchor_date=anchor_s, page_period_meta=period_meta, page_totals=page_totals,
         month_options=month_options, selected_month=selected_month, nav_prev_url=nav_prev_url, nav_next_url=nav_next_url,
+        page_insights=page_insights, expense_overview=expense_overview,
     )
+
 
 
 @app.post("/gestionale/uscite")

@@ -19,14 +19,24 @@
   .expense{background:linear-gradient(180deg, rgba(248,113,113,.92) 0%, rgba(220,38,38,.72) 100%)}
   .net.pos{background:linear-gradient(180deg, rgba(59,130,246,.95) 0%, rgba(37,99,235,.74) 100%)}
   .net.neg{background:linear-gradient(180deg, rgba(248,113,113,.92) 0%, rgba(185,28,28,.72) 100%)}
-  @media(max-width:900px){.toolbar,.period-form,.kpi-grid{grid-template-columns:1fr}.day-box{min-width:50px;flex-basis:50px}.arrow-btn{width:100%;height:48px}}
+  .split-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .pie-wrap{display:grid;grid-template-columns:180px 1fr;gap:16px;align-items:center}
+  .pie{width:180px;height:180px;border-radius:50%;background:rgba(148,163,184,.16);display:grid;place-items:center;margin:auto;position:relative}
+  .pie::after{content:"";width:112px;height:112px;border-radius:50%;background:var(--panel);box-shadow:inset 0 0 0 1px var(--soft)}
+  .pie-center{position:absolute;text-align:center;z-index:1}
+  .pie-center .value{font-size:24px;font-weight:800}
+  .legend{display:grid;gap:10px}
+  .legend-row{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center}
+  .swatch{width:11px;height:11px;border-radius:999px}
+  .list-card{border:1px solid var(--line-soft);border-radius:14px;padding:12px;background:var(--panel-2)}
+  @media(max-width:900px){.toolbar,.period-form,.kpi-grid,.split-grid,.pie-wrap{grid-template-columns:1fr}.day-box{min-width:50px;flex-basis:50px}.arrow-btn{width:100%;height:48px}}
 </style>
 
 <div class="card">
   <div class="row" style="justify-content:space-between;align-items:center;">
     <div>
       <h2 style="margin:0 0 6px 0;">💸 Uscite</h2>
-      <div class="muted">Prima guardi il periodo e lo storico, poi sotto inserisci le nuove spese.</div>
+      <div class="muted">Prima hai il quadro delle spese, con ricorrenti, gruppi di routine e pesi reali. Poi sotto trovi lo storico e l'inserimento.</div>
     </div>
     <div class="row">
       <a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Home gestionale</a>
@@ -68,15 +78,15 @@
 </div>
 
 <div class="kpi-grid" style="margin-top:14px;">
-  <div class="kpi"><div class="muted">Incassi {{ page_period_meta.label }}</div><div class="big">€ {{ '%.2f'|format(page_totals.income_period or 0) }}</div></div>
   <div class="kpi"><div class="muted">Uscite {{ page_period_meta.label }}</div><div class="big">€ {{ '%.2f'|format(page_totals.expense_period or 0) }}</div></div>
   <div class="kpi"><div class="muted">Saldo {{ page_period_meta.label }}</div><div class="big">€ {{ '%.2f'|format(page_totals.net_period or 0) }}</div></div>
-  <div class="kpi"><div class="muted">Totale filtrato tabella</div><div class="big">€ {{ '%.2f'|format(total_amount) }}</div></div>
+  <div class="kpi"><div class="muted">Categoria più pesante</div><div class="big" style="font-size:20px;">{{ page_insights.top_expense_category.label|capitalize }}</div><div class="muted" style="margin-top:8px;">€ {{ '%.2f'|format(page_insights.top_expense_category.total or 0) }}</div></div>
+  <div class="kpi"><div class="muted">Spese ricorrenti rilevate</div><div class="big">{{ expense_overview.recurring_count }}</div><div class="muted" style="margin-top:8px;">€ {{ '%.2f'|format(expense_overview.recurring_total or 0) }}</div></div>
 </div>
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Grafico {{ selected_period_type }} {{ stores[chart_store] }}</h3>
-  <div class="muted">Lo stesso periodo mostra incassi, uscite e saldo così capisci subito il peso delle spese.</div>
+  <div class="muted">Lo stesso periodo mostra incassi, uscite e saldo così capisci subito il peso reale delle spese.</div>
   <div class="chart-scroll">
     <div class="chart-wrap">
       {% for d in chart_rows %}
@@ -90,6 +100,74 @@
       </div>
       {% endfor %}
     </div>
+  </div>
+</div>
+
+<div class="split-grid" style="margin-top:14px;">
+  <div class="card">
+    <h3 style="margin-top:0;">Raggruppamento uscite del periodo</h3>
+    <div class="pie-wrap">
+      <div class="pie" style="background:{{ expense_overview.family_pie_style }};">
+        <div class="pie-center">
+          <div class="value">€ {{ '%.0f'|format(expense_overview.period_total or 0) }}</div>
+          <div class="muted">{{ page_period_meta.range_label }}</div>
+        </div>
+      </div>
+      <div class="legend">
+        {% for row in expense_overview.family_rows %}
+        <div class="legend-row">
+          <span class="swatch" style="background:{{ row.color }};"></span>
+          <div>
+            <div style="font-weight:700;">{{ row.name }}</div>
+            <div class="muted">{{ row.count }} movimenti · {{ '%.1f'|format(row.share_pct or 0) }}%</div>
+          </div>
+          <div style="font-weight:700;">€ {{ '%.2f'|format(row.total or 0) }}</div>
+        </div>
+        {% else %}
+        <div class="muted">Nessuna uscita nel periodo selezionato.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0;">Spese che si ripetono mese dopo mese</h3>
+    <div class="legend">
+      {% for row in expense_overview.recurring_rows %}
+      <div class="list-card">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+          <strong>{{ row.label }}</strong>
+          <span>€ {{ '%.2f'|format(row.total or 0) }}</span>
+        </div>
+        <div class="muted" style="margin-top:8px;">{{ row.family }} · presente in {{ row.months_count }} mesi · media € {{ '%.2f'|format(row.avg_monthly or 0) }}</div>
+      </div>
+      {% else %}
+      <div class="muted">Non ho trovato ancora spese chiaramente ricorrenti su più mesi per questo negozio.</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Routine raggruppata</h3>
+  <div class="muted" style="margin-bottom:10px;">Quando la stessa spesa ricompare con lo stesso senso, qui la vedi unita in una sola riga.</div>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Voce raggruppata</th><th>Famiglia</th><th>Movimenti</th><th>Mesi trovati</th><th>Peso</th><th>Totale periodo</th></tr></thead>
+      <tbody>
+        {% for row in expense_overview.routine_rows %}
+        <tr>
+          <td><strong>{{ row.label }}</strong></td>
+          <td>{{ row.family }}</td>
+          <td>{{ row.count }}</td>
+          <td>{{ row.months_count }}</td>
+          <td>{{ '%.1f'|format(row.share_pct or 0) }}%</td>
+          <td><strong>€ {{ '%.2f'|format(row.total or 0) }}</strong></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="muted">Ancora nessuna uscita registrata.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
 </div>
 
