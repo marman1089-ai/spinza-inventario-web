@@ -3,6 +3,7 @@ import datetime
 import json
 import csv
 import io
+import calendar
 from datetime import date, datetime, timedelta
 import re
 from urllib.parse import quote_plus, unquote_plus, urlencode
@@ -1139,6 +1140,121 @@ def _parse_import_txt_blocks(raw_text: str, fallback_store: str = 'spinza'):
     return _reconcile_import_blocks(blocks)
 
 
+def _expense_category_options():
+    """Categorie principali usate nei grafici e nei menu 'Sposta'."""
+    preferred = [
+        'Stipendi',
+        'Materie prime',
+        'Manutenzione e attrezzature',
+        'Professionisti',
+        'Bollette e utenze',
+        'Affitti e abbonamenti',
+        'Servizi finanziari',
+        'Marketing',
+        'Packaging',
+        'Tasse',
+        'Delivery e logistica',
+        'Pulizie e consumo interno',
+        'Investimenti e rientri',
+        'Spese secondarie',
+    ]
+    seen = set()
+    out = []
+    for name in preferred + [r[0] for r in _EXPENSE_RULES]:
+        key = _normalize_signature(name)
+        if key and key not in seen:
+            out.append(name)
+            seen.add(key)
+    return out
+
+
+def _build_import_preview(blocks, raw_text: str, fallback_store: str, include_expenses: bool, replace_existing_dates: bool):
+    """Riepilogo leggibile prima di salvare l'import TXT: totali, righe estratte e giorni mancanti."""
+    preview_rows = []
+    month_map = {}
+    income_total = 0.0
+    expense_total = 0.0
+    income_count = 0
+    expense_count = 0
+
+    for block in blocks or []:
+        ds = str(block.get('date') or '').strip()
+        store_key = str(block.get('store') or fallback_store or 'spinza').strip()
+        incomes = block.get('incomes') or []
+        expenses = block.get('expenses') or []
+        inc_total = round(sum(float(x.get('amount') or 0) for x in incomes), 2)
+        exp_total = round(sum(float(x.get('amount') or 0) for x in expenses), 2)
+        income_total += inc_total
+        expense_total += exp_total
+        income_count += len([x for x in incomes if float(x.get('amount') or 0) > 0])
+        expense_count += len([x for x in expenses if float(x.get('amount') or 0) > 0])
+        try:
+            dd = datetime.strptime(ds, '%Y-%m-%d').date()
+            mk = ds[:7]
+            month_map.setdefault((store_key, mk), set()).add(dd.day)
+        except Exception:
+            dd = None
+
+        methods = {}
+        for item in incomes:
+            name = str(item.get('payment_method') or '').strip().lower() or 'non specificato'
+            methods[name] = methods.get(name, 0.0) + float(item.get('amount') or 0)
+
+        expense_samples = []
+        for item in expenses[:6]:
+            expense_samples.append({
+                'name': str(item.get('name') or 'Import TXT')[:80],
+                'amount': round(float(item.get('amount') or 0), 2),
+                'category': _auto_expense_category('import txt', str(item.get('name') or ''), str(item.get('raw') or '')),
+            })
+
+        preview_rows.append({
+            'date': ds,
+            'store': store_key,
+            'store_label': STORES.get(store_key, store_key),
+            'income_total': inc_total,
+            'expense_total': exp_total,
+            'income_count': len(incomes),
+            'expense_count': len(expenses),
+            'methods': [{'name': k, 'amount': round(v, 2)} for k, v in sorted(methods.items())],
+            'expense_samples': expense_samples,
+            'declared_total': block.get('declared_total'),
+        })
+
+    missing_groups = []
+    for (store_key, mk), days_present in sorted(month_map.items(), key=lambda x: (x[0][1], x[0][0])):
+        try:
+            year, month = [int(x) for x in mk.split('-', 1)]
+            last_day = calendar.monthrange(year, month)[1]
+            missing = [f'{mk}-{day:02d}' for day in range(1, last_day + 1) if day not in days_present]
+            missing_groups.append({
+                'store': store_key,
+                'store_label': STORES.get(store_key, store_key),
+                'month_key': mk,
+                'month_label': _month_label(mk),
+                'present_count': len(days_present),
+                'days_in_month': last_day,
+                'missing_dates': missing,
+                'missing_count': len(missing),
+            })
+        except Exception:
+            continue
+
+    return {
+        'raw_text': raw_text or '',
+        'fallback_store': fallback_store,
+        'include_expenses': bool(include_expenses),
+        'replace_existing_dates': bool(replace_existing_dates),
+        'rows': preview_rows,
+        'days_count': len(preview_rows),
+        'income_count': income_count,
+        'expense_count': expense_count,
+        'income_total': round(income_total, 2),
+        'expense_total': round(expense_total, 2),
+        'missing_groups': missing_groups,
+    }
+
+
 PALETTE_DARK = [
     '#38bdf8', '#2563eb', '#818cf8', '#f59e0b', '#ef4444', '#14b8a6', '#a855f7', '#22c55e', '#f97316', '#eab308'
 ]
@@ -1535,9 +1651,10 @@ def _build_expense_overview(cur, scope_store: str, period_type: str = 'month', a
     end_s = end_d.isoformat()
     where_sql, params = _cash_scope_where(scope_store)
     ph = _ph()
-    rows = _dict_rows(cur, f"SELECT flow_date, store, category, supplier, payment_method, amount, notes FROM cash_expenses WHERE {where_sql} ORDER BY flow_date ASC, id ASC", params)
+    rows = _dict_rows(cur, f"SELECT id, flow_date, store, category, supplier, payment_method, amount, notes FROM cash_expenses WHERE {where_sql} ORDER BY flow_date ASC, id ASC", params)
 
     family_map = {}
+    family_detail_map = {}
     period_map = {}
     all_map = {}
     total_period = 0.0
@@ -1567,6 +1684,17 @@ def _build_expense_overview(cur, scope_store: str, period_type: str = 'month', a
             fam = family_map.setdefault(family, {'name': family, 'total': 0.0, 'count': 0})
             fam['total'] += amount
             fam['count'] += 1
+            family_detail_map.setdefault(family, []).append({
+                'id': int(row.get('id') or 0),
+                'date': flow_date,
+                'store': row.get('store') or '',
+                'store_label': STORES.get(row.get('store') or '', row.get('store') or ''),
+                'category': row.get('category') or '',
+                'supplier': row.get('supplier') or '',
+                'payment_method': row.get('payment_method') or '',
+                'amount': amount,
+                'notes': row.get('notes') or '',
+            })
 
             grp = period_map.setdefault(sig, {
                 'label': label,
@@ -1581,6 +1709,9 @@ def _build_expense_overview(cur, scope_store: str, period_type: str = 'month', a
     for idx, row in enumerate(family_rows):
         row['share_pct'] = round((float(row.get('total') or 0) / total_period) * 100.0, 1) if total_period > 0 else 0.0
         row['color'] = PALETTE_DARK[idx % len(PALETTE_DARK)]
+        details = sorted(family_detail_map.get(row.get('name') or '', []), key=lambda x: (x.get('date') or '', -float(x.get('amount') or 0)))
+        row['details'] = details
+        row['detail_total'] = round(sum(float(x.get('amount') or 0) for x in details), 2)
     family_pie_style = _build_conic_gradient(family_rows, total_period)
 
     routine_rows = []
@@ -1615,6 +1746,7 @@ def _build_expense_overview(cur, scope_store: str, period_type: str = 'month', a
         'routine_grouped_total': round(sum(x['total'] for x in routine_rows), 2),
         'recurring_count': len(recurring_rows),
         'routine_count': len(routine_rows),
+        'category_options': _expense_category_options(),
     }
 
 def _build_cash_dashboard(cur, scope_store: str, period_type: str = 'week', anchor_s: str = ''):
@@ -3048,16 +3180,8 @@ def sales_report_delete_group(request: Request, group_id: int):
 
 
 
-@app.get("/gestionale/incassi", response_class=HTMLResponse)
-
-
-def cash_entries_page(request: Request, flow_date: str = '', payment_method: str = 'ALL', period_type: str = 'month', anchor_date: str = '', month_key: str = '', nav: str = '', imported_entries: int = 0, imported_expenses: int = 0, import_error: str = ''):
+def _cash_entries_page_context(request: Request, user: dict, flow_date: str = '', payment_method: str = 'ALL', period_type: str = 'month', anchor_date: str = '', month_key: str = '', nav: str = '', imported_entries: int = 0, imported_expenses: int = 0, import_error: str = '', import_preview=None):
     import_error = unquote_plus(str(import_error or '')).strip()
-    user = require_login(request)
-    if not user:
-        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    if not can_view_management_finance(request, user):
-        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
     brand = _current_store_scope(request, user)
     active_store = request.session.get("active_store") if is_admin(request) else None
     can_edit_management = user.get('role') in ('admin', 'manager', 'staff')
@@ -3092,8 +3216,7 @@ def cash_entries_page(request: Request, flow_date: str = '', payment_method: str
     next_anchor = _shift_anchor_date(period_type, anchor_day, 1).isoformat()
     nav_prev_url = _query_url('/gestionale/incassi', flow_date=flow_date, payment_method=payment_method, period_type=period_type, month_key=_month_key_from_value(prev_anchor), anchor_date=prev_anchor)
     nav_next_url = _query_url('/gestionale/incassi', flow_date=flow_date, payment_method=payment_method, period_type=period_type, month_key=_month_key_from_value(next_anchor), anchor_date=next_anchor)
-    return render(
-        "cashflow_entries.html",
+    return dict(
         user=user, brand=brand, active_store=active_store, stores=STORES,
         can_edit_management=can_edit_management, rows=rows, today=date.today().isoformat(),
         selected_date=flow_date, selected_payment=payment_method, payments=payments,
@@ -3102,8 +3225,32 @@ def cash_entries_page(request: Request, flow_date: str = '', payment_method: str
         page_period_meta=period_meta, page_totals=page_totals, month_options=month_options, selected_month=selected_month,
         nav_prev_url=nav_prev_url, nav_next_url=nav_next_url, page_insights=page_insights,
         income_breakdown=income_breakdown, income_pie_total=income_pie_total, income_pie_style=income_pie_style,
+        import_preview=import_preview,
     )
 
+
+@app.get("/gestionale/incassi", response_class=HTMLResponse)
+def cash_entries_page(request: Request, flow_date: str = '', payment_method: str = 'ALL', period_type: str = 'month', anchor_date: str = '', month_key: str = '', nav: str = '', imported_entries: int = 0, imported_expenses: int = 0, import_error: str = ''):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+    return render(
+        "cashflow_entries.html",
+        **_cash_entries_page_context(
+            request, user,
+            flow_date=flow_date,
+            payment_method=payment_method,
+            period_type=period_type,
+            anchor_date=anchor_date,
+            month_key=month_key,
+            nav=nav,
+            imported_entries=imported_entries,
+            imported_expenses=imported_expenses,
+            import_error=import_error,
+        )
+    )
 
 
 @app.post("/gestionale/incassi")
@@ -3179,6 +3326,7 @@ async def cash_entries_import_txt(request: Request):
     pasted_text = str(form.get('import_text') or '').strip()
     include_expenses = _is_truthy(form.get('import_expenses'))
     replace_existing_dates = _is_truthy(form.get('replace_existing_dates'))
+    confirm_import = _is_truthy(form.get('confirm_import'))
 
     fallback_store = str(form.get('fallback_store') or form.get('store') or '').strip()
     if fallback_store not in STORES:
@@ -3220,6 +3368,20 @@ async def cash_entries_import_txt(request: Request):
         forced_store = user.get('store') or fallback_store
         for block in blocks:
             block['store'] = forced_store
+
+    if not confirm_import:
+        preview = _build_import_preview(blocks, raw_text, fallback_store, include_expenses, replace_existing_dates)
+        first_date = str((blocks[0] or {}).get('date') or '') if blocks else ''
+        return render(
+            "cashflow_entries.html",
+            **_cash_entries_page_context(
+                request, user,
+                period_type='month',
+                anchor_date=first_date,
+                month_key=_month_key_from_value(first_date) if first_date else '',
+                import_preview=preview,
+            )
+        )
 
     imported_entries = 0
     imported_expenses = 0
@@ -3441,6 +3603,46 @@ async def cash_payment_method_delete(request: Request):
         conn.commit()
     return RedirectResponse('/gestionale/incassi', status_code=HTTP_303_SEE_OTHER)
 
+
+
+@app.post("/gestionale/uscite/{expense_id}/sposta-categoria")
+async def cash_expenses_move_category(request: Request, expense_id: int):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse('/gestionale', status_code=HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    new_category = str(form.get('new_category') or '').strip()
+    return_to = _safe_next_url(str(form.get('return_to') or request.headers.get('referer') or ''), '/gestionale')
+    if not new_category:
+        return RedirectResponse(return_to, status_code=HTTP_303_SEE_OTHER)
+
+    brand = _current_store_scope(request, user)
+    where_sql, params = _cash_scope_where(brand)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(
+            f"SELECT id, store, flow_date, category, supplier, amount FROM cash_expenses WHERE id={ph} AND {where_sql}",
+            (expense_id, *params),
+        ).fetchone()
+        if row:
+            row = dict(row)
+            old_category = row.get('category') or ''
+            cur.execute(f"UPDATE cash_expenses SET category={ph} WHERE id={ph}", (new_category, expense_id))
+            _log(
+                cur,
+                store=row.get('store') or (user.get('store') or 'spinza'),
+                username=user['username'],
+                action='UPDATE',
+                category='USCITE',
+                name=f"Spostata categoria uscita {row.get('flow_date','')} - {row.get('supplier','')} da {old_category} a {new_category}",
+                delta=0,
+            )
+            conn.commit()
+    return RedirectResponse(return_to, status_code=HTTP_303_SEE_OTHER)
 
 
 @app.post("/gestionale/uscite/{expense_id}/delete")

@@ -41,6 +41,11 @@
   .pie-center .value{font-size:24px;font-weight:800}
   .legend{display:grid;gap:10px}
   .legend-row{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center}
+  .legend-row.clickable{cursor:pointer;border:1px solid transparent;border-radius:14px;padding:8px;background:rgba(148,163,184,.04)}
+  .legend-row.clickable:hover,.legend-row.clickable.active{border-color:rgba(56,189,248,.35);background:rgba(56,189,248,.08)}
+  .expense-detail-panel{display:none;margin-top:14px;border:1px solid var(--line-soft);border-radius:16px;background:var(--panel-2);padding:12px}
+  .expense-detail-panel.active{display:block}
+  .expense-move-form{display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
   .swatch{width:11px;height:11px;border-radius:999px}
   .split-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   .mini-list{display:grid;gap:10px}
@@ -197,19 +202,19 @@
       <a href="/gestionale/uscite?period_type={{ period_meta.type }}&month_key={{ selected_month }}&anchor_date={{ period_meta.start }}" class="btn2" style="text-decoration:none;display:inline-block;">Apri uscite</a>
     </div>
     <div class="pie-wrap">
-      <div class="pie" style="background:{{ expense_overview.family_pie_style }};">
+      <div class="pie js-expense-pie" style="background:{{ expense_overview.family_pie_style }};cursor:pointer;" title="Clicca qui o una categoria per vedere le spese">
         <div class="pie-center">
           <div class="value">€ {{ '%.0f'|format(expense_overview.period_total or 0) }}</div>
           <div class="muted">{{ period_meta.range_label }}</div>
         </div>
       </div>
       <div class="legend">
-        {% for row in expense_overview.family_rows[:7] %}
-        <div class="legend-row">
+        {% for row in expense_overview.family_rows[:9] %}
+        <div class="legend-row clickable js-expense-family" data-target="expense-family-{{ loop.index0 }}">
           <span class="swatch" style="background:{{ row.color }};"></span>
           <div>
             <div style="font-weight:700;">{{ row.name }}</div>
-            <div class="muted">{{ '%.1f'|format(row.share_pct or 0) }}% · {{ row.count }} mov.</div>
+            <div class="muted">{{ '%.1f'|format(row.share_pct or 0) }}% · {{ row.count }} mov. · clicca per vedere</div>
           </div>
           <div style="font-weight:700;">€ {{ '%.2f'|format(row.total or 0) }}</div>
         </div>
@@ -218,6 +223,55 @@
         {% endfor %}
       </div>
     </div>
+
+    <div class="chart-detail"><div class="chart-detail-title">Dettaglio categoria spese</div><div>Clicca la torta o una categoria: sotto compare l'elenco delle spese, con il menu <strong>Sposta</strong> per correggere subito quelle sbagliate.</div></div>
+
+    {% for row in expense_overview.family_rows[:9] %}
+    <div class="expense-detail-panel js-expense-panel" id="expense-family-{{ loop.index0 }}">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-bottom:10px;">
+        <div>
+          <h4 style="margin:0;">{{ row.name }}</h4>
+          <div class="muted">{{ row.count }} movimenti · € {{ '%.2f'|format(row.total or 0) }} · {{ '%.1f'|format(row.share_pct or 0) }}% delle uscite</div>
+        </div>
+        <a class="btn2" href="/gestionale/uscite?category={{ row.name }}&period_type={{ period_meta.type }}&month_key={{ selected_month }}&anchor_date={{ period_meta.start }}" style="text-decoration:none;display:inline-block;">Vedi in uscite</a>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="daily-table">
+          <thead>
+            <tr><th>Data</th><th>Fornitore / voce</th><th>Importo</th><th>Categoria attuale</th><th>Sposta</th></tr>
+          </thead>
+          <tbody>
+            {% for item in row.details %}
+            <tr>
+              <td><strong>{{ item.date }}</strong></td>
+              <td>
+                <strong>{{ item.supplier or item.notes or 'Spesa' }}</strong>
+                {% if item.notes and item.notes != item.supplier %}<div class="muted">{{ item.notes }}</div>{% endif %}
+              </td>
+              <td style="text-align:right;"><strong>€ {{ '%.2f'|format(item.amount or 0) }}</strong></td>
+              <td>{{ item.category }}</td>
+              <td>
+                {% if can_view_finance %}
+                <form method="post" action="/gestionale/uscite/{{ item.id }}/sposta-categoria" class="expense-move-form">
+                  <input type="hidden" name="return_to" value="/gestionale?period_type={{ period_meta.type }}&month_key={{ selected_month }}&anchor_date={{ period_meta.anchor }}">
+                  <select name="new_category" style="min-width:190px;">
+                    {% for cat in expense_overview.category_options %}
+                      <option value="{{ cat }}" {% if cat == item.category %}selected{% endif %}>{{ cat }}</option>
+                    {% endfor %}
+                  </select>
+                  <button class="btn2" type="submit">Sposta</button>
+                </form>
+                {% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="muted">Nessuna spesa in questa categoria.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endfor %}
   </div>
 
   <div class="chart-card">
@@ -366,6 +420,30 @@ Bilancio
   document.querySelectorAll('.js-day-detail').forEach(function(el){
     el.addEventListener('click', function(){ showDetail(el); });
     el.addEventListener('mouseenter', function(){ showDetail(el); });
+  });
+
+  function openExpensePanel(targetId){
+    var panels = document.querySelectorAll('.js-expense-panel');
+    var buttons = document.querySelectorAll('.js-expense-family');
+    panels.forEach(function(p){ p.classList.remove('active'); });
+    buttons.forEach(function(b){ b.classList.remove('active'); });
+    var panel = document.getElementById(targetId);
+    if(panel){
+      panel.classList.add('active');
+      var btn = document.querySelector('.js-expense-family[data-target="'+targetId+'"]');
+      if(btn){ btn.classList.add('active'); }
+      panel.scrollIntoView({behavior:'smooth', block:'nearest'});
+    }
+  }
+
+  document.querySelectorAll('.js-expense-family').forEach(function(el){
+    el.addEventListener('click', function(){ openExpensePanel(el.getAttribute('data-target')); });
+  });
+  document.querySelectorAll('.js-expense-pie').forEach(function(el){
+    el.addEventListener('click', function(){
+      var first = document.querySelector('.js-expense-family');
+      if(first){ openExpensePanel(first.getAttribute('data-target')); }
+    });
   });
 })();
 </script>

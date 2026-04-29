@@ -286,8 +286,88 @@ Qonto subscription 54€" style="width:100%;margin-top:12px;min-height:180px;res
       <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="import_expenses" checked> Importa anche le uscite trovate nel testo</label>
     </div>
     <div class="tiny" style="margin-top:10px;">Se nel testo trovi il nome del negozio lo uso automaticamente. Se non c’è, uso il negozio selezionato sopra. Puoi incollare anche blocchi mensili tipo “APRIL 2025” o “SPINZA APRILE 2026”; se una riga delivery ha “(23€ cash)” il programma controlla il Total del giorno e decide se sottrarlo per non sballare i conti.</div>
-    <div style="margin-top:14px;"><button class="btn" type="submit">Estrai e salva incassi/spese</button></div>
+    <div style="margin-top:14px;"><button class="btn" type="submit">Controlla prima di salvare</button></div>
   </form>
+
+  {% if import_preview %}
+  <div class="card" style="margin-top:16px;background:rgba(14,165,233,.06);border-color:rgba(56,189,248,.26);">
+    <h3 style="margin-top:0;">Controllo prima del salvataggio</h3>
+    <div class="kpi-grid" style="margin-bottom:12px;">
+      <div class="kpi"><div class="muted">Giorni letti</div><div class="big">{{ import_preview.days_count }}</div></div>
+      <div class="kpi"><div class="muted">Entrate estratte</div><div class="big">€ {{ '%.2f'|format(import_preview.income_total or 0) }}</div><div class="muted">{{ import_preview.income_count }} righe</div></div>
+      <div class="kpi"><div class="muted">Uscite estratte</div><div class="big">€ {{ '%.2f'|format(import_preview.expense_total or 0) }}</div><div class="muted">{{ import_preview.expense_count }} righe</div></div>
+      <div class="kpi"><div class="muted">Modalità</div><div style="font-weight:800;margin-top:8px;">{% if import_preview.replace_existing_dates %}Sostituisce giorni uguali{% else %}Aggiunge senza sostituire{% endif %}</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px;">
+      <h4 style="margin:0 0 8px 0;">Giorni vuoti del mese</h4>
+      {% for group in import_preview.missing_groups %}
+        <div style="margin-bottom:10px;">
+          <strong>{{ group.store_label }} · {{ group.month_label }}</strong>
+          <div class="muted">{{ group.present_count }}/{{ group.days_in_month }} giorni trovati nel testo.</div>
+          {% if group.missing_count > 0 %}
+            <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
+              {% for ds in group.missing_dates %}
+                <span class="pill" title="Nessuna riga trovata nel testo per questo giorno">{{ ds[8:10] }}</span>
+              {% endfor %}
+            </div>
+            <div class="tiny" style="margin-top:8px;">Questi giorni non vengono salvati: possono essere giorni mancanti o giorni di chiusura. Controllali prima di confermare.</div>
+          {% else %}
+            <div class="pill" style="margin-top:8px;">Nessun giorno vuoto trovato</div>
+          {% endif %}
+        </div>
+      {% else %}
+        <div class="muted">Nessun mese completo riconosciuto per il controllo dei giorni vuoti.</div>
+      {% endfor %}
+    </div>
+
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr><th>Data</th><th>Sede</th><th>Entrate lette</th><th>Uscite lette</th><th>Metodi / note</th></tr>
+        </thead>
+        <tbody>
+          {% for row in import_preview.rows %}
+          <tr>
+            <td><strong>{{ row.date }}</strong></td>
+            <td>{{ row.store_label }}</td>
+            <td><strong>€ {{ '%.2f'|format(row.income_total or 0) }}</strong><br><span class="muted">{{ row.income_count }} righe</span></td>
+            <td><strong>€ {{ '%.2f'|format(row.expense_total or 0) }}</strong><br><span class="muted">{{ row.expense_count }} righe</span></td>
+            <td>
+              {% for method in row.methods %}
+                <div><strong style="text-transform:capitalize;">{{ method.name }}</strong> € {{ '%.2f'|format(method.amount or 0) }}</div>
+              {% endfor %}
+              {% if row.declared_total %}
+                <div class="muted" style="margin-top:6px;">Total scritto nel testo: € {{ '%.2f'|format(row.declared_total or 0) }}</div>
+              {% endif %}
+              {% if row.expense_samples %}
+                <div class="tiny" style="margin-top:6px;">Prime uscite lette:
+                  {% for ex in row.expense_samples %}
+                    <div>{{ ex.name }} · € {{ '%.2f'|format(ex.amount or 0) }} → {{ ex.category }}</div>
+                  {% endfor %}
+                </div>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <form method="post" action="/gestionale/incassi/import-txt" style="margin-top:14px;">
+      <input type="hidden" name="confirm_import" value="1">
+      <input type="hidden" name="fallback_store" value="{{ import_preview.fallback_store }}">
+      {% if import_preview.replace_existing_dates %}<input type="hidden" name="replace_existing_dates" value="on">{% endif %}
+      {% if import_preview.include_expenses %}<input type="hidden" name="import_expenses" value="on">{% endif %}
+      <textarea name="import_text" style="display:none;">{{ import_preview.raw_text }}</textarea>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <button class="btn" type="submit">Conferma e salva tutto</button>
+        <a class="btn2" href="/gestionale/incassi" style="text-decoration:none;display:inline-block;">Annulla</a>
+      </div>
+      <div class="tiny" style="margin-top:8px;">Solo dopo questa conferma entrano davvero in cassa/incassi e uscite. Prima è solo un controllo.</div>
+    </form>
+  </div>
+  {% endif %}
 </div>
 
 <div class="card" style="margin-top:14px;">
