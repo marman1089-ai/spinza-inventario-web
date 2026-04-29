@@ -1019,26 +1019,36 @@ def _expense_family(row) -> str:
         str(row.get('supplier') or ''),
         str(row.get('notes') or ''),
     ]).lower()
-    if any(k in text for k in ['stipend', 'salari', 'personale', 'dipendent', 'busta paga']):
-        return 'Personale'
-    if any(k in text for k in ['affitto', 'rent', 'locazione', 'canone', 'abbon', 'qonto', 'software', 'licenza']):
-        return 'Canoni e abbonamenti'
-    if any(k in text for k in ['luce', 'gas', 'acqua', 'enel', 'utenz', 'telefono', 'internet', 'tim', 'wind', 'iliad', 'energia']):
-        return 'Utenze'
-    if any(k in text for k in ['nexi', 'commission', 'banca', 'bonifico', 'pos', 'interessi']):
+
+    # Raggruppamento intelligente pensato per leggere la home in pochi secondi.
+    # Le parole chiave lavorano su categoria, fornitore e note, quindi funzionano
+    # anche con le spese importate dal testo libero.
+    if any(k in text for k in ['stipend', 'salari', 'personale', 'dipendent', 'busta paga', 'lipo', 'niccolo', 'elio', 'mattia', 'mira', 'giulia']):
+        return 'Stipendi'
+    if any(k in text for k in ['commercialist', 'consulent', 'paghe', 'professionist', 'avvocato', 'notaio', 'labor consultant', 'studio']):
+        return 'Professionisti'
+    if any(k in text for k in ['luce', 'gas', 'acqua', 'enel', 'utenz', 'bollett', 'telefono', 'internet', 'tim', 'wind', 'iliad', 'energia']):
+        return 'Bollette e utenze'
+    if any(k in text for k in ['affitto', 'rent', 'locazione', 'canone', 'abbon', 'qonto', 'software', 'licenza', 'dominio', 'hosting', 'render', 'supabase']):
+        return 'Affitti e abbonamenti'
+    if any(k in text for k in ['mozzarella', 'farina', 'pomodor', 'salume', 'prosciutto', 'salsiccia', 'nduja', 'verdure', 'metro', 'fornit', 'forno', 'carrefour', 'food', 'bevande', 'bibite', 'ingredient', 'materie', 'materia prima', 'latte', 'bufala', 'pecorino', 'grana', 'parmigiano']):
+        return 'Materie prime'
+    if any(k in text for k in ['packaging', 'cartoni', 'vaschette', 'buste', 'tovagliol', 'posate', 'bicchieri', 'contenitori']):
+        return 'Packaging'
+    if any(k in text for k in ['ripar', 'manut', 'attrezz', 'guasto', 'tecnic', 'frigo', 'forno', 'lavastoviglie', 'impianto']):
+        return 'Manutenzione'
+    if any(k in text for k in ['nexi', 'commission', 'banca', 'bonifico', 'pos', 'interessi', 'sumup', 'transaz']):
         return 'Servizi finanziari'
-    if any(k in text for k in ['social', 'ads', 'marketing', 'pubblic', 'meta', 'instagram', 'google']):
+    if any(k in text for k in ['social', 'ads', 'marketing', 'pubblic', 'meta', 'instagram', 'google', 'tiktok', 'volantini']):
         return 'Marketing'
-    if any(k in text for k in ['commercialist', 'consulent', 'inps', 'iva', 'tari', 'imu', 'tassa', 'f24']):
-        return 'Tasse e consulenze'
-    if any(k in text for k in ['metro', 'fornit', 'forno', 'carrefour', 'food', 'bevande', 'bibite', 'ingredient', 'materie']):
-        return 'Fornitori e materie prime'
-    if any(k in text for k in ['ripar', 'manut', 'attrezz', 'guasto', 'tecnic']):
-        return 'Manutenzioni'
-    if any(k in text for k in ['delivery', 'glovo', 'deliveroo', 'just eat', 'logistic', 'trasporto', 'benzina', 'carburante']):
-        return 'Logistica'
+    if any(k in text for k in ['delivery', 'glovo', 'deliveroo', 'just eat', 'logistic', 'trasporto', 'benzina', 'carburante', 'corriere']):
+        return 'Delivery e logistica'
+    if any(k in text for k in ['inps', 'iva', 'tari', 'imu', 'tassa', 'f24', 'imposta', 'agenzia entrate']):
+        return 'Tasse'
+    if any(k in text for k in ['secondar', 'varie', 'extra', 'altro', 'spesa piccola']):
+        return 'Spese secondarie'
     category = str(row.get('category') or '').strip()
-    return _title_case_words(category) if category else 'Varie'
+    return _title_case_words(category) if category else 'Spese secondarie'
 
 
 def _expense_is_fixed(label: str, family: str) -> bool:
@@ -1244,11 +1254,18 @@ def _build_cash_dashboard(cur, scope_store: str, period_type: str = 'week', anch
         f"SELECT LOWER(TRIM(payment_method)) AS name, COALESCE(SUM(amount),0) AS total FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY LOWER(TRIM(payment_method)) ORDER BY total DESC, name ASC",
         params + (start_s, end_s),
     )
-    expense_breakdown = _dict_rows(
+    raw_expense_rows = _dict_rows(
         cur,
-        f"SELECT LOWER(TRIM(category)) AS name, COALESCE(SUM(amount),0) AS total FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY LOWER(TRIM(category)) ORDER BY total DESC, name ASC",
+        f"SELECT category, supplier, notes, amount FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph}",
         params + (start_s, end_s),
     )
+    expense_groups = {}
+    for erow in raw_expense_rows:
+        family = _expense_family(erow)
+        slot = expense_groups.setdefault(family, {'name': family, 'total': 0.0, 'count': 0})
+        slot['total'] += float(erow.get('amount') or 0)
+        slot['count'] += 1
+    expense_breakdown = sorted(expense_groups.values(), key=lambda x: (-float(x.get('total') or 0), x.get('name') or ''))
 
     for idx, row in enumerate(income_breakdown, start=1):
         row['rank'] = idx
@@ -1439,13 +1456,62 @@ def _build_scope_period_chart(cur, scope_store: str, period_type: str = 'week', 
     where_sql, params = _cash_scope_where(scope_store)
     start_s = start_d.isoformat()
     end_s = end_d.isoformat()
+
     entries = _dict_rows(cur, f"SELECT flow_date, SUM(amount) AS total FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date ORDER BY flow_date ASC", params + (start_s, end_s))
     expenses = _dict_rows(cur, f"SELECT flow_date, SUM(amount) AS total FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date ORDER BY flow_date ASC", params + (start_s, end_s))
     by_entry = {str(r['flow_date']): float(r.get('total') or 0) for r in entries}
     by_expense = {str(r['flow_date']): float(r.get('total') or 0) for r in expenses}
+
+    income_detail_rows = _dict_rows(
+        cur,
+        f"SELECT flow_date, LOWER(TRIM(payment_method)) AS name, COALESCE(SUM(amount),0) AS total FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date, LOWER(TRIM(payment_method)) ORDER BY flow_date ASC, total DESC",
+        params + (start_s, end_s),
+    )
+    expense_detail_rows = _dict_rows(
+        cur,
+        f"SELECT flow_date, category, supplier, notes, amount FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} ORDER BY flow_date ASC, amount DESC",
+        params + (start_s, end_s),
+    )
+
+    income_details = {}
+    for row in income_detail_rows:
+        ds = str(row.get('flow_date') or '')
+        name = (row.get('name') or 'non specificato').strip() or 'non specificato'
+        total = float(row.get('total') or 0)
+        if total <= 0:
+            continue
+        income_details.setdefault(ds, []).append({'label': name, 'total': total})
+
+    expense_details = {}
+    for row in expense_detail_rows:
+        ds = str(row.get('flow_date') or '')
+        amount = float(row.get('amount') or 0)
+        if amount <= 0:
+            continue
+        family = _expense_family(row)
+        slot = expense_details.setdefault(ds, {}).setdefault(family, {'label': family, 'total': 0.0, 'count': 0})
+        slot['total'] += amount
+        slot['count'] += 1
+
     rows = []
     max_amount = 1.0
     days_count = (end_d - start_d).days + 1
+    weekdays = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom']
+
+    def euro(v):
+        return f"€ {float(v or 0):.2f}"
+
+    def lines_for(items, total, empty_label):
+        if not items:
+            return f"Totale: {euro(total)}\n{empty_label}"
+        out = [f"Totale: {euro(total)}"]
+        for item in items[:8]:
+            extra = ''
+            if item.get('count') and int(item.get('count') or 0) > 1:
+                extra = f" ({int(item.get('count') or 0)} mov.)"
+            out.append(f"• {item.get('label')}: {euro(item.get('total') or 0)}{extra}")
+        return '\n'.join(out)
+
     for i in range(days_count):
         d = start_d + timedelta(days=i)
         ds = d.isoformat()
@@ -1453,14 +1519,43 @@ def _build_scope_period_chart(cur, scope_store: str, period_type: str = 'week', 
         usc = by_expense.get(ds, 0.0)
         net = inc - usc
         max_amount = max(max_amount, inc, usc, abs(net))
-        rows.append({'date': ds, 'label': d.strftime('%d/%m'), 'income': inc, 'expense': usc, 'net': net})
-    for r in rows:
-        r['income_h'] = max(8, int((r['income'] / max_amount) * 130)) if r['income'] else 8
-        r['expense_h'] = max(8, int((r['expense'] / max_amount) * 130)) if r['expense'] else 8
-        r['net_h'] = max(8, int((abs(r['net']) / max_amount) * 130)) if r['net'] else 8
-        r['positive'] = r['net'] >= 0
-    return rows
+        income_items = sorted(income_details.get(ds, []), key=lambda x: -float(x.get('total') or 0))
+        expense_items = sorted((expense_details.get(ds, {}) or {}).values(), key=lambda x: -float(x.get('total') or 0))
+        net_detail = f"Entrate: {euro(inc)}\nUscite: {euro(usc)}\nBilancio: {euro(net)}"
+        rows.append({
+            'date': ds,
+            'label': d.strftime('%d/%m'),
+            'day_label': f"{weekdays[d.weekday()]} {d.strftime('%d/%m')}",
+            'income': inc,
+            'expense': usc,
+            'net': net,
+            'income_detail': lines_for(income_items, inc, 'Nessuna entrata salvata'),
+            'expense_detail': lines_for(expense_items, usc, 'Nessuna uscita salvata'),
+            'net_detail': net_detail,
+            'income_items': income_items,
+            'expense_items': expense_items,
+        })
 
+    chart_height = 150
+    for r in rows:
+        r['income_h'] = max(8, int((r['income'] / max_amount) * chart_height)) if r['income'] else 8
+        r['expense_h'] = max(8, int((r['expense'] / max_amount) * chart_height)) if r['expense'] else 8
+        r['net_h'] = max(8, int((abs(r['net']) / max_amount) * chart_height)) if r['net'] else 8
+        r['positive'] = r['net'] >= 0
+
+    tick_values = [max_amount * x for x in (0.25, 0.50, 0.75, 1.0)]
+    ticks = []
+    for value in tick_values:
+        label = f"€ {value:.0f}" if value >= 10 else f"€ {value:.2f}"
+        ticks.append({'value': value, 'label': label, 'pct': round((value / max_amount) * 100.0, 2) if max_amount else 0, 'px': int((value / max_amount) * chart_height) if max_amount else 0})
+
+    return {
+        'rows': rows,
+        'scale': {
+            'max': max_amount,
+            'ticks': ticks,
+        }
+    }
 
 def _sales_month_overview(cur, store: str, month_key: str):
     selected_store = (store or 'spinza').strip()
@@ -2007,7 +2102,9 @@ def gestionale_home(request: Request, period_type: str = 'month', anchor_date: s
             recent_docs = [dict(r) for r in cur.execute(sql, (store, store, store)).fetchall()]
 
         compare, totals, recent_entries, recent_expenses, period_meta, insights = _build_cash_dashboard(cur, store, period_type, anchor_s)
-        period_rows = _build_scope_period_chart(cur, store, period_type, anchor_s)
+        period_chart = _build_scope_period_chart(cur, store, period_type, anchor_s)
+        period_rows = period_chart.get('rows', [])
+        chart_scale = period_chart.get('scale', {'ticks': [], 'max': 1.0})
         month_options = _month_options_for_scope(cur, store, selected_month)
         sales_store = store if store != 'ALL' else (active_store or 'spinza')
         sales_overview = _sales_month_overview(cur, sales_store, selected_month)
@@ -2039,6 +2136,7 @@ def gestionale_home(request: Request, period_type: str = 'month', anchor_date: s
         month_options=month_options,
         selected_month=selected_month,
         period_rows=period_rows,
+        chart_scale=chart_scale,
         sales_overview=sales_overview,
         nav_prev_url=nav_prev_url,
         nav_next_url=nav_next_url,

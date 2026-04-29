@@ -12,13 +12,26 @@
   .big{font-size:28px;font-weight:800;line-height:1.05}
   .delta{font-weight:800}
   .delta.pos{color:var(--accent-emerald)} .delta.neg{color:var(--accent-red)} .delta.neu{color:var(--muted)}
-  .bars{display:flex;align-items:flex-end;gap:8px;height:170px;padding-top:10px;overflow-x:auto;overflow-y:hidden}
-  .bar-col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:8px;min-width:34px}
+  .bars{display:flex;align-items:flex-end;gap:8px;height:190px;padding:12px 0 24px 62px;overflow-x:auto;overflow-y:hidden;position:relative}
+  .bar-col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:7px;min-width:34px;position:relative;z-index:2;cursor:pointer}
+  .bar-col:hover .bar{filter:brightness(1.18);box-shadow:0 0 0 2px rgba(255,255,255,.12)}
   .bar{width:16px;border-radius:8px 8px 4px 4px;background:linear-gradient(180deg, rgba(59,130,246,.92) 0%, rgba(37,99,235,.72) 100%)}
   .bar.expense{background:linear-gradient(180deg, rgba(239,68,68,.92) 0%, rgba(220,38,38,.70) 100%)}
   .bar.net.pos{background:linear-gradient(180deg, rgba(56,189,248,.92) 0%, rgba(37,99,235,.75) 100%)}
   .bar.net.neg{background:linear-gradient(180deg, rgba(248,113,113,.92) 0%, rgba(220,38,38,.72) 100%)}
   .bar-label{font-size:11px;color:var(--muted)}
+  .grid-line{position:absolute;left:0;right:0;border-top:1px dashed rgba(148,163,184,.28);z-index:1;pointer-events:none}
+  .grid-line span{position:absolute;left:0;top:-10px;font-size:11px;color:var(--muted);background:var(--panel);padding:1px 6px;border-radius:999px;border:1px solid var(--line-soft)}
+  .bar-value{font-size:10px;color:var(--muted);line-height:1;white-space:nowrap}
+  .chart-detail{margin-top:12px;border:1px solid var(--line-soft);border-radius:14px;background:var(--panel-2);padding:10px;font-size:13px;white-space:pre-line;color:var(--text)}
+  .chart-detail-title{font-weight:800;margin-bottom:4px}
+  .daily-table-wrap{overflow:auto;border:1px solid var(--line-soft);border-radius:18px;background:var(--panel)}
+  .daily-table{width:100%;border-collapse:collapse;min-width:620px}
+  .daily-table th,.daily-table td{padding:10px 12px;border-bottom:1px solid var(--line-soft);text-align:right}
+  .daily-table th:first-child,.daily-table td:first-child{text-align:left}
+  .daily-table thead th{position:sticky;top:0;background:var(--panel-2);z-index:1;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+  .daily-table tbody tr:hover{background:rgba(148,163,184,.08)}
+  .daily-table .pos{color:var(--accent-emerald);font-weight:800}.daily-table .neg{color:var(--accent-red);font-weight:800}
   .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
   .kpi{border:1px solid var(--line-soft);border-radius:18px;padding:14px;background:var(--panel)}
   .pie-wrap{display:grid;grid-template-columns:180px 1fr;gap:16px;align-items:center}
@@ -138,13 +151,18 @@
       <div class="delta {% if totals.income_growth_pct > 0 %}pos{% elif totals.income_growth_pct < 0 %}neg{% else %}neu{% endif %}">{{ '%+.1f'|format(totals.income_growth_pct or 0) }}%</div>
     </div>
     <div class="bars">
+      {% for tick in chart_scale.ticks %}
+        <div class="grid-line" style="bottom:calc(24px + {{ tick.px }}px);"><span>{{ tick.label }}</span></div>
+      {% endfor %}
       {% for d in period_rows %}
-      <div class="bar-col">
-        <div class="bar" style="height:{{ d.income_h }}px" title="{{ d.label }} · € {{ '%.2f'|format(d.income) }}"></div>
+      <div class="bar-col js-day-detail" data-detail-title="Entrate {{ d.day_label }}" data-detail="{{ d.income_detail }}" title="{{ d.income_detail }}">
+        {% if d.income > 0 %}<div class="bar-value">€ {{ '%.0f'|format(d.income) }}</div>{% endif %}
+        <div class="bar" style="height:{{ d.income_h }}px"></div>
         <div class="bar-label">{{ d.label }}</div>
       </div>
       {% endfor %}
     </div>
+    <div class="chart-detail"><div class="chart-detail-title js-detail-title">Dettaglio entrate</div><div class="js-detail-box">Passa con il mouse o clicca una barra per leggere POS, contanti, delivery e altri metodi.</div></div>
   </div>
 
   <div class="chart-card">
@@ -156,13 +174,18 @@
       <div class="delta {% if totals.expense_growth_pct < 0 %}pos{% elif totals.expense_growth_pct > 0 %}neg{% else %}neu{% endif %}">{{ '%+.1f'|format(totals.expense_growth_pct or 0) }}%</div>
     </div>
     <div class="bars">
+      {% for tick in chart_scale.ticks %}
+        <div class="grid-line" style="bottom:calc(24px + {{ tick.px }}px);"><span>{{ tick.label }}</span></div>
+      {% endfor %}
       {% for d in period_rows %}
-      <div class="bar-col">
-        <div class="bar expense" style="height:{{ d.expense_h }}px" title="{{ d.label }} · € {{ '%.2f'|format(d.expense) }}"></div>
+      <div class="bar-col js-day-detail" data-detail-title="Uscite {{ d.day_label }}" data-detail="{{ d.expense_detail }}" title="{{ d.expense_detail }}">
+        {% if d.expense > 0 %}<div class="bar-value">€ {{ '%.0f'|format(d.expense) }}</div>{% endif %}
+        <div class="bar expense" style="height:{{ d.expense_h }}px"></div>
         <div class="bar-label">{{ d.label }}</div>
       </div>
       {% endfor %}
     </div>
+    <div class="chart-detail"><div class="chart-detail-title js-detail-title">Dettaglio uscite</div><div class="js-detail-box">Passa con il mouse o clicca una barra per leggere uscite raggruppate: stipendi, materie prime, manutenzione, professionisti, bollette e altre famiglie.</div></div>
   </div>
 
   <div class="chart-card">
@@ -174,13 +197,18 @@
       <div class="delta {% if totals.net_period > 0 %}pos{% elif totals.net_period < 0 %}neg{% else %}neu{% endif %}">{{ '%+.1f'|format(totals.net_growth_pct or 0) }}%</div>
     </div>
     <div class="bars">
+      {% for tick in chart_scale.ticks %}
+        <div class="grid-line" style="bottom:calc(24px + {{ tick.px }}px);"><span>{{ tick.label }}</span></div>
+      {% endfor %}
       {% for d in period_rows %}
-      <div class="bar-col">
-        <div class="bar net {% if d.positive %}pos{% else %}neg{% endif %}" style="height:{{ d.net_h }}px" title="{{ d.label }} · € {{ '%.2f'|format(d.net) }}"></div>
+      <div class="bar-col js-day-detail" data-detail-title="Bilancio {{ d.day_label }}" data-detail="{{ d.net_detail }}" title="{{ d.net_detail }}">
+        {% if d.net != 0 %}<div class="bar-value">€ {{ '%.0f'|format(d.net) }}</div>{% endif %}
+        <div class="bar net {% if d.positive %}pos{% else %}neg{% endif %}" style="height:{{ d.net_h }}px"></div>
         <div class="bar-label">{{ d.label }}</div>
       </div>
       {% endfor %}
     </div>
+    <div class="chart-detail"><div class="chart-detail-title js-detail-title">Dettaglio bilancio</div><div class="js-detail-box">Clicca un giorno per vedere entrate, uscite e saldo netto.</div></div>
   </div>
 
   <div class="chart-card">
@@ -215,6 +243,54 @@
     </div>
   </div>
 </div>
+
+<div class="card" style="margin-bottom:14px;">
+  <div class="chart-head" style="margin-bottom:12px;">
+    <div>
+      <div class="muted">Tabella giorno per giorno</div>
+      <h3 style="margin:4px 0 0 0;">Entrate, uscite e bilancio · {{ period_meta.range_label }}</h3>
+    </div>
+    <div class="pill">{{ period_rows|length }} giorni visualizzati</div>
+  </div>
+  <div class="daily-table-wrap">
+    <table class="daily-table">
+      <thead>
+        <tr>
+          <th>Giorno</th>
+          <th>Entrate</th>
+          <th>Uscite</th>
+          <th>Bilancio</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in period_rows %}
+        <tr class="js-day-detail" data-detail-title="Dettaglio {{ d.day_label }}" data-detail="Entrate
+{{ d.income_detail }}
+
+Uscite
+{{ d.expense_detail }}
+
+Bilancio
+{{ d.net_detail }}" title="Clicca per vedere il dettaglio del giorno">
+          <td><strong>{{ d.day_label }}</strong></td>
+          <td>€ {{ '%.2f'|format(d.income or 0) }}</td>
+          <td>€ {{ '%.2f'|format(d.expense or 0) }}</td>
+          <td class="{% if d.net >= 0 %}pos{% else %}neg{% endif %}">€ {{ '%.2f'|format(d.net or 0) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <th>Totale</th>
+          <th style="text-align:right;">€ {{ '%.2f'|format(totals.income_period or 0) }}</th>
+          <th style="text-align:right;">€ {{ '%.2f'|format(totals.expense_period or 0) }}</th>
+          <th style="text-align:right;" class="{% if totals.net_period >= 0 %}pos{% else %}neg{% endif %}">€ {{ '%.2f'|format(totals.net_period or 0) }}</th>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  <div class="chart-detail" style="margin-top:12px;"><div class="chart-detail-title js-detail-title">Dettaglio giorno</div><div class="js-detail-box">Clicca una riga della tabella per vedere il dettaglio completo di entrate, uscite e bilancio.</div></div>
+</div>
 {% endif %}
 
 <div class="doc-grid" style="margin-bottom:14px;">
@@ -243,4 +319,22 @@
   </div>
 </div>
 {% endif %}
+
+<script>
+(function(){
+  function showDetail(el){
+    var card = el.closest('.chart-card') || el.closest('.card');
+    if(!card) return;
+    var box = card.querySelector('.js-detail-box');
+    var title = card.querySelector('.js-detail-title');
+    if(!box) return;
+    box.textContent = el.getAttribute('data-detail') || 'Nessun dettaglio disponibile.';
+    if(title){ title.textContent = el.getAttribute('data-detail-title') || 'Dettaglio'; }
+  }
+  document.querySelectorAll('.js-day-detail').forEach(function(el){
+    el.addEventListener('click', function(){ showDetail(el); });
+    el.addEventListener('mouseenter', function(){ showDetail(el); });
+  });
+})();
+</script>
 {% endblock %}
