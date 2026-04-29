@@ -1441,6 +1441,7 @@ _EXPENSE_RULES = [
     ]),
 ]
 
+
 def _clean_expense_candidate(text: str) -> str:
     s = str(text or '')
     s = re.sub(r'\b(import\s*txt|txt|uscita|spesa|spese)\b', ' ', s, flags=re.I)
@@ -1449,45 +1450,133 @@ def _clean_expense_candidate(text: str) -> str:
     return re.sub(r'\s+', ' ', s).strip()
 
 
+def _standard_expense_category_names() -> set:
+    """Categorie contenitore: non devono guidare la riclassificazione."""
+    names = {
+        'stipendi', 'materie prime', 'manutenzione e attrezzature', 'professionisti',
+        'bollette e utenze', 'affitti e abbonamenti', 'servizi finanziari',
+        'servizi piattaforme', 'marketing', 'packaging', 'tasse', 'delivery e logistica',
+        'pulizie e consumo interno', 'da verificare movimento interno', 'movimenti cassa',
+        'spese secondarie'
+    }
+    try:
+        for fam, _ in _EXPENSE_RULES:
+            names.add(_normalize_signature(fam))
+    except Exception:
+        pass
+    return names
+
+
+def _category_is_only_container(category: str) -> bool:
+    norm = _normalize_signature(category)
+    return (not norm) or norm in _GENERIC_EXPENSE_CATEGORIES or norm in _standard_expense_category_names()
+
+
+def _is_income_or_summary_note_part(part: str) -> bool:
+    """Riconosce le righe di contesto del giorno che NON sono la spesa specifica."""
+    text = str(part or '').strip()
+    if not text:
+        return True
+    norm = _normalize_signature(text)
+    if not norm:
+        return True
+    try:
+        if _should_skip_import_amount_line(text):
+            return True
+    except Exception:
+        pass
+    label = re.split(r"[0-9]", text, 1)[0].strip(' :-–—')
+    try:
+        if _normalize_import_payment_method(label):
+            return True
+    except Exception:
+        pass
+    if re.match(r'^(pos|cash|qcash|contanti|deliveroo|glovo|just\s*eat|justeat|scuola|satispay|paypal)\b', norm):
+        return True
+    if norm.startswith(('fondo cassa', 'fondo ', 'total ', 'totale ', 'avg ', 'media ')):
+        return True
+    if 'total sales' in norm or 'avg day' in norm or 'media giorno' in norm:
+        return True
+    return False
+
+
+def _clean_expense_notes_for_rules(notes: str) -> str:
+    parts = re.split(r'\s*\|\s*|\n+', str(notes or ''))
+    kept = []
+    seen = set()
+    for part in parts:
+        clean = re.sub(r'\s+', ' ', str(part or '').replace('\u00a0', ' ')).strip()
+        if not clean or _is_income_or_summary_note_part(clean):
+            continue
+        key = _normalize_signature(clean)
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(clean)
+    return ' | '.join(kept[:6])
+
+
+def _expense_text_for_rules(row, *, strip_paid_by: bool = True) -> str:
+    """Testo contabile usato dalle regole automatiche.
+
+    La categoria vecchia non deve trascinare il risultato. Se una spesa era finita
+    in "Movimenti cassa", ricostruisco la categoria da fornitore + riga originale pulita.
+    """
+    category_part = str(row.get('category') or '').strip()
+    if _category_is_only_container(category_part):
+        category_part = ''
+    supplier_part = str(row.get('supplier') or '').strip()
+    notes_part = _clean_expense_notes_for_rules(str(row.get('notes') or ''))
+    text = ' '.join([category_part, supplier_part, notes_part])
+    if strip_paid_by:
+        # Chi ha pagato non decide la categoria: "Metro paid by Amza" resta Materie prime.
+        text = re.sub(r"\b(paid by|pagato da|pagata da|pagato con|pagata con|by)\s+[A-Za-zÀ-ÿ0-9_ .'-]+", ' ', text, flags=re.I)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def _expense_primary_text(row) -> str:
+    """Solo voce principale, senza note di contesto: utile per Movimenti cassa / giroconti."""
+    category_part = str(row.get('category') or '').strip()
+    if _category_is_only_container(category_part):
+        category_part = ''
+    supplier_part = str(row.get('supplier') or '').strip()
+    if supplier_part:
+        return supplier_part
+    return category_part or _clean_expense_notes_for_rules(str(row.get('notes') or ''))
+
+
 def _looks_like_employee_name(row) -> bool:
-    category = str(row.get('category') or '')
-    supplier = str(row.get('supplier') or '')
-    notes = str(row.get('notes') or '')
-    joined = ' '.join([category, supplier, notes])
-    norm_joined = _normalize_signature(joined)
+    text = _expense_text_for_rules(row)
+    norm_joined = _normalize_signature(text)
 
     if any(hint in norm_joined for hint in _EMPLOYEE_WORD_HINTS):
         return True
 
-    for raw in [supplier, category]:
+    for raw in [_expense_primary_text(row), _clean_expense_notes_for_rules(str(row.get('notes') or ''))]:
         candidate = _clean_expense_candidate(raw)
         norm = _normalize_signature(candidate)
         if not norm:
             continue
         tokens = [t for t in norm.split() if t]
-        if len(tokens) > 4:
+        if len(tokens) > 5:
             continue
-        # Se dentro la voce c'è un nome conosciuto, la considero personale anche se è scritto
-        # insieme alla sede: "Palazzuolo Stefano", "Colazione Elio", "Amza".
         if any(t in _KNOWN_EMPLOYEE_NAMES for t in tokens):
             return True
         if any(t in _NON_EMPLOYEE_SINGLE_WORDS for t in tokens):
             continue
-        # Regola richiesta: se è una voce corta composta solo da parole alfabetiche
-        # e non sembra un fornitore/categoria, la tratto come nome persona => dipendente.
-        if 1 <= len(tokens) <= 2 and all(re.match(r'^[a-z]{2,}$', t) for t in tokens):
-            return True
-
+        # Non trasformo qualunque parola sconosciuta in stipendio: riduce errori con fornitori nuovi.
     return False
 
 
 _MATERIE_PRIME_STRONG_HINTS = (
     'sapori di toscana', 'sapori toscana', 'sogegross', 'sogergross', 'socialgros', 'socialgross',
-    'metro', 'metro cure', 'metro le cure', 'carrefour', 'esselunga', 'coop cure', 'conad',
-    'forno spinza', 'forno', 'macellaio', 'macelleria', 'carne', 'buns', 'caffe', 'caffè', 'coffee',
-    'aqua golden', 'acqua golden', 'prinz', 'kombucha', 'legendari', 'leggendari', 'icaro',
-    'bevande', 'bibite', 'birra', 'birre', 'ichnusa', 'caseificio', 'molino', 'panificio', 'ortofrutta',
-    'ortolano', 'fornitore', 'fornitori', 'materia prima', 'materie prime'
+    'metro', 'metro cure', 'metro le cure', 'carrefour', 'esselunga', 'coop cure', 'coop', 'conad',
+    'forno spinza', 'forno', 'panificio', 'molino', 'macellaio', 'macelleria', 'carne', 'buns',
+    'caffe', 'caffè', 'coffee', 'aqua golden', 'acqua golden', 'golden italia', 'prinz', 'kombucha',
+    'legendari', 'leggendari', 'icaro', 'bevande', 'bibite', 'birra', 'birre', 'ichnusa',
+    'caseificio', 'latticini', 'molino', 'ortofrutta', 'ortolano', 'fornitore', 'fornitori',
+    'materia prima', 'materie prime', 'cotto', 'salumi', 'salume', 'prosciutto', 'mozzarella',
+    'bufala', 'pomodoro', 'verdure', 'funghi'
 )
 
 
@@ -1506,39 +1595,28 @@ def _has_any_normalized(text: str, keywords) -> bool:
     return any(_keyword_matches_normalized(norm, k) for k in keywords if k)
 
 
-def _expense_text_for_rules(row, *, strip_paid_by: bool = True) -> str:
-    """Testo usato dalle regole. Chi ha pagato non deve decidere la categoria.
-    Esempio: "Metro cure paid by Amza" resta Metro/Materie prime, non Stipendi.
-    """
-    category_part = str(row.get('category') or '')
-    if _normalize_signature(category_part) in _GENERIC_EXPENSE_CATEGORIES:
-        category_part = ''
-    text = ' '.join([
-        category_part,
-        str(row.get('supplier') or ''),
-        str(row.get('notes') or ''),
-    ])
-    if strip_paid_by:
-        text = re.sub(r"\b(paid by|pagato da|pagata da|pagato con|pagata con|by)\s+[A-Za-zÀ-ÿ0-9_ .'-]+", ' ', text, flags=re.I)
-    return text
-
-
 def _is_strong_materie_prime(row) -> bool:
     text = _expense_text_for_rules(row)
     return _has_any_normalized(text, _MATERIE_PRIME_STRONG_HINTS)
 
 
 def _is_exact_or_near_cash_movement(row) -> bool:
-    text = _normalize_signature(_expense_text_for_rules(row))
+    # Solo se la voce principale è davvero coins/monete/cambio/resto/fondo cassa.
+    # Non guardo le note del giorno, perché contengono spesso "Fondo cassa 5€".
+    text = _normalize_signature(_expense_primary_text(row))
+    if not text:
+        return False
     tokens = set(text.split())
-    if tokens and tokens.issubset({'import', 'txt', 'coins', 'coin', 'monete', 'spicci', 'cambio', 'cassa', 'resto'}):
+    cash_tokens = {'coins', 'coin', 'monete', 'spicci', 'cambio', 'cassa', 'resto', 'fondo'}
+    if tokens and tokens.issubset(cash_tokens) and any(t in tokens for t in {'coins', 'coin', 'monete', 'spicci', 'cambio', 'resto', 'fondo'}):
         return True
-    return any(k in text for k in ['cambio cassa', 'fondo cassa', 'resto cassa'])
+    return text in {'coins', 'coin', 'monete', 'spicci', 'cambio cassa', 'resto', 'resto cassa', 'fondo cassa'}
 
 
 def _is_exact_or_near_internal_movement(row) -> bool:
+    primary = _normalize_signature(_expense_primary_text(row))
     text = _normalize_signature(_expense_text_for_rules(row))
-    cleaned = re.sub(r'\b(import|txt|uscita|spesa|spese|le|la|il|di|da)\b', ' ', text)
+    cleaned = re.sub(r'\b(import|txt|uscita|spesa|spese|le|la|il|di|da)\b', ' ', primary)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     tokens = {t for t in cleaned.split() if t}
     if tokens and tokens.issubset({'spinza', 'reburger'}):
@@ -1549,6 +1627,11 @@ def _is_exact_or_near_internal_movement(row) -> bool:
 def _rule_family_match(row):
     normalized_text = _normalize_signature(_expense_text_for_rules(row))
     for family, keywords in _EXPENSE_RULES:
+        # Movimenti cassa viene deciso solo dalla voce principale, non dalle note del giorno.
+        if family == 'Movimenti cassa':
+            if _is_exact_or_near_cash_movement(row):
+                return family
+            continue
         if any(_keyword_matches_normalized(normalized_text, k) for k in keywords):
             return family
     return ''
@@ -1568,7 +1651,7 @@ def _expense_family(row) -> str:
         return 'Stipendi'
 
     category = str(row.get('category') or '').strip()
-    if _normalize_signature(category) in _GENERIC_EXPENSE_CATEGORIES:
+    if _category_is_only_container(category):
         return 'Spese secondarie'
     return _title_case_words(category) if category else 'Spese secondarie'
 
@@ -3532,7 +3615,7 @@ async def cash_entries_import_txt(request: Request):
                         raw_line = str(expense.get('raw') or '').strip()
                         supplier = str(expense.get('name') or raw_line or 'Import TXT').strip()[:120]
                         expense_notes = _join_unique_notes([raw_line, block_notes])
-                        auto_category = _auto_expense_category('import txt', supplier, expense_notes)
+                        auto_category = _auto_expense_category('import txt', supplier, raw_line)
                         _insert_cash_expense_compat(cur, store_key, flow_date, auto_category, supplier, '', amount, expense_notes, user['username'])
                         _log(cur, store=store_key, username=user['username'], action='CREATE', category='USCITE', name=f"Import TXT {flow_date} - {supplier}", delta=float(amount or 0))
                         imported_expenses += 1
