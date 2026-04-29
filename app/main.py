@@ -1253,11 +1253,27 @@ _EXPENSE_RULES = [
     ('Marketing', ['social', 'social media', 'ads', 'marketing', 'pubblic', 'sponsorizz', 'meta', 'instagram', 'insta', 'followers', 'verification', 'facebook', 'google ads', 'tiktok', 'volantini', 'grafica']),
     ('Packaging', ['packaging', 'cartoni', 'cartone', 'vaschette', 'buste', 'sacchetti', 'tovagliol', 'posate', 'bicchieri', 'contenitori', 'etichette']),
     ('Manutenzione e attrezzature', ['ripar', 'manut', 'attrezz', 'guasto', 'tecnic', 'frigo', 'freezer', 'lavastoviglie', 'impianto', 'idraulic', 'elettric', 'macchinario', 'forno rotto', 'brico', 'ferramenta', 'vetraio', 'cappa', 'impastatrice', 'passaggio motorino', 'motorino', 'mini pinner', 'pinner', 'nastrocolor', 'amazon', 'atollo']),
-    ('Materie prime', ['mozzarella', 'farina', 'pomodor', 'salume', 'prosciutto', 'salsiccia', 'nduja', 'verdure', 'metro', 'fornit', 'forno', 'carrefour', 'esselunga', 'coop', 'conad', 'sogergross', 'food', 'bevande', 'bibite', 'ingredient', 'materie', 'materia prima', 'latte', 'bufala', 'pecorino', 'grana', 'parmigiano', 'stracciatella', 'olio', 'tonno', 'acciughe', 'funghi', 'macellaio', 'carne', 'buns', 'caffe', 'caffè', 'coffee', 'aqua golden', 'acqua golden']),
+    ('Materie prime', [
+        # Ingredienti / cucina
+        'mozzarella', 'farina', 'pomodor', 'salume', 'salumi', 'prosciutto', 'salsiccia', 'nduja', 'verdure',
+        'ortofrutta', 'ortolano', 'frutta', 'lattuga', 'rucola', 'funghi', 'cipolle', 'basilico', 'ingredient',
+        'materie', 'materia prima', 'latte', 'latticini', 'caseificio', 'bufala', 'pecorino', 'grana', 'parmigiano',
+        'stracciatella', 'olio', 'tonno', 'acciughe', 'macellaio', 'macelleria', 'carne', 'pollo', 'bovino', 'suino',
+        'buns', 'pane', 'forno', 'panificio', 'molino', 'caffe', 'caffè', 'coffee', 'dolci', 'dessert', 'gelato',
+        # Grossisti / supermercati / fornitori generici food
+        'metro', 'metro cure', 'metro le cure', 'fornit', 'fornitore', 'fornitori', 'sapori di toscana',
+        'sapori toscana', 'sapori', 'toscana sapori', 'sogegross', 'sogergross', 'socialgros', 'socialgross',
+        'carrefour', 'esselunga', 'coop', 'conad', 'lidl', 'aldi', 'pam', 'makro', 'ce di', 'cedi', 'cash and carry',
+        # Bibite / beverage
+        'bevande', 'bibite', 'drink', 'soft drink', 'birra', 'birre', 'ichnusa', 'vino', 'vini', 'acqua golden',
+        'aqua golden', 'acqua bottiglia', 'acqua naturale', 'acqua frizzante', 'prinz', 'prinz beverage',
+        'kombucha', 'kombucha legendari', 'legendari', 'leggendari', 'icaro', 'coca cola', 'cocacola', 'coca-cola',
+        'fanta', 'sprite', 'pepsi', 'red bull', 'san pellegrino', 'sanpellegrino'
+    ]),
     ('Delivery e logistica', ['delivery', 'glovo', 'deliveroo', 'just eat', 'justeat', 'logistic', 'trasporto', 'benzina', 'carburante', 'corriere', 'spedizione', 'parcheggio']),
     ('Pulizie e consumo interno', ['detersiv', 'pulizia', 'sanificant', 'carta mani', 'scottex', 'sapone', 'sgrassatore', 'candeggina']),
     ('Investimenti e rientri', ['return on investment', 'investimento', 'roi']),
-    ('Spese secondarie', ['secondar', 'varie', 'cinese', 'coins', 'coin', 'bit', 'extra', 'altro', 'spesa piccola'])
+    ('Spese secondarie', ['secondar', 'varie', 'cinese', 'coins', 'coin', 'bit', 'altro', 'spesa piccola'])
 ]
 
 def _clean_expense_candidate(text: str) -> str:
@@ -1300,6 +1316,30 @@ def _looks_like_employee_name(row) -> bool:
     return False
 
 
+_MATERIE_PRIME_STRONG_HINTS = (
+    'sapori di toscana', 'sapori toscana', 'sogegross', 'sogergross', 'socialgros', 'socialgross',
+    'metro', 'metro cure', 'metro le cure', 'carrefour', 'esselunga', 'coop cure', 'conad',
+    'forno spinza', 'forno', 'macellaio', 'macelleria', 'carne', 'buns', 'caffe', 'caffè', 'coffee',
+    'aqua golden', 'acqua golden', 'prinz', 'kombucha', 'legendari', 'leggendari', 'icaro',
+    'bevande', 'bibite', 'birra', 'birre', 'ichnusa', 'caseificio', 'molino', 'panificio', 'ortofrutta',
+    'ortolano', 'fornitore', 'fornitori', 'materia prima', 'materie prime'
+)
+
+
+def _has_any_normalized(text: str, keywords) -> bool:
+    norm = _normalize_signature(text)
+    return any(_normalize_signature(k) in norm for k in keywords if k)
+
+
+def _is_strong_materie_prime(row) -> bool:
+    text = ' '.join([
+        str(row.get('category') or ''),
+        str(row.get('supplier') or ''),
+        str(row.get('notes') or ''),
+    ])
+    return _has_any_normalized(text, _MATERIE_PRIME_STRONG_HINTS)
+
+
 def _expense_family(row) -> str:
     normalized_text = _normalize_signature(' '.join([
         str(row.get('category') or ''),
@@ -1326,15 +1366,27 @@ def _auto_expense_category(category: str = '', supplier: str = '', notes: str = 
 
 def _should_auto_replace_expense_category(category: str, supplier: str = '', notes: str = '') -> bool:
     norm_cat = _normalize_signature(category)
+    row = {'category': category, 'supplier': supplier, 'notes': notes}
+    new_category = _auto_expense_category(category, supplier, notes)
+
+    # Le categorie generiche/provvisorie vanno sempre ricalcolate.
     if norm_cat in _GENERIC_EXPENSE_CATEGORIES:
         return True
-    if norm_cat != _normalize_signature('Stipendi') and _looks_like_employee_name({'category': category, 'supplier': supplier, 'notes': notes}):
+
+    # Rimedio dati vecchi: se una voce è chiaramente materia prima/fornitore food o bibite,
+    # la correggo anche se prima era finita in una categoria sbagliata.
+    if _normalize_signature(new_category) == _normalize_signature('Materie prime') and _is_strong_materie_prime(row):
         return True
+
+    # Rimedio dati vecchi: nomi/personale finiti fuori dagli stipendi.
+    if norm_cat != _normalize_signature('Stipendi') and _looks_like_employee_name(row):
+        return True
+
     return False
 
 
 def _recategorize_existing_cash_expenses(scope_store: str = 'ALL') -> int:
-    """Rimedia i dati già inseriti: aggiorna solo categorie generiche o persone finite fuori dagli stipendi."""
+    """Rimedia i dati già inseriti: aggiorna categorie generiche, fornitori food/bibite e persone finite fuori dagli stipendi."""
     updated = 0
     ph = _ph()
     try:
