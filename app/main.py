@@ -756,12 +756,160 @@ def _normalize_import_payment_method(label: str):
     return ''
 
 
+def _normalize_import_text_for_matching(text: str) -> str:
+    """Versione semplice senza accenti, utile per riconoscere mesi/negozi."""
+    try:
+        import unicodedata
+        text = unicodedata.normalize('NFKD', text or '')
+        text = ''.join(ch for ch in text if not unicodedata.combining(ch))
+    except Exception:
+        text = text or ''
+    return text.lower().strip()
+
+
+MONTH_WORDS = {
+    'gennaio': 1, 'jan': 1, 'january': 1,
+    'febbraio': 2, 'feb': 2, 'february': 2,
+    'marzo': 3, 'mar': 3, 'march': 3,
+    'aprile': 4, 'apr': 4, 'april': 4,
+    'maggio': 5, 'may': 5,
+    'giugno': 6, 'jun': 6, 'june': 6,
+    'luglio': 7, 'jul': 7, 'july': 7,
+    'agosto': 8, 'aug': 8, 'august': 8,
+    'settembre': 9, 'sett': 9, 'sep': 9, 'september': 9,
+    'ottobre': 10, 'oct': 10, 'october': 10,
+    'novembre': 11, 'nov': 11, 'november': 11,
+    'dicembre': 12, 'dec': 12, 'december': 12,
+}
+
+
+_SKIP_IMPORT_AMOUNT_PREFIXES = (
+    'total', 'totale', 'totali', 'totale mese', 'totale incassi', 'incassi totali',
+    'avg', 'media', 'fondo cassa', 'fondo', 'saldo', 'netto', 'lordo'
+)
+
+
+def _detect_import_store(line: str, current_store: str) -> str:
+    upper = (line or '').upper()
+    if 'SPINZA' in upper:
+        return 'spinza'
+    if 'CAMALDOLI' in upper:
+        return 'reburger_camaldoli'
+    if 'PALAZZUOLO' in upper or 'PALAZZUOLI' in upper:
+        return 'reburger_palazzuolo'
+    return current_store or 'spinza'
+
+
+def _detect_import_month_year(line: str, current_month=None, current_year=None):
+    normalized = _normalize_import_text_for_matching(line)
+    month = current_month
+    year = current_year
+    month_found_in_line = False
+
+    # Formati tipo 04/2026, 04-2026, 2026-04
+    m_num = re.search(r'\b(20\d{2})[\-/\.](0?[1-9]|1[0-2])\b', normalized)
+    if m_num:
+        year = int(m_num.group(1)); month = int(m_num.group(2)); month_found_in_line = True
+    m_num = re.search(r'\b(0?[1-9]|1[0-2])[\-/\.](20\d{2})\b', normalized)
+    if m_num:
+        month = int(m_num.group(1)); year = int(m_num.group(2)); month_found_in_line = True
+
+    # Formati tipo APRILE 2026 / APRIL 2026 / SPINZA FEBRUARY 2026.
+    # Non uso numeri a 1-2 cifre come anno, altrimenti righe tipo "Deliveroo 80€" diventano 2080.
+    for word, value in MONTH_WORDS.items():
+        if re.search(r'\b' + re.escape(word) + r'\b', normalized):
+            month = value
+            month_found_in_line = True
+            break
+    y = re.search(r'\b(20\d{2})\b', normalized)
+    if y and month_found_in_line:
+        year = int(y.group(1))
+    return month, year
+
+
+def _start_import_block(blocks, current, store, iso_date):
+    if current and (current.get('incomes') or current.get('expenses') or current.get('notes')):
+        blocks.append(current)
+    return {
+        'store': store,
+        'date': iso_date,
+        'incomes': [],
+        'expenses': [],
+        'notes': [],
+    }
+
+
+def _parse_import_date_from_line(line: str, context_month=None, context_year=None):
+    clean = re.sub(r"\s+", ' ', (line or '').replace(' ', ' ')).strip()
+    normalized = _normalize_import_text_for_matching(clean)
+
+    # 2026-04-01
+    m = re.search(r"\b(20\d{2})[\-/\.](\d{1,2})[\-/\.](\d{1,2})\b", clean)
+    if m:
+        yy, mm, dd = m.groups()
+        try:
+            return date(int(yy), int(mm), int(dd)).isoformat()
+        except Exception:
+            return None
+
+    # 01/04/26, 01-04-2026, 1.4.26
+    m = re.search(r"\b(\d{1,2})[\-/\.](\d{1,2})[\-/\.](\d{2,4})\b", clean)
+    if m:
+        dd, mm, yy = m.groups()
+        year = int(yy)
+        if year < 100:
+            year += 2000
+        try:
+            return date(year, int(mm), int(dd)).isoformat()
+        except Exception:
+            return None
+
+    # 01/04 oppure 01-04: uso anno dal titolo/mese corrente se presente
+    m = re.search(r"\b(\d{1,2})[\-/\.](\d{1,2})\b", clean)
+    if m and context_year:
+        dd, mm = m.groups()
+        try:
+            return date(int(context_year), int(mm), int(dd)).isoformat()
+        except Exception:
+            return None
+
+    # 1 aprile 2026 / 1 apr / 1 APRILE
+    for word, month_value in MONTH_WORDS.items():
+        m = re.search(r"\b(\d{1,2})\s+" + re.escape(word) + r"\b", normalized)
+        if m:
+            day = int(m.group(1))
+            y = re.search(r"\b(20\d{2}|\d{2})\b", normalized)
+            year = int(y.group(1)) if y else int(context_year or date.today().year)
+            if year < 100:
+                year += 2000
+            try:
+                return date(year, month_value, day).isoformat()
+            except Exception:
+                return None
+
+    # Riga solo giorno tipo "1", "01", "1 lunedì", "01 - lun" dentro un titolo APRILE 2026.
+    # Evito righe con euro/importi o parole da incasso/spesa.
+    if context_month and context_year and '€' not in clean:
+        if not re.search(r"\b(pos|cash|contanti|deliveroo|glovo|just\s*eat|satispay|paypal|totale|fondo|metro|forno|nexi|affitto)\b", normalized):
+            m = re.match(r"^(\d{1,2})(?:\s|$|[\-\./])", normalized)
+            if m:
+                day = int(m.group(1))
+                if 1 <= day <= 31:
+                    try:
+                        return date(int(context_year), int(context_month), day).isoformat()
+                    except Exception:
+                        return None
+    return None
+
+
 def _parse_import_txt_blocks(raw_text: str, fallback_store: str = 'spinza'):
     text = (raw_text or '').replace('\r\n', '\n').replace('\r', '\n')
     lines = [ln.strip() for ln in text.split('\n')]
     current = None
     blocks = []
     store = fallback_store or 'spinza'
+    context_month = None
+    context_year = None
 
     def close_current():
         nonlocal current
@@ -775,47 +923,23 @@ def _parse_import_txt_blocks(raw_text: str, fallback_store: str = 'spinza'):
         if not line:
             continue
 
-        upper_line = line.upper()
-        if not current and ('SPINZA' in upper_line):
-            store = 'spinza'
-            continue
-        if not current and ('CAMALDOLI' in upper_line):
-            store = 'reburger_camaldoli'
-            continue
-        if not current and ('PALAZZUOLO' in upper_line):
-            store = 'reburger_palazzuolo'
-            continue
-
-        m_date = re.search(r"(\d{1,2})/(\d{1,2})/(\d{2,4})", line)
-        if m_date:
+        detected_store = _detect_import_store(line, store)
+        if detected_store != store:
             close_current()
-            dd, mm, yy = m_date.groups()
-            year = int(yy)
-            if year < 100:
-                year += 2000
-            try:
-                iso = date(year, int(mm), int(dd)).isoformat()
-            except Exception:
-                continue
-            current = {
-                'store': store,
-                'date': iso,
-                'incomes': [],
-                'expenses': [],
-                'notes': [],
-            }
+            store = detected_store
+        context_month, context_year = _detect_import_month_year(line, context_month, context_year)
+
+        iso_date = _parse_import_date_from_line(line, context_month, context_year)
+        if iso_date:
+            current = _start_import_block(blocks, current, store, iso_date)
             continue
 
+        # Se il testo ha solo intestazioni prima della data, non salvo nulla finché non trovo una giornata.
         if not current:
             continue
 
-        lower = line.lower()
-        if lower.startswith('total sales') or lower.startswith('avg / day'):
-            current['notes'].append(line)
-            continue
-        if lower.startswith('total '):
-            continue
-        if lower.startswith('fondo cassa'):
+        lower = _normalize_import_text_for_matching(line)
+        if lower.startswith(_SKIP_IMPORT_AMOUNT_PREFIXES):
             current['notes'].append(line)
             continue
 
@@ -831,12 +955,12 @@ def _parse_import_txt_blocks(raw_text: str, fallback_store: str = 'spinza'):
             if '(' in line or ' x ' in lower:
                 current['notes'].append(line)
         else:
-            expense_name = label or line
+            # Ogni riga con importo non riconosciuta come metodo di pagamento viene trattata come spesa.
+            expense_name = label or re.sub(r"\s*€?\s*[0-9]+(?:[\.,][0-9]{1,2})?\s*€?\s*$", '', line).strip() or line
             current['expenses'].append({'name': expense_name[:120], 'amount': amount, 'raw': line})
 
     close_current()
     return blocks
-
 
 
 PALETTE_DARK = [
@@ -2487,6 +2611,7 @@ async def cash_entries_create(request: Request):
     return RedirectResponse('/gestionale/incassi', status_code=HTTP_303_SEE_OTHER)
 
 
+@app.post("/gestionale/incassi/importa-file")
 @app.post("/gestionale/incassi/import-txt")
 async def cash_entries_import_txt(request: Request):
     user = require_login(request)
@@ -2496,28 +2621,34 @@ async def cash_entries_import_txt(request: Request):
         return RedirectResponse('/gestionale', status_code=HTTP_303_SEE_OTHER)
 
     form = await request.form()
-    upload = form.get('import_file')
+    # Compatibile sia con il nuovo form (import_file/fallback_store) sia con il vecchio form (upload_file/store).
+    upload = form.get('import_file') or form.get('upload_file')
     pasted_text = str(form.get('import_text') or '').strip()
     include_expenses = _is_truthy(form.get('import_expenses'))
     replace_existing_dates = _is_truthy(form.get('replace_existing_dates'))
 
-    fallback_store = str(form.get('fallback_store') or '').strip()
+    fallback_store = str(form.get('fallback_store') or form.get('store') or '').strip()
     if fallback_store not in STORES:
         fallback_store = (request.session.get('active_store') if is_admin(request) else user.get('store')) or 'spinza'
     if fallback_store not in STORES:
         fallback_store = 'spinza'
 
-    raw_text = pasted_text
+    text_parts = []
     filename = ''
-    if not raw_text and getattr(upload, 'filename', ''):
+    if getattr(upload, 'filename', ''):
         try:
             raw_bytes = await upload.read()
-            raw_text = _decode_uploaded_text(raw_bytes)
+            uploaded_text = _decode_uploaded_text(raw_bytes)
+            if uploaded_text.strip():
+                text_parts.append(uploaded_text)
             filename = str(getattr(upload, 'filename', '') or '').strip()
         except Exception as e:
             msg = quote_plus(f'File non leggibile: {e}')
             return RedirectResponse(f'/gestionale/incassi?import_error={msg}', status_code=HTTP_303_SEE_OTHER)
+    if pasted_text.strip():
+        text_parts.append(pasted_text)
 
+    raw_text = '\n'.join(text_parts)
     if not raw_text.strip():
         msg = quote_plus('Carica un file TXT/CSV oppure incolla il testo da importare.')
         return RedirectResponse(f'/gestionale/incassi?import_error={msg}', status_code=HTTP_303_SEE_OTHER)
