@@ -1580,6 +1580,230 @@ _MATERIE_PRIME_STRONG_HINTS = (
 )
 
 
+
+# Regole contabili molto forti: prima di qualsiasi categoria generica.
+# Queste sono pensate per i tuoi appunti reali: fornitori food/bibite in Materie prime,
+# nomi/paghe in Stipendi, parole tecniche in utenze/commissioni/ecc.
+_STRICT_CATEGORY_RULES = [
+    ('Materie prime', [
+        # fornitori food/bibite ricorrenti
+        'sapori di toscana', 'sapori toscana', 'sogegross', 'sogergross', 'socialgros', 'socialgross',
+        'social gros', 'social gross', 'metro', 'metro cure', 'metro le cure', 'cheque metro', 'makro',
+        'carrefour', 'esselunga', 'coop', 'coop cure', 'conad', 'lidl', 'aldi', 'pam', 'cash and carry',
+        'icaro', 'prinz', 'kombucha', 'legendari', 'leggendari', 'golden italia', 'aqua golden', 'acqua golden',
+        # fornitori/ingredienti
+        'forno', 'forno spinza', 'panificio', 'molino', 'farina', 'macellaio', 'macelleria', 'carne', 'buns',
+        'caffe', 'caffè', 'coffee', 'cash coffee', 'bibite', 'bevande', 'soft drink', 'birra', 'birre', 'drink',
+        'coca cola', 'cocacola', 'coca-cola', 'fanta', 'sprite', 'red bull', 'san pellegrino', 'sanpellegrino',
+        'caseificio', 'latticini', 'mozzarella', 'bufala', 'pecorino', 'grana', 'parmigiano', 'stracciatella',
+        'salumi', 'salume', 'prosciutto', 'cotto', 'salsiccia', 'nduja', 'pomodoro', 'verdure', 'funghi',
+        'ortofrutta', 'ortolano', 'olio', 'dolci', 'dessert', 'materia prima', 'materie prime'
+    ]),
+    ('Stipendi', [
+        'stipendio', 'stipendi', 'salario', 'salari', 'busta paga', 'paghe dipendenti', 'dipendente',
+        'anticipo', 'acconto stipendio', 'extra sala', 'extra cucina', 'extra marzo', 'extra aprile',
+        'consegna', 'turno', 'turni', 'ore lavoro', 'alberghiera',
+        # nomi/persone usate nei tuoi appunti: se compaiono come voce principale, sono personale
+        'jess', 'samuele', 'boubou', 'angelica', 'aneglica', 'miriam', 'renis', 'alisa', 'alex', 'amza',
+        'coleschi', 'lorenzo', 'elio', 'stefano', 'mira', 'giulia', 'lipo', 'niccolo', 'nicolo', 'mattia',
+        'mohamed', 'youssef', 'hamza'
+    ]),
+    ('Affitti e abbonamenti', [
+        'affitto', 'affitti', 'rent', 'locazione', 'canone locazione', 'canone affitto', 'rent spinza',
+        'affitto bnb', 'affitto reburger', 'affitto villani', 'rent villani'
+    ]),
+    ('Servizi finanziari', [
+        'nexi', 'sumup', 'qonto', 'rata qonto', 'oneri commissioni', 'commissione', 'commissioni',
+        'banca', 'bonifico', 'canone bancario', 'transazione', 'transazioni'
+    ]),
+    ('Bollette e utenze', [
+        'luce', 'gas', 'acqua bnb', 'aqua bnb', 'acqua b&b', 'lumina', 'enel', 'eni', 'wifi', 'wi fi',
+        'vodafone', 'tim', 'wind', 'iliad', 'telefono', 'internet', 'fibra', 'utenza', 'utenze', 'bolletta', 'bollette'
+    ]),
+    ('Professionisti', [
+        'consulente', 'commercialista', 'consulente del lavoro', 'paghe', 'cedolino', 'architect', 'architetto',
+        'chiara architect', 'geometra', 'avvocato', 'notaio', 'studio professionale'
+    ]),
+    ('Marketing', [
+        'social media', 'social', 'instagram', 'insta', 'followers', 'verification', 'the florentine',
+        'florentine', 'ads', 'sponsorizzata', 'sponsorizzate', 'pubblicita', 'pubblicità', 'marketing'
+    ]),
+    ('Packaging', [
+        'packaging', 'cartoni', 'cartone', 'vaschette', 'buste', 'sacchetti', 'tovaglioli', 'bicchieri',
+        'contenitori', 'packaging lecure', 'packaging le cure'
+    ]),
+    ('Manutenzione e attrezzature', [
+        'amazon', 'brico', 'ferramenta', 'vetraio', 'cappa', 'impastatrice', 'motorino', 'mini pinner',
+        'pinner', 'nastrocolor', 'riparazione', 'manutenzione', 'attrezzatura', 'attrezzature', 'utensile',
+        'ricambio', 'frigo', 'freezer', 'lavastoviglie'
+    ]),
+    ('Tasse', [
+        'imposta da bollo', 'imposta', 'bollo', 'f24', 'iva', 'inps', 'tari', 'imu', 'tassa', 'tasse', 'tributo'
+    ]),
+    ('Servizi piattaforme', [
+        'the fork pay', 'the fork', 'thefork', 'fork pay', 'forkpay'
+    ]),
+    ('Spese secondarie', [
+        'cinese', 'bit'
+    ]),
+]
+
+
+def _match_strict_category_from_text(text: str) -> str:
+    """Categoria forte basata sulla singola riga/voce, non sul blocco del giorno.
+
+    Nota: i nomi di persona vengono controllati DOPO i fornitori/parole operative.
+    Così "Alisa social media" resta Marketing e "Rent Villani Amza" resta Affitti.
+    """
+    norm = _normalize_signature(text)
+    if not norm:
+        return ''
+    # Prima tutte le categorie operative, esclusi i nomi/stipendi.
+    for category, keywords in _STRICT_CATEGORY_RULES:
+        if category == 'Stipendi':
+            continue
+        for kw in keywords:
+            if _keyword_matches_normalized(norm, kw):
+                return category
+    # Poi il personale.
+    for category, keywords in _STRICT_CATEGORY_RULES:
+        if category != 'Stipendi':
+            continue
+        for kw in keywords:
+            if _keyword_matches_normalized(norm, kw):
+                return category
+    return ''
+
+
+def _extract_learning_pattern_from_supplier(supplier: str, notes: str = '') -> str:
+    """Crea una chiave riutilizzabile per imparare correzioni manuali: Metro Cure -> metro, Sogergross Le Cure -> sogergross."""
+    raw = str(supplier or '').strip() or str(notes or '').strip()
+    raw = re.sub(r'€?\s*\d+(?:[\.,]\d{1,2})?\s*€?', ' ', raw)
+    raw = re.sub(r'\b(paid by|pagato da|pagata da|by)\b.*$', ' ', raw, flags=re.I)
+    norm = _normalize_signature(raw)
+    # tolgo parole che sono solo sede/contesto e non il fornitore
+    stop = {
+        'spinza', 'reburger', 'camaldoli', 'palazzuolo', 'palazzuoli', 'cure', 'lecure', 'le', 'la', 'il',
+        'atollo', 'villani', 'bnb', 'foscolo', 'marzo', 'aprile', 'febbraio', 'gennaio', 'maggio', 'giugno',
+        'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre', 'paid', 'by', 'amza'
+    }
+    tokens = [t for t in norm.split() if t and t not in stop]
+    if not tokens:
+        return norm[:80]
+    joined = ' '.join(tokens)
+    for phrase in ['sapori di toscana', 'social gross', 'social gros', 'soge gross', 'the fork', 'the florentine', 'cash coffee']:
+        pn = _normalize_signature(phrase)
+        if pn in joined:
+            return pn
+    return ' '.join(tokens[:2])[:80]
+
+
+def _ensure_cash_expense_category_rules_table(cur):
+    """Tabella piccola per far imparare al gestionale le correzioni fatte con Sposta."""
+    try:
+        if using_postgres():
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS cash_expense_category_rules (
+                    id SERIAL PRIMARY KEY,
+                    store TEXT NOT NULL DEFAULT 'ALL',
+                    pattern TEXT NOT NULL DEFAULT '',
+                    pattern_norm TEXT NOT NULL DEFAULT '',
+                    category TEXT NOT NULL DEFAULT '',
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_by TEXT NOT NULL DEFAULT 'system',
+                    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+        else:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS cash_expense_category_rules (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    store TEXT NOT NULL DEFAULT 'ALL',
+                    pattern TEXT NOT NULL DEFAULT '',
+                    pattern_norm TEXT NOT NULL DEFAULT '',
+                    category TEXT NOT NULL DEFAULT '',
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_by TEXT NOT NULL DEFAULT 'system',
+                    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+    except Exception:
+        pass
+
+
+def _load_learned_expense_rules(cur, store: str = 'ALL') -> list[dict]:
+    try:
+        _ensure_cash_expense_category_rules_table(cur)
+        ph = _ph()
+        rows = _dict_rows(
+            cur,
+            f"SELECT pattern_norm, category FROM cash_expense_category_rules WHERE is_active=1 AND (store={ph} OR store='ALL') ORDER BY LENGTH(pattern_norm) DESC, id DESC",
+            (store or 'ALL',),
+        )
+        return [r for r in rows if r.get('pattern_norm') and r.get('category')]
+    except Exception:
+        return []
+
+
+def _match_learned_category(row, rules: list[dict] | None = None, cur=None, store: str = 'ALL') -> str:
+    rules = rules if rules is not None else (_load_learned_expense_rules(cur, store) if cur is not None else [])
+    if not rules:
+        return ''
+    text = _normalize_signature(_expense_primary_text(row) + ' ' + _expense_text_for_rules(row))
+    if not text:
+        return ''
+    for rule in rules:
+        pat = str(rule.get('pattern_norm') or '').strip()
+        if pat and _keyword_matches_normalized(text, pat):
+            return str(rule.get('category') or '').strip()
+    return ''
+
+
+def _save_learned_expense_rule(cur, *, store: str, supplier: str, notes: str, category: str, username: str):
+    pattern = _extract_learning_pattern_from_supplier(supplier, notes)
+    pattern_norm = _normalize_signature(pattern)
+    category = str(category or '').strip()
+    if not pattern_norm or not category:
+        return pattern_norm
+    _ensure_cash_expense_category_rules_table(cur)
+    ph = _ph()
+    try:
+        existing = cur.execute(
+            f"SELECT id FROM cash_expense_category_rules WHERE store={ph} AND pattern_norm={ph} LIMIT 1",
+            (store or 'ALL', pattern_norm),
+        ).fetchone()
+        if existing:
+            rid = dict(existing).get('id') if not isinstance(existing, tuple) else existing[0]
+            cur.execute(f"UPDATE cash_expense_category_rules SET category={ph}, is_active=1 WHERE id={ph}", (category, rid))
+        else:
+            cur.execute(
+                f"INSERT INTO cash_expense_category_rules(store, pattern, pattern_norm, category, is_active, created_by) VALUES({ph},{ph},{ph},{ph},1,{ph})",
+                (store or 'ALL', pattern, pattern_norm, category, username or 'system'),
+            )
+    except Exception:
+        pass
+    return pattern_norm
+
+
+def _apply_category_to_similar_expenses(cur, *, brand: str, pattern_norm: str, new_category: str) -> int:
+    """Aggiorna i vecchi dati simili senza toccare importi, date o note."""
+    if not pattern_norm or not new_category:
+        return 0
+    ph = _ph()
+    where = ''
+    params = []
+    if brand and brand != 'ALL' and brand in STORES:
+        where = f' WHERE store={ph}'
+        params.append(brand)
+    rows = _dict_rows(cur, f"SELECT id, supplier, notes FROM cash_expenses{where}", tuple(params))
+    changed = 0
+    for row in rows:
+        text = _normalize_signature(str(row.get('supplier') or '') + ' ' + str(row.get('notes') or ''))
+        if _keyword_matches_normalized(text, pattern_norm):
+            cur.execute(f"UPDATE cash_expenses SET category={ph} WHERE id={ph}", (new_category, int(row.get('id'))))
+            changed += 1
+    return changed
+
 def _keyword_matches_normalized(normalized_text: str, keyword: str) -> bool:
     norm_k = _normalize_signature(keyword)
     if not norm_k:
@@ -1638,15 +1862,24 @@ def _rule_family_match(row):
 
 
 def _expense_family(row) -> str:
+    # 1) Movimenti cassa solo se la singola voce lo dice davvero.
     if _is_exact_or_near_cash_movement(row):
         return 'Movimenti cassa'
     if _is_exact_or_near_internal_movement(row):
         return 'Da verificare / movimento interno'
 
+    # 2) Prima regole forti sulla singola riga/fornitore: evita che Materie prime resti vuota.
+    strict = _match_strict_category_from_text(_expense_primary_text(row)) or _match_strict_category_from_text(_expense_text_for_rules(row))
+    if strict:
+        # Se è paid by Amza, Amza viene già tolto dal testo regole.
+        return strict
+
+    # 3) Regole classiche.
     family = _rule_family_match(row)
     if family:
         return family
 
+    # 4) Nomi persona / extra / stipendi.
     if _looks_like_employee_name(row):
         return 'Stipendi'
 
@@ -1699,18 +1932,20 @@ def _recategorize_existing_cash_expenses(scope_store: str = 'ALL') -> int:
             if scope_store and scope_store != 'ALL' and scope_store in STORES:
                 where = f' WHERE store={ph}'
                 params.append(scope_store)
+            rules = _load_learned_expense_rules(cur, scope_store or 'ALL')
             rows = _dict_rows(cur, f'SELECT id, category, supplier, notes FROM cash_expenses{where}', tuple(params))
             for row in rows:
                 current = str(row.get('category') or '').strip()
                 supplier = str(row.get('supplier') or '').strip()
                 notes = str(row.get('notes') or '').strip()
-                new_category = _auto_expense_category(current, supplier, notes)
+                learned = _match_learned_category({'category': current, 'supplier': supplier, 'notes': notes}, rules=rules)
+                new_category = learned or _auto_expense_category(current, supplier, notes)
                 if not new_category or _normalize_signature(new_category) == _normalize_signature(current):
                     continue
-                if not _should_auto_replace_expense_category(current, supplier, notes):
-                    continue
-                cur.execute(f'UPDATE cash_expenses SET category={ph} WHERE id={ph}', (new_category, int(row.get('id'))))
-                updated += 1
+                # Le regole imparate e le regole forti possono correggere anche vecchie categorie sbagliate.
+                if learned or _should_auto_replace_expense_category(current, supplier, notes):
+                    cur.execute(f'UPDATE cash_expenses SET category={ph} WHERE id={ph}', (new_category, int(row.get('id'))))
+                    updated += 1
     except Exception as e:
         print('[WARN] Ricategorizzazione uscite non completata:', e)
     return updated
@@ -3811,20 +4046,30 @@ async def cash_expenses_move_category(request: Request, expense_id: int):
     with connect() as conn:
         cur = conn.cursor()
         row = cur.execute(
-            f"SELECT id, store, flow_date, category, supplier, amount FROM cash_expenses WHERE id={ph} AND {where_sql}",
+            f"SELECT id, store, flow_date, category, supplier, notes, amount FROM cash_expenses WHERE id={ph} AND {where_sql}",
             (expense_id, *params),
         ).fetchone()
         if row:
             row = dict(row)
             old_category = row.get('category') or ''
             cur.execute(f"UPDATE cash_expenses SET category={ph} WHERE id={ph}", (new_category, expense_id))
+            # Impara dalla correzione: se sposti Metro/Sogegross/Prinz ecc., aggiorna anche le vecchie voci simili.
+            pattern_norm = _save_learned_expense_rule(
+                cur,
+                store=(brand if brand != 'ALL' else 'ALL'),
+                supplier=str(row.get('supplier') or ''),
+                notes=str(row.get('notes') or ''),
+                category=new_category,
+                username=user.get('username') or 'system',
+            )
+            similar_count = _apply_category_to_similar_expenses(cur, brand=brand, pattern_norm=pattern_norm, new_category=new_category)
             _log(
                 cur,
                 store=row.get('store') or (user.get('store') or 'spinza'),
                 username=user['username'],
                 action='UPDATE',
                 category='USCITE',
-                name=f"Spostata categoria uscita {row.get('flow_date','')} - {row.get('supplier','')} da {old_category} a {new_category}",
+                name=f"Spostata categoria uscita {row.get('flow_date','')} - {row.get('supplier','')} da {old_category} a {new_category}. Regola appresa: {pattern_norm}. Simili aggiornate: {similar_count}",
                 delta=0,
             )
             conn.commit()

@@ -319,6 +319,20 @@ def init_db():
         )
         """)
 
+        # CASH FLOW: regole imparate per categorizzare automaticamente le uscite
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS cash_expense_category_rules (
+            id {id_col},
+            store TEXT NOT NULL DEFAULT 'ALL',
+            pattern TEXT NOT NULL DEFAULT '',
+            pattern_norm TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT '',
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_by TEXT NOT NULL DEFAULT 'system',
+            ts {ts_default}
+        )
+        """)
+
         # CASH FLOW: metodi di pagamento configurabili per gli incassi
         _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS cash_payment_methods (
@@ -682,6 +696,14 @@ def init_db():
                 "ALTER TABLE cash_expenses ADD COLUMN notes TEXT NOT NULL DEFAULT ''",
                 "ALTER TABLE cash_expenses ADD COLUMN created_by TEXT NOT NULL DEFAULT 'system'",
             ]
+        try:
+            if pg:
+                _safe_exec(cur, "CREATE TABLE IF NOT EXISTS cash_expense_category_rules (id SERIAL PRIMARY KEY, store TEXT NOT NULL DEFAULT 'ALL', pattern TEXT NOT NULL DEFAULT '', pattern_norm TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL DEFAULT 'system', ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            else:
+                _safe_exec(cur, "CREATE TABLE IF NOT EXISTS cash_expense_category_rules (id INTEGER PRIMARY KEY AUTOINCREMENT, store TEXT NOT NULL DEFAULT 'ALL', pattern TEXT NOT NULL DEFAULT '', pattern_norm TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL DEFAULT 'system', ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        except Exception:
+            pass
+
         for stmt in cash_alters:
             try:
                 _safe_exec(cur, stmt)
