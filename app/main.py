@@ -1150,12 +1150,14 @@ def _expense_category_options():
         'Bollette e utenze',
         'Affitti e abbonamenti',
         'Servizi finanziari',
+        'Servizi piattaforme',
         'Marketing',
         'Packaging',
         'Tasse',
         'Delivery e logistica',
         'Pulizie e consumo interno',
-        'Investimenti e rientri',
+        'Da verificare / movimento interno',
+        'Movimenti cassa',
         'Spese secondarie',
     ]
     seen = set()
@@ -1357,40 +1359,96 @@ _NON_EMPLOYEE_SINGLE_WORDS = {
 _EMPLOYEE_WORD_HINTS = (
     'stipend', 'salario', 'salari', 'personale', 'dipendent', 'busta paga', 'retribuz',
     'anticipo', 'acconto', 'extra sala', 'extra cucina', 'extra marzo', 'extra aprile',
-    'ore ', 'ore:', 'turno', 'turni', 'collaborator', 'lavorator'
+    'consegna', 'alberghiera', 'ore ', 'ore:', 'turno', 'turni', 'collaborator', 'lavorator'
 )
 
 _EXPENSE_RULES = [
-    ('Professionisti', ['commercialist', 'consulent', 'consulente del lavoro', 'cedolino', 'paghe', 'professionist', 'avvocato', 'notaio', 'studio professionale', 'labor consultant', 'architect', 'architetto', 'architett']),
-    ('Tasse', ['inps', 'iva', 'tari', 'imu', 'tassa', 'tasse', 'f24', 'imposta', 'agenzia entrate', 'ritenuta', 'diritto camerale', 'bollo']),
-    ('Bollette e utenze', ['luce', 'gas', 'acqua bnb', 'aqua bnb', 'enel', 'eni', 'utenz', 'bollett', 'telefono', 'internet', 'wifi', 'tim', 'wind', 'iliad', 'vodafone', 'energia', 'publiacqua', 'lumina']),
-    ('Affitti e abbonamenti', ['affitto', 'rent', 'locazione', 'canone', 'abbon', 'subscription', 'software', 'licenza', 'dominio', 'hosting', 'render', 'supabase', 'saas']),
-    ('Servizi finanziari', ['nexi', 'commission', 'oneri commissioni', 'banca', 'bonifico', 'pos', 'interessi', 'sumup', 'transaz', 'carta', 'conto corrente', 'canone bancario', 'qonto', 'rata qonto', 'the fork', 'fork pay']),
-    ('Marketing', ['social', 'social media', 'ads', 'marketing', 'pubblic', 'sponsorizz', 'meta', 'instagram', 'insta', 'followers', 'verification', 'facebook', 'google ads', 'tiktok', 'volantini', 'grafica']),
-    ('Packaging', ['packaging', 'cartoni', 'cartone', 'vaschette', 'buste', 'sacchetti', 'tovagliol', 'posate', 'bicchieri', 'contenitori', 'etichette']),
-    ('Manutenzione e attrezzature', ['ripar', 'manut', 'attrezz', 'guasto', 'tecnic', 'frigo', 'freezer', 'lavastoviglie', 'impianto', 'idraulic', 'elettric', 'macchinario', 'forno rotto', 'brico', 'ferramenta', 'vetraio', 'cappa', 'impastatrice', 'passaggio motorino', 'motorino', 'mini pinner', 'pinner', 'nastrocolor', 'amazon', 'atollo']),
-    ('Materie prime', [
-        # Ingredienti / cucina
-        'mozzarella', 'farina', 'pomodor', 'salume', 'salumi', 'prosciutto', 'salsiccia', 'nduja', 'verdure',
-        'ortofrutta', 'ortolano', 'frutta', 'lattuga', 'rucola', 'funghi', 'cipolle', 'basilico', 'ingredient',
-        'materie', 'materia prima', 'latte', 'latticini', 'caseificio', 'bufala', 'pecorino', 'grana', 'parmigiano',
-        'stracciatella', 'olio', 'tonno', 'acciughe', 'macellaio', 'macelleria', 'carne', 'pollo', 'bovino', 'suino',
-        'buns', 'pane', 'forno', 'panificio', 'molino', 'caffe', 'caffè', 'coffee', 'dolci', 'dessert', 'gelato',
-        # Grossisti / supermercati / fornitori generici food
-        'metro', 'metro cure', 'metro le cure', 'fornit', 'fornitore', 'fornitori', 'sapori di toscana',
-        'sapori toscana', 'sapori', 'toscana sapori', 'sogegross', 'sogergross', 'socialgros', 'socialgross',
-        'carrefour', 'esselunga', 'coop', 'conad', 'lidl', 'aldi', 'pam', 'makro', 'ce di', 'cedi', 'cash and carry',
-        # Bibite / beverage
-        'bevande', 'bibite', 'drink', 'soft drink', 'birra', 'birre', 'ichnusa', 'vino', 'vini', 'acqua golden',
-        'aqua golden', 'acqua bottiglia', 'acqua naturale', 'acqua frizzante', 'prinz', 'prinz beverage',
-        'kombucha', 'kombucha legendari', 'legendari', 'leggendari', 'icaro', 'coca cola', 'cocacola', 'coca-cola',
-        'fanta', 'sprite', 'pepsi', 'red bull', 'san pellegrino', 'sanpellegrino'
+    # Ordine importante: prima voci specifiche, poi categorie più generiche.
+    ('Professionisti', [
+        'commercialist', 'consulent', 'consulente del lavoro', 'cedolino', 'paghe', 'professionist',
+        'avvocato', 'notaio', 'studio professionale', 'labor consultant', 'architect', 'architetto',
+        'architett', 'geometra', 'ingegnere', 'progettista'
     ]),
-    ('Delivery e logistica', ['delivery', 'glovo', 'deliveroo', 'just eat', 'justeat', 'logistic', 'trasporto', 'benzina', 'carburante', 'corriere', 'spedizione', 'parcheggio']),
-    ('Pulizie e consumo interno', ['detersiv', 'pulizia', 'sanificant', 'carta mani', 'scottex', 'sapone', 'sgrassatore', 'candeggina']),
-    ('Investimenti e rientri', ['return on investment', 'investimento', 'roi']),
-    ('Spese secondarie', ['secondar', 'varie', 'cinese', 'coins', 'coin', 'bit', 'altro', 'spesa piccola'])
+    ('Tasse', [
+        'inps', 'iva', 'tari', 'imu', 'tassa', 'tasse', 'f24', 'imposta', 'agenzia entrate',
+        'ritenuta', 'diritto camerale', 'bollo', 'imposta da bollo', 'sanzione', 'tributo'
+    ]),
+    ('Bollette e utenze', [
+        'luce', 'gas', 'acqua bnb', 'aqua bnb', 'acqua b&b', 'enel', 'eni', 'utenz', 'bollett',
+        'telefono', 'internet', 'wifi', 'wi fi', 'tim', 'wind', 'iliad', 'vodafone', 'energia',
+        'publiacqua', 'lumina', 'fibra', 'rete'
+    ]),
+    ('Affitti e abbonamenti', [
+        'affitto', 'rent ', ' rent', 'locazione', 'canone locazione', 'canone affitto',
+        'bnb camaldoli', 'reburger camaldoli', 'villani', 'spinza affitto'
+    ]),
+    ('Servizi finanziari', [
+        'nexi', 'commissione nexi', 'nexi commissione', 'commissioni nexi', 'oneri commissioni',
+        'banca', 'bonifico', 'interessi', 'sumup', 'transaz', 'carta', 'conto corrente',
+        'canone bancario', 'qonto', 'rata qonto', 'qonto subscription', 'subscription qonto'
+    ]),
+    ('Servizi piattaforme', [
+        'the fork', 'fork pay', 'thefork', 'forkpay', 'just eat fee', 'glovo fee', 'deliveroo fee'
+    ]),
+    ('Marketing', [
+        'social', 'social media', 'ads', 'marketing', 'pubblic', 'sponsorizz', 'meta', 'instagram',
+        'insta', 'followers', 'verification', 'facebook', 'google ads', 'tiktok', 'volantini',
+        'grafica', 'the florentine', 'florentine'
+    ]),
+    ('Packaging', [
+        'packaging', 'cartoni', 'cartone', 'vaschette', 'buste', 'sacchetti', 'tovagliol',
+        'posate', 'bicchieri', 'contenitori', 'etichette', 'lecure packaging', 'packaging lecure'
+    ]),
+    ('Manutenzione e attrezzature', [
+        'ripar', 'manut', 'attrezz', 'guasto', 'tecnic', 'frigo', 'freezer', 'lavastoviglie',
+        'impianto', 'idraulic', 'elettric', 'macchinario', 'forno rotto', 'brico', 'ferramenta',
+        'vetraio', 'cappa', 'impastatrice', 'passaggio motorino', 'motorino', 'mini pinner',
+        'pinner', 'nastrocolor', 'amazon', 'atollo', 'utensile', 'ricambio', 'materiale tecnico'
+    ]),
+    ('Materie prime', [
+        'mozzarella', 'farina', 'pomodor', 'salume', 'salumi', 'prosciutto', 'salsiccia', 'nduja',
+        'verdure', 'ortofrutta', 'ortolano', 'frutta', 'lattuga', 'rucola', 'funghi', 'cipolle',
+        'basilico', 'ingredient', 'materie', 'materia prima', 'latte', 'latticini', 'caseificio',
+        'bufala', 'pecorino', 'grana', 'parmigiano', 'stracciatella', 'olio', 'tonno', 'acciughe',
+        'macellaio', 'macelleria', 'carne', 'pollo', 'bovino', 'suino', 'buns', 'pane', 'forno',
+        'panificio', 'molino', 'caffe', 'caffè', 'coffee', 'dolci', 'dessert', 'gelato', 'cotto',
+        'metro', 'metro cure', 'metro le cure', 'cheque metro', 'fornit', 'fornitore', 'fornitori',
+        'sapori di toscana', 'sapori toscana', 'sapori', 'toscana sapori', 'sogegross', 'sogergross',
+        'socialgros', 'socialgross', 'social gros', 'social gross', 'carrefour', 'esselunga', 'coop',
+        'coop cure', 'conad', 'lidl', 'aldi', 'pam', 'makro', 'ce di', 'cedi', 'cash and carry',
+        'bevande', 'bibite', 'drink', 'soft drink', 'birra', 'birre', 'ichnusa', 'vino', 'vini',
+        'acqua golden', 'aqua golden', 'golden italia', 'acqua bottiglia', 'acqua naturale',
+        'acqua frizzante', 'prinz', 'prinz beverage', 'kombucha', 'kombucha legendari', 'legendari',
+        'leggendari', 'icaro', 'coca cola', 'cocacola', 'coca-cola', 'fanta', 'sprite', 'pepsi',
+        'red bull', 'san pellegrino', 'sanpellegrino'
+    ]),
+    ('Delivery e logistica', [
+        'delivery', 'glovo rimborso', 'deliveroo rimborso', 'just eat rimborso', 'justeat rimborso',
+        'logistic', 'trasporto', 'benzina', 'carburante', 'corriere', 'spedizione', 'parcheggio'
+    ]),
+    ('Pulizie e consumo interno', [
+        'detersiv', 'pulizia', 'sanificant', 'carta mani', 'scottex', 'sapone', 'sgrassatore',
+        'candeggina', 'igiene'
+    ]),
+    ('Da verificare / movimento interno', [
+        'return on investment', 'investimento', 'roi', 'movimento interno', 'giroconto'
+    ]),
+    ('Movimenti cassa', [
+        'coins', 'coin', 'monete', 'spicci', 'cambio cassa', 'resto', 'fondo cassa'
+    ]),
+    ('Spese secondarie', [
+        'secondar', 'varie', 'cinese', 'bit', 'altro', 'spesa piccola'
+    ])
 ]
+
+_NON_OPERATING_EXPENSE_FAMILIES = {'Movimenti cassa'}
+
+_STRONG_RECLASS_FAMILIES = {
+    'Stipendi', 'Materie prime', 'Affitti e abbonamenti', 'Bollette e utenze', 'Servizi finanziari',
+    'Servizi piattaforme', 'Marketing', 'Packaging', 'Manutenzione e attrezzature', 'Professionisti',
+    'Tasse', 'Movimenti cassa', 'Da verificare / movimento interno'
+}
+
 
 def _clean_expense_candidate(text: str) -> str:
     s = str(text or '')
@@ -1444,28 +1502,116 @@ _MATERIE_PRIME_STRONG_HINTS = (
 
 def _has_any_normalized(text: str, keywords) -> bool:
     norm = _normalize_signature(text)
-    return any(_normalize_signature(k) in norm for k in keywords if k)
+    return any(_keyword_matches_normalized(norm, k) for k in keywords if k)
 
 
 def _is_strong_materie_prime(row) -> bool:
+    category_part = str(row.get('category') or '')
+    # Se la categoria corrente è generica/provvisoria non la uso come indizio,
+    # altrimenti impedirebbe di correggere vecchie righe finite in "Spese secondarie".
+    if _normalize_signature(category_part) in _GENERIC_EXPENSE_CATEGORIES:
+        category_part = ''
     text = ' '.join([
-        str(row.get('category') or ''),
+        category_part,
         str(row.get('supplier') or ''),
         str(row.get('notes') or ''),
     ])
     return _has_any_normalized(text, _MATERIE_PRIME_STRONG_HINTS)
 
 
-def _expense_family(row) -> str:
-    normalized_text = _normalize_signature(' '.join([
-        str(row.get('category') or ''),
+def _expense_text_for_rules(row, *, strip_paid_by: bool = True) -> str:
+    """Testo contabile ripulito: chi ha pagato non deve decidere la categoria.
+    Esempio: "Metro cure paid by Amza" resta Metro, quindi Materie prime, non Stipendi.
+    """
+    category_part = str(row.get('category') or '')
+    # Se la categoria corrente è generica/provvisoria non la uso come indizio,
+    # altrimenti impedirebbe di correggere vecchie righe finite in "Spese secondarie".
+    if _normalize_signature(category_part) in _GENERIC_EXPENSE_CATEGORIES:
+        category_part = ''
+    text = ' '.join([
+        category_part,
         str(row.get('supplier') or ''),
         str(row.get('notes') or ''),
-    ]))
+    ])
+    if strip_paid_by:
+        text = re.sub(r"\b(paid by|pagato da|pagata da|pagato con|pagata con|by)\s+[A-Za-zÀ-ÿ0-9_ .\'-]+", ' ', text, flags=re.I)
+    return text
 
+
+def _is_exact_or_near_cash_movement(row) -> bool:
+    text = _normalize_signature(_expense_text_for_rules(row))
+    tokens = set(text.split())
+    if tokens and tokens.issubset({'import', 'txt', 'coins', 'coin', 'monete', 'spicci', 'cambio', 'cassa', 'resto'}):
+        return True
+    return any(k in text for k in ['cambio cassa', 'fondo cassa', 'resto cassa'])
+
+
+def _is_exact_or_near_internal_movement(row) -> bool:
+    text = _normalize_signature(_expense_text_for_rules(row))
+    cleaned = re.sub(r'\b(import|txt|uscita|spesa|spese|le|la|il|di|da)\b', ' ', text)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    tokens = {t for t in cleaned.split() if t}
+    if tokens and tokens.issubset({'spinza', 'reburger'}):
+        return True
+    return any(k in text for k in ['return on investment', 'roi', 'giroconto', 'movimento interno'])
+
+
+def _keyword_matches_normalized(normalized_text: str, keyword: str) -> bool:
+    norm_k = _normalize_signature(keyword)
+    if not norm_k:
+        return False
+    # Parole corte o frasi vanno cercate come parola/frase intera.
+    # Evita errori tipo RENIS -> ENI, oppure THE FLORENTINE -> RENT.
+    if len(norm_k) <= 4 or ' ' in norm_k or norm_k in {'rent', 'eni', 'tim', 'bit', 'pos', 'coin', 'coins'}:
+        return re.search(r'(?<![a-z0-9])' + re.escape(norm_k) + r'(?![a-z0-9])', normalized_text) is not None
+    # Per radici utili (commercialist -> commercialista, pubblic -> pubblicità) tengo il match morbido.
+    return norm_k in normalized_text
+
+
+def _rule_family_match(row):
+    normalized_text = _normalize_signature(_expense_text_for_rules(row))
     for family, keywords in _EXPENSE_RULES:
-        if any(_normalize_signature(k) in normalized_text for k in keywords):
+        if any(_keyword_matches_normalized(normalized_text, k) for k in keywords):
             return family
+    return ''
+
+
+def _is_operating_expense_family(family: str) -> bool:
+    blocked = {_normalize_signature(x) for x in _NON_OPERATING_EXPENSE_FAMILIES}
+    return _normalize_signature(family) not in blocked
+
+
+def _fetch_operating_expense_rows(cur, where_sql: str, params: tuple | list, start_s: str, end_s: str):
+    ph = _ph()
+    rows = _dict_rows(
+        cur,
+        f"SELECT store, flow_date, category, supplier, notes, amount FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph}",
+        tuple(params) + (start_s, end_s),
+    )
+    out = []
+    for row in rows:
+        family = _expense_family(row)
+        if not _is_operating_expense_family(family):
+            continue
+        item = dict(row)
+        item['family'] = family
+        out.append(item)
+    return out
+
+
+def _fetch_operating_expense_sum(cur, where_sql: str, params: tuple | list, start_s: str, end_s: str) -> float:
+    return float(sum(float(r.get('amount') or 0) for r in _fetch_operating_expense_rows(cur, where_sql, params, start_s, end_s)))
+
+
+def _expense_family(row) -> str:
+    if _is_exact_or_near_cash_movement(row):
+        return 'Movimenti cassa'
+    if _is_exact_or_near_internal_movement(row):
+        return 'Da verificare / movimento interno'
+
+    family = _rule_family_match(row)
+    if family:
+        return family
 
     if _looks_like_employee_name(row):
         return 'Stipendi'
@@ -1480,29 +1626,31 @@ def _auto_expense_category(category: str = '', supplier: str = '', notes: str = 
     return _expense_family({'category': category or '', 'supplier': supplier or '', 'notes': notes or ''})
 
 
+def _is_strong_auto_category(row, new_category: str) -> bool:
+    if not new_category:
+        return False
+    if new_category in {'Movimenti cassa', 'Da verificare / movimento interno'}:
+        return _is_exact_or_near_cash_movement(row) or _is_exact_or_near_internal_movement(row)
+    if new_category == 'Stipendi':
+        return _looks_like_employee_name(row)
+    family = _rule_family_match(row)
+    return family == new_category and new_category in _STRONG_RECLASS_FAMILIES
+
+
 def _should_auto_replace_expense_category(category: str, supplier: str = '', notes: str = '') -> bool:
     norm_cat = _normalize_signature(category)
     row = {'category': category, 'supplier': supplier, 'notes': notes}
     new_category = _auto_expense_category(category, supplier, notes)
 
-    # Le categorie generiche/provvisorie vanno sempre ricalcolate.
     if norm_cat in _GENERIC_EXPENSE_CATEGORIES:
         return True
-
-    # Rimedio dati vecchi: se una voce è chiaramente materia prima/fornitore food o bibite,
-    # la correggo anche se prima era finita in una categoria sbagliata.
-    if _normalize_signature(new_category) == _normalize_signature('Materie prime') and _is_strong_materie_prime(row):
+    if _normalize_signature(new_category) != norm_cat and _is_strong_auto_category(row, new_category):
         return True
-
-    # Rimedio dati vecchi: nomi/personale finiti fuori dagli stipendi.
-    if norm_cat != _normalize_signature('Stipendi') and _looks_like_employee_name(row):
-        return True
-
     return False
 
 
 def _recategorize_existing_cash_expenses(scope_store: str = 'ALL') -> int:
-    """Rimedia i dati già inseriti: aggiorna categorie generiche, fornitori food/bibite e persone finite fuori dagli stipendi."""
+    """Rimedia i dati già inseriti: aggiorna categorie generiche e voci riconosciute con regole forti."""
     updated = 0
     ph = _ph()
     try:
@@ -1666,6 +1814,9 @@ def _build_expense_overview(cur, scope_store: str, period_type: str = 'month', a
         flow_date = str(row.get('flow_date') or '')
         month_key = flow_date[:7] if len(flow_date) >= 7 else ''
         sig, label, family = _expense_signature(row)
+        if not _is_operating_expense_family(family):
+            # Monete/cambio/fondo cassa: rimangono nell'elenco uscite, ma non falsano torta e bilancio operativo.
+            continue
 
         slot = all_map.setdefault(sig, {
             'label': label,
@@ -1767,10 +1918,13 @@ def _build_cash_dashboard(cur, scope_store: str, period_type: str = 'week', anch
     prev_end_s = prev_end.isoformat()
 
     entries = _dict_rows(cur, f"SELECT store, flow_date, SUM(amount) AS total FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY store, flow_date ORDER BY flow_date ASC", params + (start_s, end_s))
-    expenses = _dict_rows(cur, f"SELECT store, flow_date, SUM(amount) AS total FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY store, flow_date ORDER BY flow_date ASC", params + (start_s, end_s))
+    expense_rows_for_days = _fetch_operating_expense_rows(cur, where_sql, params, start_s, end_s)
 
     by_entry = {(r['store'], str(r['flow_date'])): float(r.get('total') or 0) for r in entries}
-    by_expense = {(r['store'], str(r['flow_date'])): float(r.get('total') or 0) for r in expenses}
+    by_expense = {}
+    for erow in expense_rows_for_days:
+        key = (erow.get('store'), str(erow.get('flow_date') or ''))
+        by_expense[key] = by_expense.get(key, 0.0) + float(erow.get('amount') or 0)
 
     stores = list(STORES.keys()) if scope_store == 'ALL' else [scope_store]
     compare = []
@@ -1808,13 +1962,13 @@ def _build_cash_dashboard(cur, scope_store: str, period_type: str = 'week', anch
         })
 
     income_current = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph}", params + (start_s, end_s))
-    expense_current = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph}", params + (start_s, end_s))
+    expense_current = _fetch_operating_expense_sum(cur, where_sql, params, start_s, end_s)
     income_previous = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph}", params + (prev_start_s, prev_end_s))
-    expense_previous = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph}", params + (prev_start_s, prev_end_s))
+    expense_previous = _fetch_operating_expense_sum(cur, where_sql, params, prev_start_s, prev_end_s)
 
     totals = {
         'income_today': _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_entries WHERE {where_sql} AND flow_date={ph}", params + (date.today().isoformat(),)),
-        'expense_today': _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_expenses WHERE {where_sql} AND flow_date={ph}", params + (date.today().isoformat(),)),
+        'expense_today': _fetch_operating_expense_sum(cur, where_sql, params, date.today().isoformat(), date.today().isoformat()),
         'income_period': income_current,
         'expense_period': expense_current,
         'net_period': income_current - expense_current,
@@ -1847,6 +2001,8 @@ def _build_cash_dashboard(cur, scope_store: str, period_type: str = 'week', anch
     expense_groups = {}
     for erow in raw_expense_rows:
         family = _expense_family(erow)
+        if not _is_operating_expense_family(family):
+            continue
         slot = expense_groups.setdefault(family, {'name': family, 'total': 0.0, 'count': 0})
         slot['total'] += float(erow.get('amount') or 0)
         slot['count'] += 1
@@ -1898,9 +2054,13 @@ def _build_store_period_chart(cur, store: str, period_type: str = 'week', anchor
     start_s = start_d.isoformat()
     end_s = end_d.isoformat()
     entries = _dict_rows(cur, f"SELECT flow_date, SUM(amount) AS total FROM cash_entries WHERE store={ph} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date ORDER BY flow_date ASC", (store, start_s, end_s))
-    expenses = _dict_rows(cur, f"SELECT flow_date, SUM(amount) AS total FROM cash_expenses WHERE store={ph} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date ORDER BY flow_date ASC", (store, start_s, end_s))
+    store_where_sql = f"store={ph}"
+    expense_rows_for_days = _fetch_operating_expense_rows(cur, store_where_sql, (store,), start_s, end_s)
     by_entry = {str(r['flow_date']): float(r.get('total') or 0) for r in entries}
-    by_expense = {str(r['flow_date']): float(r.get('total') or 0) for r in expenses}
+    by_expense = {}
+    for erow in expense_rows_for_days:
+        ds = str(erow.get('flow_date') or '')
+        by_expense[ds] = by_expense.get(ds, 0.0) + float(erow.get('amount') or 0)
     rows = []
     max_amount = 1.0
     days_count = (end_d - start_d).days + 1
@@ -2043,9 +2203,12 @@ def _build_scope_period_chart(cur, scope_store: str, period_type: str = 'week', 
     end_s = end_d.isoformat()
 
     entries = _dict_rows(cur, f"SELECT flow_date, SUM(amount) AS total FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date ORDER BY flow_date ASC", params + (start_s, end_s))
-    expenses = _dict_rows(cur, f"SELECT flow_date, SUM(amount) AS total FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date ORDER BY flow_date ASC", params + (start_s, end_s))
+    expense_rows_for_days = _fetch_operating_expense_rows(cur, where_sql, params, start_s, end_s)
     by_entry = {str(r['flow_date']): float(r.get('total') or 0) for r in entries}
-    by_expense = {str(r['flow_date']): float(r.get('total') or 0) for r in expenses}
+    by_expense = {}
+    for erow in expense_rows_for_days:
+        ds = str(erow.get('flow_date') or '')
+        by_expense[ds] = by_expense.get(ds, 0.0) + float(erow.get('amount') or 0)
 
     income_detail_rows = _dict_rows(
         cur,
@@ -2074,6 +2237,8 @@ def _build_scope_period_chart(cur, scope_store: str, period_type: str = 'week', 
         if amount <= 0:
             continue
         family = _expense_family(row)
+        if not _is_operating_expense_family(family):
+            continue
         slot = expense_details.setdefault(ds, {}).setdefault(family, {'label': family, 'total': 0.0, 'count': 0})
         slot['total'] += amount
         slot['count'] += 1
