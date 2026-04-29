@@ -359,6 +359,13 @@ def _startup():
     ensure_admin_user()
     print("[STARTUP] ensure_admin_user() completato")
 
+    # Sistema i dati già inseriti: le righe importate come "import txt" o generiche
+    # vengono rilette e riclassificate nelle famiglie corrette.
+    fixed_expenses = _recategorize_existing_cash_expenses('ALL')
+    fixed_entries = _repair_existing_cash_entries_from_notes('ALL')
+    print(f"[STARTUP] uscite ricategorizzate: {fixed_expenses}")
+    print(f"[STARTUP] incassi riparati da note import: {fixed_entries}")
+
     if os.environ.get("MIGRATE_ON_START") == "1":
         data_dir = os.environ.get("OLD_DATA_DIR", ".")
         run_migration(data_dir)
@@ -715,33 +722,96 @@ def _join_unique_notes(parts, max_len: int = 700):
     return joined[:max_len].strip()
 
 
-def _parse_flexible_amount(text: str):
-    s = (text or '').replace(" ", ' ').replace('€', ' € ')
-    matches = re.findall(r"([0-9]+(?:[\.,][0-9]{1,2})?)\s*€", s)
-    if matches:
-        candidate = matches[-1]
-    else:
-        eq_match = re.search(r"=\s*€?\s*([0-9]+(?:[\.,][0-9]{1,2})?)", s)
-        if eq_match:
-            candidate = eq_match.group(1)
-        else:
-            nums = re.findall(r"([0-9]+(?:[\.,][0-9]{1,2})?)", s)
-            if not nums:
-                return None
-            candidate = nums[-1]
+def _amount_token_to_float(token: str):
+    """Converte importi scritti all'italiana o all'inglese: 1.234,56 / 1234.56 / 1234."""
+    raw = str(token or '').replace('€', '').replace(' ', '').replace('\u00a0', '').strip()
+    if not raw:
+        return None
+    # 43.396,63 => 43396.63
+    if ',' in raw and '.' in raw:
+        raw = raw.replace('.', '').replace(',', '.')
+    # 67,50 => 67.50
+    elif ',' in raw:
+        raw = raw.replace(',', '.')
+    # 1.500 => 1500 se il punto sembra separatore migliaia
+    elif raw.count('.') == 1:
+        left, right = raw.split('.', 1)
+        if len(right) == 3 and len(left) <= 3:
+            raw = left + right
     try:
-        return float(candidate.replace(',', '.'))
+        return float(raw)
     except Exception:
         return None
+
+
+def _amount_tokens(text: str):
+    s = (text or '').replace('\u00a0', ' ')
+    # Numeri con o senza separatori: 1500, 1.500, 67.50, 67,50, 43.396,63
+    return re.findall(r"(?<![A-Za-z0-9])([0-9]{1,3}(?:[\.\s][0-9]{3})+(?:,[0-9]{1,2})?|[0-9]+(?:[\.,][0-9]{1,2})?)\s*€?", s)
+
+
+def _find_amount_values(text: str):
+    values = []
+    for token in _amount_tokens(text):
+        val = _amount_token_to_float(token)
+        if val is not None:
+            values.append(val)
+    return values
+
+
+def _parse_flexible_amount(text: str):
+    """Importo generico per le spese. Preferisce il risultato dopo '='; altrimenti prende il primo importo reale della riga."""
+    s = (text or '').replace('\u00a0', ' ')
+    if '=' in s:
+        after_eq = s.split('=')[-1]
+        values = _find_amount_values(after_eq)
+        if values:
+            return values[-1]
+    values = _find_amount_values(s)
+    if not values:
+        return None
+    return values[0]
+
+
+def _parse_income_amount(line: str, payment_method: str = ''):
+    """Importo per le entrate: Glovo 87€ (23€ cash) deve salvare 87, non 23."""
+    s = (line or '').replace('\u00a0', ' ')
+    lower = _normalize_import_text_for_matching(s)
+    # Scuola 2 x 16€ = 32,00€ => prendo il totale dopo '='.
+    if '=' in s:
+        values_after_eq = _find_amount_values(s.split('=')[-1])
+        if values_after_eq:
+            return values_after_eq[-1]
+    # Scuola 4 x 16€ senza totale: calcolo 64.
+    mult = re.search(r"\b([0-9]+(?:[\.,][0-9]{1,2})?)\s*x\s*([0-9]+(?:[\.,][0-9]{1,2})?)\b", lower)
+    if mult and (payment_method or '').lower() == 'scuola':
+        left = _amount_token_to_float(mult.group(1)) or 0
+        right = _amount_token_to_float(mult.group(2)) or 0
+        product = left * right
+        if product > 0:
+            return product
+    # Tolgo parentesi tipo "(23€ cash)" perché sono note, non incasso principale del canale.
+    main_part = re.sub(r"\([^)]*\)", " ", s)
+    values = _find_amount_values(main_part)
+    if values:
+        return values[0]
+    return _parse_flexible_amount(s)
 
 
 def _normalize_import_payment_method(label: str):
     s = (label or '').strip().lower()
     s = re.sub(r"^[\-•⁃–—·*]+", '', s).strip()
-    mapping = {
+    s = re.sub(r'\s+', ' ', s)
+    aliases = {
         'pos': 'pos',
+        'card': 'pos',
+        'carta': 'pos',
+        'bancomat': 'pos',
         'cash': 'contanti',
+        'qcash': 'contanti',
+        'q cash': 'contanti',
         'contanti': 'contanti',
+        'contante': 'contanti',
         'deliveroo': 'deliveroo',
         'glovo': 'glovo',
         'just eat': 'just eat',
@@ -750,9 +820,14 @@ def _normalize_import_payment_method(label: str):
         'satispay': 'satispay',
         'paypal': 'paypal',
     }
-    for key, value in mapping.items():
-        if s.startswith(key):
-            return value
+    if s in aliases:
+        return aliases[s]
+    # Permetto solo suffissi tecnici, non nomi fornitori tipo "Cash coffee".
+    for key, value in aliases.items():
+        if s.startswith(key + ' '):
+            rest = s[len(key):].strip()
+            if rest in {'totale', 'incasso', 'entrata', 'vendite'}:
+                return value
     return ''
 
 
@@ -785,12 +860,38 @@ MONTH_WORDS = {
 
 _SKIP_IMPORT_AMOUNT_PREFIXES = (
     'total', 'totale', 'totali', 'totale mese', 'totale incassi', 'incassi totali',
-    'avg', 'media', 'fondo cassa', 'fondo', 'saldo', 'netto', 'lordo'
+    'avg', 'average', 'media', 'fondo cassa', 'fondo', 'saldo', 'netto', 'lordo'
 )
+
+_SKIP_IMPORT_AMOUNT_CONTAINS = (
+    'total sales', 'totale vendite', 'totale sales', 'avg / day', 'avg/day',
+    'media / giorno', 'media/giorno', 'average / day', 'average/day',
+    'total month', 'totale mese', 'totale aprile', 'totale gennaio', 'totale febbraio',
+    'totale marzo', 'totale maggio', 'totale giugno', 'totale luglio', 'totale agosto',
+    'totale settembre', 'totale ottobre', 'totale novembre', 'totale dicembre'
+)
+
+
+def _should_skip_import_amount_line(line: str) -> bool:
+    lower = _normalize_import_text_for_matching(line)
+    if not lower:
+        return True
+    if lower.startswith(_SKIP_IMPORT_AMOUNT_PREFIXES):
+        return True
+    if any(key in lower for key in _SKIP_IMPORT_AMOUNT_CONTAINS):
+        return True
+    # Righe riepilogo tipo "April 2024 Total sales 32.371,88€" o "April 2023 total sales...".
+    if any(re.search(r'\b' + re.escape(month_word) + r'\b', lower) for month_word in MONTH_WORDS) and 'total' in lower:
+        return True
+    return False
 
 
 def _detect_import_store(line: str, current_store: str) -> str:
     upper = (line or '').upper()
+    # I nomi dei negozi possono comparire dentro una spesa (es. "Forno spinza 4000€").
+    # Cambio negozio solo su righe intestazione, non su righe contabili con importo.
+    if '€' in upper:
+        return current_store or 'spinza'
     if 'SPINZA' in upper:
         return 'spinza'
     if 'CAMALDOLI' in upper:
@@ -836,8 +937,69 @@ def _start_import_block(blocks, current, store, iso_date):
         'incomes': [],
         'expenses': [],
         'notes': [],
+        'declared_total': None,
     }
 
+
+def _extract_expense_name_from_line(line: str, amount=None) -> str:
+    """Tiene il nome vero della spesa anche se l'importo è all'inizio: "15€ coins" => "coins"."""
+    s = re.sub(r"\s+", " ", (line or '').replace('\u00a0', ' ')).strip()
+    s = re.sub(r"^[\-•⁃–—·*]+", "", s).strip()
+    # tolgo note su chi ha pagato, ma le lascio comunque nelle note originali dell'uscita
+    s = re.sub(r"\b(paid by|pagato da|pagata da|by)\s+[A-Za-zÀ-ÿ0-9_ .'-]+$", "", s, flags=re.I).strip()
+    # rimuovo espressioni matematiche di importo e importi singoli
+    s = re.sub(r"=\s*€?\s*[0-9]{1,3}(?:[\.\s][0-9]{3})*(?:,[0-9]{1,2})?\s*€?", " ", s)
+    s = re.sub(r"€?\s*[0-9]{1,3}(?:[\.\s][0-9]{3})+(?:,[0-9]{1,2})?\s*€?", " ", s)
+    s = re.sub(r"€?\s*[0-9]+(?:[\.,][0-9]{1,2})?\s*€?", " ", s)
+    s = re.sub(r"\b(x|per)\b", " ", s, flags=re.I)
+    s = re.sub(r"[|:;,_/\\()\[\]{}]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip(" -–—")
+    return (s or 'Import TXT')[:120]
+
+
+
+def _cash_component_inside_parentheses(line: str) -> float:
+    total = 0.0
+    for inside in re.findall(r"\(([^)]*)\)", line or ''):
+        norm = _normalize_import_text_for_matching(inside)
+        if 'cash' not in norm and 'contant' not in norm:
+            continue
+        amount = _parse_flexible_amount(inside)
+        if amount:
+            total += float(amount)
+    return total
+
+
+def _reconcile_import_blocks(blocks):
+    """Usa la riga Total del giorno per capire se il cash scritto tra parentesi va sottratto dal delivery.
+    Esempio: Glovo 87€ (23€ cash) con Total che torna solo sottraendo 23 => salva Glovo 64.
+    Se invece il Total torna con 87 pieno, lascia 87.
+    """
+    for block in blocks or []:
+        declared = block.get('declared_total')
+        if not declared:
+            continue
+        incomes = block.get('incomes') or []
+        gross = sum(float(x.get('amount') or 0) for x in incomes)
+        cash_components = []
+        for income in incomes:
+            method = str(income.get('payment_method') or '').lower()
+            if method not in {'glovo', 'deliveroo', 'just eat'}:
+                cash_components.append(0.0)
+                continue
+            cash_part = _cash_component_inside_parentheses(str(income.get('raw') or ''))
+            cash_components.append(cash_part)
+        cash_total = sum(cash_components)
+        if cash_total <= 0:
+            continue
+        net = gross - cash_total
+        # Scelgo la versione che combacia meglio con il totale dichiarato.
+        if abs(net - float(declared)) + 0.01 < abs(gross - float(declared)):
+            for income, cash_part in zip(incomes, cash_components):
+                if cash_part > 0:
+                    income['amount'] = max(0.0, round(float(income.get('amount') or 0) - cash_part, 2))
+                    income['cash_component_note'] = cash_part
+    return blocks
 
 def _parse_import_date_from_line(line: str, context_month=None, context_year=None):
     clean = re.sub(r"\s+", ' ', (line or '').replace(' ', ' ')).strip()
@@ -929,6 +1091,17 @@ def _parse_import_txt_blocks(raw_text: str, fallback_store: str = 'spinza'):
             store = detected_store
         context_month, context_year = _detect_import_month_year(line, context_month, context_year)
 
+        # Non trasformare i riepiloghi di fine mese in nuove giornate o spese.
+        if _should_skip_import_amount_line(line):
+            if current:
+                current['notes'].append(line)
+                lower_skip = _normalize_import_text_for_matching(line)
+                if lower_skip.startswith(('total', 'totale')) and 'sales' not in lower_skip:
+                    total_amount = _parse_flexible_amount(line)
+                    if total_amount is not None:
+                        current['declared_total'] = total_amount
+            continue
+
         iso_date = _parse_import_date_from_line(line, context_month, context_year)
         if iso_date:
             current = _start_import_block(blocks, current, store, iso_date)
@@ -939,7 +1112,7 @@ def _parse_import_txt_blocks(raw_text: str, fallback_store: str = 'spinza'):
             continue
 
         lower = _normalize_import_text_for_matching(line)
-        if lower.startswith(_SKIP_IMPORT_AMOUNT_PREFIXES):
+        if _should_skip_import_amount_line(line):
             current['notes'].append(line)
             continue
 
@@ -951,16 +1124,19 @@ def _parse_import_txt_blocks(raw_text: str, fallback_store: str = 'spinza'):
         label = re.split(r"[0-9]", line, 1)[0].strip(' :-–—')
         pay_method = _normalize_import_payment_method(label)
         if pay_method:
+            income_amount = _parse_income_amount(line, pay_method)
+            if income_amount is not None:
+                amount = income_amount
             current['incomes'].append({'payment_method': pay_method, 'amount': amount, 'raw': line})
-            if '(' in line or ' x ' in lower:
-                current['notes'].append(line)
+            # Salvo sempre la riga originale nelle note: serve per controllo contabile e riparazioni future.
+            current['notes'].append(line)
         else:
             # Ogni riga con importo non riconosciuta come metodo di pagamento viene trattata come spesa.
-            expense_name = label or re.sub(r"\s*€?\s*[0-9]+(?:[\.,][0-9]{1,2})?\s*€?\s*$", '', line).strip() or line
+            expense_name = _extract_expense_name_from_line(line, amount)
             current['expenses'].append({'name': expense_name[:120], 'amount': amount, 'raw': line})
 
     close_current()
-    return blocks
+    return _reconcile_import_blocks(blocks)
 
 
 PALETTE_DARK = [
@@ -1001,8 +1177,17 @@ def _scope_period_label(period_type: str, previous: bool = False) -> str:
     return pair[1] if previous else pair[0]
 
 
+def _strip_accents(value: str) -> str:
+    try:
+        import unicodedata
+        text = unicodedata.normalize('NFKD', str(value or ''))
+        return ''.join(ch for ch in text if not unicodedata.combining(ch))
+    except Exception:
+        return str(value or '')
+
+
 def _normalize_signature(value: str) -> str:
-    raw = re.sub(r'[^a-z0-9]+', ' ', str(value or '').lower())
+    raw = re.sub(r'[^a-z0-9]+', ' ', _strip_accents(str(value or '')).lower())
     return re.sub(r'\s+', ' ', raw).strip()
 
 
@@ -1013,42 +1198,258 @@ def _title_case_words(value: str) -> str:
     return ' '.join(part[:1].upper() + part[1:] for part in value.split())
 
 
+_GENERIC_EXPENSE_CATEGORIES = {
+    '', 'import txt', 'import', 'txt', 'uscita', 'uscite', 'spesa', 'spese', 'varie', 'varia',
+    'altro', 'altra', 'spese varie', 'spesa varia', 'spese secondarie', 'secondarie', 'non specificato'
+}
+
+_KNOWN_EMPLOYEE_NAMES = {
+    'lipo', 'niccolo', 'nicolo', 'nicola', 'elio', 'mattia', 'marco', 'giulia', 'mira',
+    'andrea', 'alessandro', 'alessandra', 'alessio', 'antonio', 'anna', 'arianna', 'beatrice',
+    'carlo', 'chiara', 'claudia', 'cristian', 'cristiano', 'daniele', 'davide', 'denise',
+    'edoardo', 'elena', 'emanuele', 'emma', 'fabio', 'federica', 'filippo', 'francesca',
+    'francesco', 'gabriele', 'gaia', 'giorgia', 'giorgio', 'giovanni', 'giuseppe', 'ilaria',
+    'irene', 'laura', 'leonardo', 'lorenzo', 'luca', 'luigi', 'maria', 'martina', 'matteo',
+    'michele', 'paolo', 'riccardo', 'roberto', 'sara', 'serena', 'simone', 'sofia',
+    'stefano', 'tommaso', 'valentina', 'valerio', 'veronica',
+    # Nomi/soprannomi reali che compaiono negli appunti contabili: se una voce è solo un nome, è personale.
+    'jess', 'samuele', 'boubou', 'angelica', 'aneglica', 'miriam', 'renis', 'alisa',
+    'alex', 'amza', 'coleschi', 'mohamed', 'youssef', 'hamza', 'mario', 'marta'
+}
+
+_NON_EMPLOYEE_SINGLE_WORDS = {
+    'metro', 'carrefour', 'esselunga', 'coop', 'conad', 'lidl', 'aldi', 'pam', 'nexi', 'sumup',
+    'qonto', 'enel', 'eni', 'tim', 'wind', 'iliad', 'vodafone', 'amazon', 'google', 'meta',
+    'instagram', 'facebook', 'tiktok', 'deliveroo', 'glovo', 'justeat', 'just', 'satispay',
+    'paypal', 'iva', 'inps', 'f24', 'tari', 'imu', 'affitto', 'canone', 'abbonamento',
+    'luce', 'gas', 'acqua', 'telefono', 'internet', 'banca', 'pos', 'commissione', 'commissioni',
+    'farina', 'pomodoro', 'mozzarella', 'bufala', 'salumi', 'salume', 'prosciutto', 'salsiccia',
+    'nduja', 'verdure', 'bibite', 'bevande', 'forno', 'frigo', 'freezer', 'lavastoviglie',
+    'cartoni', 'vaschette', 'buste', 'tovaglioli', 'packaging', 'consulente', 'commercialista',
+    'notaio', 'avvocato', 'studio', 'manutenzione', 'riparazione', 'benzina', 'carburante',
+    'fornitore', 'fornitori', 'materie', 'materia', 'prime', 'marketing', 'pubblicita',
+    'spinza', 'reburger', 'camaldoli', 'palazzuolo', 'palazzuoli', 'cure', 'lecure', 'le',
+    'atollo', 'villani', 'bnb', 'foscolo', 'scuola', 'cinese', 'coins', 'coin', 'bit',
+    'brico', 'ferramenta', 'vetraio', 'cappa', 'impastatrice', 'motorino', 'nastrocolor',
+    'sogergross', 'lumina', 'the', 'fork', 'florentine', 'cheque', 'rent', 'rata',
+    'return', 'investment', 'coffee', 'caffe', 'caffè', 'aqua', 'golden', 'italia',
+    'buns', 'carne', 'macellaio', 'forno', 'vodafone', 'wifi', 'vodafone', 'oneri',
+    'commissioni', 'imposta', 'bollo', 'instagram', 'insta', 'followers', 'verification',
+    'architect', 'architetto', 'alberghiera', 'mini', 'pinner'
+}
+
+_EMPLOYEE_WORD_HINTS = (
+    'stipend', 'salario', 'salari', 'personale', 'dipendent', 'busta paga', 'retribuz',
+    'anticipo', 'acconto', 'extra sala', 'extra cucina', 'extra marzo', 'extra aprile',
+    'ore ', 'ore:', 'turno', 'turni', 'collaborator', 'lavorator'
+)
+
+_EXPENSE_RULES = [
+    ('Professionisti', ['commercialist', 'consulent', 'consulente del lavoro', 'cedolino', 'paghe', 'professionist', 'avvocato', 'notaio', 'studio professionale', 'labor consultant', 'architect', 'architetto', 'architett']),
+    ('Tasse', ['inps', 'iva', 'tari', 'imu', 'tassa', 'tasse', 'f24', 'imposta', 'agenzia entrate', 'ritenuta', 'diritto camerale', 'bollo']),
+    ('Bollette e utenze', ['luce', 'gas', 'acqua bnb', 'aqua bnb', 'enel', 'eni', 'utenz', 'bollett', 'telefono', 'internet', 'wifi', 'tim', 'wind', 'iliad', 'vodafone', 'energia', 'publiacqua', 'lumina']),
+    ('Affitti e abbonamenti', ['affitto', 'rent', 'locazione', 'canone', 'abbon', 'subscription', 'software', 'licenza', 'dominio', 'hosting', 'render', 'supabase', 'saas']),
+    ('Servizi finanziari', ['nexi', 'commission', 'oneri commissioni', 'banca', 'bonifico', 'pos', 'interessi', 'sumup', 'transaz', 'carta', 'conto corrente', 'canone bancario', 'qonto', 'rata qonto', 'the fork', 'fork pay']),
+    ('Marketing', ['social', 'social media', 'ads', 'marketing', 'pubblic', 'sponsorizz', 'meta', 'instagram', 'insta', 'followers', 'verification', 'facebook', 'google ads', 'tiktok', 'volantini', 'grafica']),
+    ('Packaging', ['packaging', 'cartoni', 'cartone', 'vaschette', 'buste', 'sacchetti', 'tovagliol', 'posate', 'bicchieri', 'contenitori', 'etichette']),
+    ('Manutenzione e attrezzature', ['ripar', 'manut', 'attrezz', 'guasto', 'tecnic', 'frigo', 'freezer', 'lavastoviglie', 'impianto', 'idraulic', 'elettric', 'macchinario', 'forno rotto', 'brico', 'ferramenta', 'vetraio', 'cappa', 'impastatrice', 'passaggio motorino', 'motorino', 'mini pinner', 'pinner', 'nastrocolor', 'amazon', 'atollo']),
+    ('Materie prime', ['mozzarella', 'farina', 'pomodor', 'salume', 'prosciutto', 'salsiccia', 'nduja', 'verdure', 'metro', 'fornit', 'forno', 'carrefour', 'esselunga', 'coop', 'conad', 'sogergross', 'food', 'bevande', 'bibite', 'ingredient', 'materie', 'materia prima', 'latte', 'bufala', 'pecorino', 'grana', 'parmigiano', 'stracciatella', 'olio', 'tonno', 'acciughe', 'funghi', 'macellaio', 'carne', 'buns', 'caffe', 'caffè', 'coffee', 'aqua golden', 'acqua golden']),
+    ('Delivery e logistica', ['delivery', 'glovo', 'deliveroo', 'just eat', 'justeat', 'logistic', 'trasporto', 'benzina', 'carburante', 'corriere', 'spedizione', 'parcheggio']),
+    ('Pulizie e consumo interno', ['detersiv', 'pulizia', 'sanificant', 'carta mani', 'scottex', 'sapone', 'sgrassatore', 'candeggina']),
+    ('Investimenti e rientri', ['return on investment', 'investimento', 'roi']),
+    ('Spese secondarie', ['secondar', 'varie', 'cinese', 'coins', 'coin', 'bit', 'extra', 'altro', 'spesa piccola'])
+]
+
+def _clean_expense_candidate(text: str) -> str:
+    s = str(text or '')
+    s = re.sub(r'\b(import\s*txt|txt|uscita|spesa|spese)\b', ' ', s, flags=re.I)
+    s = re.sub(r'€?\s*\d+(?:[\.,]\d{1,2})?\s*€?', ' ', s)
+    s = re.sub(r'[|:;,_/\\()\[\]{}]+', ' ', s)
+    return re.sub(r'\s+', ' ', s).strip()
+
+
+def _looks_like_employee_name(row) -> bool:
+    category = str(row.get('category') or '')
+    supplier = str(row.get('supplier') or '')
+    notes = str(row.get('notes') or '')
+    joined = ' '.join([category, supplier, notes])
+    norm_joined = _normalize_signature(joined)
+
+    if any(hint in norm_joined for hint in _EMPLOYEE_WORD_HINTS):
+        return True
+
+    for raw in [supplier, category]:
+        candidate = _clean_expense_candidate(raw)
+        norm = _normalize_signature(candidate)
+        if not norm:
+            continue
+        tokens = [t for t in norm.split() if t]
+        if len(tokens) > 4:
+            continue
+        # Se dentro la voce c'è un nome conosciuto, la considero personale anche se è scritto
+        # insieme alla sede: "Palazzuolo Stefano", "Colazione Elio", "Amza".
+        if any(t in _KNOWN_EMPLOYEE_NAMES for t in tokens):
+            return True
+        if any(t in _NON_EMPLOYEE_SINGLE_WORDS for t in tokens):
+            continue
+        # Regola richiesta: se è una voce corta composta solo da parole alfabetiche
+        # e non sembra un fornitore/categoria, la tratto come nome persona => dipendente.
+        if 1 <= len(tokens) <= 2 and all(re.match(r'^[a-z]{2,}$', t) for t in tokens):
+            return True
+
+    return False
+
+
 def _expense_family(row) -> str:
-    text = ' '.join([
+    normalized_text = _normalize_signature(' '.join([
         str(row.get('category') or ''),
         str(row.get('supplier') or ''),
         str(row.get('notes') or ''),
-    ]).lower()
+    ]))
 
-    # Raggruppamento intelligente pensato per leggere la home in pochi secondi.
-    # Le parole chiave lavorano su categoria, fornitore e note, quindi funzionano
-    # anche con le spese importate dal testo libero.
-    if any(k in text for k in ['stipend', 'salari', 'personale', 'dipendent', 'busta paga', 'lipo', 'niccolo', 'elio', 'mattia', 'mira', 'giulia']):
+    for family, keywords in _EXPENSE_RULES:
+        if any(_normalize_signature(k) in normalized_text for k in keywords):
+            return family
+
+    if _looks_like_employee_name(row):
         return 'Stipendi'
-    if any(k in text for k in ['commercialist', 'consulent', 'paghe', 'professionist', 'avvocato', 'notaio', 'labor consultant', 'studio']):
-        return 'Professionisti'
-    if any(k in text for k in ['luce', 'gas', 'acqua', 'enel', 'utenz', 'bollett', 'telefono', 'internet', 'tim', 'wind', 'iliad', 'energia']):
-        return 'Bollette e utenze'
-    if any(k in text for k in ['affitto', 'rent', 'locazione', 'canone', 'abbon', 'qonto', 'software', 'licenza', 'dominio', 'hosting', 'render', 'supabase']):
-        return 'Affitti e abbonamenti'
-    if any(k in text for k in ['mozzarella', 'farina', 'pomodor', 'salume', 'prosciutto', 'salsiccia', 'nduja', 'verdure', 'metro', 'fornit', 'forno', 'carrefour', 'food', 'bevande', 'bibite', 'ingredient', 'materie', 'materia prima', 'latte', 'bufala', 'pecorino', 'grana', 'parmigiano']):
-        return 'Materie prime'
-    if any(k in text for k in ['packaging', 'cartoni', 'vaschette', 'buste', 'tovagliol', 'posate', 'bicchieri', 'contenitori']):
-        return 'Packaging'
-    if any(k in text for k in ['ripar', 'manut', 'attrezz', 'guasto', 'tecnic', 'frigo', 'forno', 'lavastoviglie', 'impianto']):
-        return 'Manutenzione'
-    if any(k in text for k in ['nexi', 'commission', 'banca', 'bonifico', 'pos', 'interessi', 'sumup', 'transaz']):
-        return 'Servizi finanziari'
-    if any(k in text for k in ['social', 'ads', 'marketing', 'pubblic', 'meta', 'instagram', 'google', 'tiktok', 'volantini']):
-        return 'Marketing'
-    if any(k in text for k in ['delivery', 'glovo', 'deliveroo', 'just eat', 'logistic', 'trasporto', 'benzina', 'carburante', 'corriere']):
-        return 'Delivery e logistica'
-    if any(k in text for k in ['inps', 'iva', 'tari', 'imu', 'tassa', 'f24', 'imposta', 'agenzia entrate']):
-        return 'Tasse'
-    if any(k in text for k in ['secondar', 'varie', 'extra', 'altro', 'spesa piccola']):
-        return 'Spese secondarie'
+
     category = str(row.get('category') or '').strip()
+    if _normalize_signature(category) in _GENERIC_EXPENSE_CATEGORIES:
+        return 'Spese secondarie'
     return _title_case_words(category) if category else 'Spese secondarie'
+
+
+def _auto_expense_category(category: str = '', supplier: str = '', notes: str = '') -> str:
+    return _expense_family({'category': category or '', 'supplier': supplier or '', 'notes': notes or ''})
+
+
+def _should_auto_replace_expense_category(category: str, supplier: str = '', notes: str = '') -> bool:
+    norm_cat = _normalize_signature(category)
+    if norm_cat in _GENERIC_EXPENSE_CATEGORIES:
+        return True
+    if norm_cat != _normalize_signature('Stipendi') and _looks_like_employee_name({'category': category, 'supplier': supplier, 'notes': notes}):
+        return True
+    return False
+
+
+def _recategorize_existing_cash_expenses(scope_store: str = 'ALL') -> int:
+    """Rimedia i dati già inseriti: aggiorna solo categorie generiche o persone finite fuori dagli stipendi."""
+    updated = 0
+    ph = _ph()
+    try:
+        with connect() as conn:
+            cur = conn.cursor()
+            where = ''
+            params = []
+            if scope_store and scope_store != 'ALL' and scope_store in STORES:
+                where = f' WHERE store={ph}'
+                params.append(scope_store)
+            rows = _dict_rows(cur, f'SELECT id, category, supplier, notes FROM cash_expenses{where}', tuple(params))
+            for row in rows:
+                current = str(row.get('category') or '').strip()
+                supplier = str(row.get('supplier') or '').strip()
+                notes = str(row.get('notes') or '').strip()
+                new_category = _auto_expense_category(current, supplier, notes)
+                if not new_category or _normalize_signature(new_category) == _normalize_signature(current):
+                    continue
+                if not _should_auto_replace_expense_category(current, supplier, notes):
+                    continue
+                cur.execute(f'UPDATE cash_expenses SET category={ph} WHERE id={ph}', (new_category, int(row.get('id'))))
+                updated += 1
+    except Exception as e:
+        print('[WARN] Ricategorizzazione uscite non completata:', e)
+    return updated
+
+
+def _repair_existing_cash_entries_from_notes(scope_store: str = 'ALL') -> int:
+    """Corregge vecchi import dove righe tipo "Glovo 87€ (23€ cash)" erano state lette male.
+    Lavora per giornata: se trova la riga Total, decide se salvare delivery lordo o al netto del cash in parentesi.
+    """
+    updated = 0
+    ph = _ph()
+
+    def extract_raw_for_method(notes: str, method: str, original_method: str):
+        parts = re.split(r'\s*\|\s*|\n+', notes or '')
+        method_tokens = {method, str(original_method or '').strip().lower()}
+        if method == 'contanti':
+            method_tokens.update({'cash', 'qcash', 'q cash', 'contanti'})
+        if method == 'just eat':
+            method_tokens.update({'justeat', 'just eat'})
+        for part in parts:
+            norm = _normalize_import_text_for_matching(part)
+            label = re.split(r"[0-9]", part or '', 1)[0].strip(' :-–—')
+            detected = _normalize_import_payment_method(label)
+            if detected and detected == method:
+                return part
+            if detected:
+                continue
+            # fallback solo per vecchie note molto pulite, evitando fornitori tipo "Cash coffee".
+            if any(norm == tok or norm.startswith(tok + ' ') and len(norm.split()) <= 3 for tok in method_tokens if tok):
+                return part
+        return ''
+
+    def extract_declared_total(notes_list):
+        for notes in notes_list:
+            for part in re.split(r'\s*\|\s*|\n+', notes or ''):
+                norm = _normalize_import_text_for_matching(part)
+                if norm.startswith(('total', 'totale')) and 'sales' not in norm:
+                    amount = _parse_flexible_amount(part)
+                    if amount is not None:
+                        return float(amount)
+        return None
+
+    try:
+        with connect() as conn:
+            cur = conn.cursor()
+            where = ''
+            params = []
+            if scope_store and scope_store != 'ALL' and scope_store in STORES:
+                where = f' WHERE store={ph}'
+                params.append(scope_store)
+            rows = _dict_rows(cur, f'SELECT id, store, flow_date, payment_method, amount, notes FROM cash_entries{where}', tuple(params))
+            grouped = {}
+            for row in rows:
+                key = (str(row.get('store') or ''), str(row.get('flow_date') or ''))
+                grouped.setdefault(key, []).append(row)
+
+            for key, day_rows in grouped.items():
+                declared = extract_declared_total([str(r.get('notes') or '') for r in day_rows])
+                prepared = []
+                for row in day_rows:
+                    original_method = str(row.get('payment_method') or '').strip()
+                    method = _normalize_import_payment_method(original_method) or original_method.lower()
+                    raw_line = extract_raw_for_method(str(row.get('notes') or ''), method, original_method)
+                    parsed = None
+                    cash_part = 0.0
+                    if raw_line:
+                        parsed = _parse_income_amount(raw_line, method)
+                        if method in {'glovo', 'deliveroo', 'just eat'}:
+                            cash_part = _cash_component_inside_parentheses(raw_line)
+                    prepared.append({
+                        'row': row,
+                        'method': method,
+                        'raw_line': raw_line,
+                        'gross_amount': float(parsed if parsed is not None else (row.get('amount') or 0)),
+                        'cash_part': float(cash_part or 0),
+                    })
+                gross = sum(x['gross_amount'] for x in prepared)
+                net = gross - sum(x['cash_part'] for x in prepared)
+                subtract_cash = False
+                if declared is not None and sum(x['cash_part'] for x in prepared) > 0:
+                    subtract_cash = abs(net - declared) + 0.01 < abs(gross - declared)
+                for item in prepared:
+                    row = item['row']
+                    new_amount = item['gross_amount']
+                    if subtract_cash and item['cash_part'] > 0:
+                        new_amount = max(0.0, round(new_amount - item['cash_part'], 2))
+                    old_amount = float(row.get('amount') or 0)
+                    if abs(old_amount - float(new_amount)) > 0.009:
+                        cur.execute(f'UPDATE cash_entries SET amount={ph} WHERE id={ph}', (float(new_amount), int(row.get('id'))))
+                        updated += 1
+    except Exception as e:
+        print('[WARN] Riparazione incassi non completata:', e)
+    return updated
 
 
 def _expense_is_fixed(label: str, family: str) -> bool:
@@ -2105,6 +2506,7 @@ def gestionale_home(request: Request, period_type: str = 'month', anchor_date: s
         period_chart = _build_scope_period_chart(cur, store, period_type, anchor_s)
         period_rows = period_chart.get('rows', [])
         chart_scale = period_chart.get('scale', {'ticks': [], 'max': 1.0})
+        expense_overview = _build_expense_overview(cur, store, period_type, anchor_s)
         month_options = _month_options_for_scope(cur, store, selected_month)
         sales_store = store if store != 'ALL' else (active_store or 'spinza')
         sales_overview = _sales_month_overview(cur, sales_store, selected_month)
@@ -2137,6 +2539,7 @@ def gestionale_home(request: Request, period_type: str = 'month', anchor_date: s
         selected_month=selected_month,
         period_rows=period_rows,
         chart_scale=chart_scale,
+        expense_overview=expense_overview,
         sales_overview=sales_overview,
         nav_prev_url=nav_prev_url,
         nav_next_url=nav_next_url,
@@ -2812,7 +3215,8 @@ async def cash_entries_import_txt(request: Request):
                         raw_line = str(expense.get('raw') or '').strip()
                         supplier = str(expense.get('name') or raw_line or 'Import TXT').strip()[:120]
                         expense_notes = _join_unique_notes([raw_line, block_notes])
-                        _insert_cash_expense_compat(cur, store_key, flow_date, 'import txt', supplier, '', amount, expense_notes, user['username'])
+                        auto_category = _auto_expense_category('import txt', supplier, expense_notes)
+                        _insert_cash_expense_compat(cur, store_key, flow_date, auto_category, supplier, '', amount, expense_notes, user['username'])
                         _log(cur, store=store_key, username=user['username'], action='CREATE', category='USCITE', name=f"Import TXT {flow_date} - {supplier}", delta=float(amount or 0))
                         imported_expenses += 1
     except Exception as e:
@@ -2829,10 +3233,22 @@ async def cash_entries_import_txt(request: Request):
     return RedirectResponse(query, status_code=HTTP_303_SEE_OTHER)
 
 
+@app.post("/gestionale/uscite/ricategorizza")
+def cash_expenses_recategorize(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+    brand = _current_store_scope(request, user)
+    fixed = _recategorize_existing_cash_expenses(brand)
+    return RedirectResponse(f"/gestionale/uscite?recategorized_count={fixed}", status_code=HTTP_303_SEE_OTHER)
+
+
 @app.get("/gestionale/uscite", response_class=HTMLResponse)
 
 
-def cash_expenses_page(request: Request, flow_date: str = "", category: str = "ALL", period_type: str = 'month', anchor_date: str = '', month_key: str = '', nav: str = ''):
+def cash_expenses_page(request: Request, flow_date: str = "", category: str = "ALL", period_type: str = 'month', anchor_date: str = '', month_key: str = '', nav: str = '', recategorized_count: int = -1):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -2876,7 +3292,7 @@ def cash_expenses_page(request: Request, flow_date: str = "", category: str = "A
         total_amount=total_amount, chart_rows=chart_rows, chart_store=chart_store,
         selected_period_type=period_type, selected_anchor_date=anchor_s, page_period_meta=period_meta, page_totals=page_totals,
         month_options=month_options, selected_month=selected_month, nav_prev_url=nav_prev_url, nav_next_url=nav_next_url,
-        page_insights=page_insights, expense_overview=expense_overview,
+        page_insights=page_insights, expense_overview=expense_overview, recategorized_count=recategorized_count,
     )
 
 
@@ -2904,14 +3320,19 @@ def cash_expenses_create(
     amount_value = _safe_amount(amount)
     if amount_value <= 0:
         return RedirectResponse('/gestionale/uscite', status_code=HTTP_303_SEE_OTHER)
+    category_clean = (category or '').strip()
+    supplier_clean = (supplier or '').strip()
+    notes_clean = (notes or '').strip()
+    if _should_auto_replace_expense_category(category_clean, supplier_clean, notes_clean):
+        category_clean = _auto_expense_category(category_clean, supplier_clean, notes_clean)
     ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
         cur.execute(
             f"INSERT INTO cash_expenses(store, flow_date, category, supplier, payment_method, amount, notes, created_by) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (store, flow_date, (category or '').strip(), (supplier or '').strip(), (payment_method or '').strip(), amount_value, (notes or '').strip(), user['username']),
+            (store, flow_date, category_clean, supplier_clean, (payment_method or '').strip(), amount_value, notes_clean, user['username']),
         )
-        _log(cur, store=store, username=user['username'], action='CREATE', category='CASSA', name=f"Uscita {flow_date} - {(category or '').strip()}", delta=-amount_value)
+        _log(cur, store=store, username=user['username'], action='CREATE', category='CASSA', name=f"Uscita {flow_date} - {category_clean}", delta=-amount_value)
     return RedirectResponse('/gestionale/uscite', status_code=HTTP_303_SEE_OTHER)
 
 @app.post("/gestionale/incassi/{entry_id}/delete")

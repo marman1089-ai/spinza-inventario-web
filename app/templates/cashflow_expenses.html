@@ -39,10 +39,18 @@
       <div class="muted">Prima hai il quadro delle spese, con ricorrenti, gruppi di routine e pesi reali. Poi sotto trovi lo storico e l'inserimento.</div>
     </div>
     <div class="row">
+      <form method="post" action="/gestionale/uscite/ricategorizza" style="margin:0;">
+        <button class="btn2" type="submit">Ricalcola categorie già inserite</button>
+      </form>
       <a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Home gestionale</a>
       <a href="/gestionale/incassi" class="btn2" style="text-decoration:none;display:inline-block;">Incassi</a>
     </div>
   </div>
+  {% if recategorized_count is defined and recategorized_count >= 0 %}
+    <div style="margin-top:12px;padding:10px 12px;border:1px solid rgba(34,197,94,.28);border-radius:14px;background:rgba(34,197,94,.10);">
+      Ricategorizzazione completata: <strong>{{ recategorized_count }}</strong> uscite aggiornate.
+    </div>
+  {% endif %}
 </div>
 
 <div class="card" style="margin-top:14px;">

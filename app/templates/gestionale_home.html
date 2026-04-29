@@ -191,6 +191,38 @@
   <div class="chart-card">
     <div class="chart-head">
       <div>
+        <div class="muted">Spese divise automaticamente</div>
+        <div class="big">€ {{ '%.2f'|format(expense_overview.period_total or 0) }}</div>
+      </div>
+      <a href="/gestionale/uscite?period_type={{ period_meta.type }}&month_key={{ selected_month }}&anchor_date={{ period_meta.start }}" class="btn2" style="text-decoration:none;display:inline-block;">Apri uscite</a>
+    </div>
+    <div class="pie-wrap">
+      <div class="pie" style="background:{{ expense_overview.family_pie_style }};">
+        <div class="pie-center">
+          <div class="value">€ {{ '%.0f'|format(expense_overview.period_total or 0) }}</div>
+          <div class="muted">{{ period_meta.range_label }}</div>
+        </div>
+      </div>
+      <div class="legend">
+        {% for row in expense_overview.family_rows[:7] %}
+        <div class="legend-row">
+          <span class="swatch" style="background:{{ row.color }};"></span>
+          <div>
+            <div style="font-weight:700;">{{ row.name }}</div>
+            <div class="muted">{{ '%.1f'|format(row.share_pct or 0) }}% · {{ row.count }} mov.</div>
+          </div>
+          <div style="font-weight:700;">€ {{ '%.2f'|format(row.total or 0) }}</div>
+        </div>
+        {% else %}
+        <div class="muted">Nessuna uscita nel periodo selezionato.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-card">
+    <div class="chart-head">
+      <div>
         <div class="muted">Bilancio entrate / uscite</div>
         <div class="big">€ {{ '%.2f'|format(totals.net_period or 0) }}</div>
       </div>

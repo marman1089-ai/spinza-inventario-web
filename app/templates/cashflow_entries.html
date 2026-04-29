@@ -255,7 +255,7 @@
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Importa incassi e spese da testo</h3>
-  <div class="muted" style="margin-bottom:10px;">Puoi scegliere un file TXT/CSV oppure incollare direttamente il testo nella casella qui sotto. Il sistema legge POS, contanti, Deliveroo, Glovo, Just Eat e le righe di spesa con importo.</div>
+  <div class="muted" style="margin-bottom:10px;">Puoi scegliere un file TXT/CSV oppure incollare direttamente il testo nella casella qui sotto. Il sistema legge POS, contanti/QCash, Deliveroo, Glovo, Just Eat, Scuola, le spese con importo e i totali di controllo del giorno.</div>
   <form method="post" action="/gestionale/incassi/import-txt" enctype="multipart/form-data">
     <div class="row">
       <select name="fallback_store">
@@ -269,20 +269,23 @@
     </div>
 
     <textarea name="import_text" rows="10" placeholder="Esempio:
-SPINZA APRILE 2026
-01/04/26
-POS 249,50€
-Cash 55€
-Deliveroo 80€
-Glovo 40€
-Metro 125€
-Nexi commissione 18,50€" style="width:100%;margin-top:12px;min-height:180px;resize:vertical;"></textarea>
+APRIL 2025
+* 01/04/2025
+- Pos 285€
+- Cash 180€
+- Deliveroo 336€
+- Glovo 67.50€
+- Scuola 2 x 16€ = 32,00€
+Fondo cassa 5€
+Total 900.80€
+Coleschi 1500€
+Qonto subscription 54€" style="width:100%;margin-top:12px;min-height:180px;resize:vertical;"></textarea>
 
     <div class="row" style="margin-top:10px;">
       <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="replace_existing_dates" checked> Sovrascrivi gli stessi giorni già presenti</label>
       <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="import_expenses" checked> Importa anche le uscite trovate nel testo</label>
     </div>
-    <div class="tiny" style="margin-top:10px;">Se nel testo trovi il nome del negozio lo uso automaticamente. Se non c’è, uso il negozio selezionato sopra. Puoi incollare anche blocchi mensili tipo “SPINZA APRILE 2026” con giorni 1, 2, 3 oppure date complete.</div>
+    <div class="tiny" style="margin-top:10px;">Se nel testo trovi il nome del negozio lo uso automaticamente. Se non c’è, uso il negozio selezionato sopra. Puoi incollare anche blocchi mensili tipo “APRIL 2025” o “SPINZA APRILE 2026”; se una riga delivery ha “(23€ cash)” il programma controlla il Total del giorno e decide se sottrarlo per non sballare i conti.</div>
     <div style="margin-top:14px;"><button class="btn" type="submit">Estrai e salva incassi/spese</button></div>
   </form>
 </div>
