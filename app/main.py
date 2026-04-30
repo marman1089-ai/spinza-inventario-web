@@ -3050,6 +3050,7 @@ def _sales_report_tree(cur, period_id: int):
                 'id': child_id,
                 'name': child.get('name') or 'Voce',
                 'base_name': child.get('base_name') or child.get('name') or 'Voce',
+                'parent_id': child.get('parent_id'),
                 'amount': own_amount,
                 'quantity': own_quantity,
                 'total_amount': total_amount,
@@ -3075,6 +3076,125 @@ def _sales_report_flat_options(nodes, prefix=''):
         out.append({'id': n['id'], 'label': label})
         out.extend(_sales_report_flat_options(n.get('children') or [], prefix + '— '))
     return out
+
+
+
+def _sales_report_root_options(nodes, model_groups=None):
+    """Opzioni pulite per assegnare le singole voci ai gruppi principali."""
+    model_norms = {_sales_name_norm((g or {}).get('name') or '') for g in (model_groups or [])}
+    out = []
+    for n in nodes or []:
+        name = n.get('name') or ''
+        if model_norms and _sales_name_norm(name) not in model_norms:
+            continue
+        out.append({'id': n.get('id'), 'label': name})
+    return out
+
+
+def _sales_report_descendant_ids(cur, group_id: int):
+    """Restituisce id del gruppo e di tutti i figli, per cancellazioni sicure."""
+    ph = _ph()
+    ids = [int(group_id)]
+    cursor = 0
+    while cursor < len(ids):
+        children = _dict_rows(cur, f"SELECT id FROM sales_report_groups WHERE parent_id={ph}", (ids[cursor],))
+        for child in children:
+            cid = int(child.get('id') or 0)
+            if cid and cid not in ids:
+                ids.append(cid)
+        cursor += 1
+    return ids
+
+
+def _sales_report_model_group_for_name(cur, store: str, name: str):
+    ph = _ph()
+    norm = _sales_name_norm(name)
+    if not norm:
+        return None
+    row = cur.execute(
+        f"SELECT id, name, sort_order FROM sales_report_group_models WHERE store={ph} AND name_norm={ph}",
+        (store, norm),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def _sales_report_root_name_for_group_id(cur, group_id: int):
+    """Dato un parent_id, risale fino al gruppo principale e ne ritorna il nome."""
+    ph = _ph()
+    row = cur.execute(f"SELECT id, name, parent_id FROM sales_report_groups WHERE id={ph}", (int(group_id),)).fetchone()
+    if not row:
+        return ''
+    row = dict(row)
+    guard = 0
+    while row.get('parent_id') is not None and guard < 25:
+        parent = cur.execute(f"SELECT id, name, parent_id FROM sales_report_groups WHERE id={ph}", (int(row['parent_id']),)).fetchone()
+        if not parent:
+            break
+        row = dict(parent)
+        guard += 1
+    return (row.get('name') or '').strip()
+
+
+def _rename_sales_report_root_group_everywhere(cur, store: str, old_name: str, new_name: str, username: str = 'system'):
+    """Rinomina un gruppo principale fisso in tutti i mesi dello stesso negozio."""
+    ph = _ph()
+    old_norm = _sales_name_norm(old_name)
+    clean = (new_name or '').strip()
+    if not old_norm or not clean:
+        return
+    model_row = _sales_report_model_group_for_name(cur, store, old_name)
+    sort_order = int((model_row or {}).get('sort_order') or 0) if model_row else None
+    _delete_sales_report_model_group(cur, store, old_name)
+    _upsert_sales_report_model_group(cur, store, clean, username=username, sort_order=sort_order, is_active=1)
+    cur.execute(
+        f"UPDATE sales_report_name_rules SET target_group_name={ph}, is_deleted=0 WHERE store={ph} AND LOWER(TRIM(COALESCE(target_group_name,'')))={ph}",
+        (clean, store, old_norm),
+    )
+    cur.execute(
+        f"""
+        UPDATE sales_report_groups
+        SET name={ph},
+            base_name=CASE
+                WHEN COALESCE(base_name,'')='' OR LOWER(TRIM(base_name))={ph} THEN {ph}
+                ELSE base_name
+            END
+        WHERE period_id IN (SELECT id FROM sales_report_periods WHERE store={ph})
+          AND parent_id IS NULL
+          AND LOWER(TRIM(name))={ph}
+        """,
+        (clean, old_norm, clean, store, old_norm),
+    )
+
+
+def _delete_sales_report_root_group_everywhere(cur, store: str, group_name: str):
+    """Elimina davvero un gruppo principale fisso e i suoi sottogruppi da tutti i mesi."""
+    ph = _ph()
+    norm = _sales_name_norm(group_name)
+    if not norm:
+        return 0
+    _delete_sales_report_model_group(cur, store, group_name)
+    # Le regole che puntavano a questo gruppo non devono più bloccare o ricreare il vecchio gruppo:
+    # le voci torneranno fuori dai gruppi finché non le riassegni.
+    cur.execute(
+        f"UPDATE sales_report_name_rules SET target_group_name={ph}, is_deleted=0 WHERE store={ph} AND LOWER(TRIM(COALESCE(target_group_name,'')))={ph}",
+        ('', store, norm),
+    )
+    deleted = 0
+    periods = _dict_rows(cur, f"SELECT id FROM sales_report_periods WHERE store={ph}", (store,))
+    for pr in periods:
+        roots = _dict_rows(
+            cur,
+            f"SELECT id FROM sales_report_groups WHERE period_id={ph} AND parent_id IS NULL AND LOWER(TRIM(name))={ph}",
+            (int(pr['id']), norm),
+        )
+        for root in roots:
+            ids = _sales_report_descendant_ids(cur, int(root['id']))
+            if not ids:
+                continue
+            placeholders = ','.join([ph] * len(ids))
+            cur.execute(f"DELETE FROM sales_report_groups WHERE id IN ({placeholders})", tuple(ids))
+            deleted += len(ids)
+    return deleted
 
 
 def _parse_sales_report_upload(filename: str, raw_bytes: bytes):
@@ -3418,6 +3538,7 @@ def sales_report_page(request: Request, month_key: str = '', store: str = '', im
         walk(tree)
         parent_options = _sales_report_flat_options(tree)
         model_groups = _sales_report_model_groups(cur, selected_store)
+        root_parent_options = _sales_report_root_options(tree, model_groups)
         month_options = _month_options_for_scope(cur, selected_store, selected_month)
         summary = {
             'amount': top_amount,
@@ -3449,6 +3570,7 @@ def sales_report_page(request: Request, month_key: str = '', store: str = '', im
         periods=periods,
         month_options=month_options,
         parent_options=parent_options,
+        root_parent_options=root_parent_options,
         model_groups=model_groups,
         tree=tree,
         chart_tree_json=json.dumps(tree),
@@ -3511,7 +3633,9 @@ async def sales_report_import_file(request: Request, upload_file: UploadFile = F
             if target_parent is None:
                 rule = _sales_report_rule_for_name(cur, store, name) or {}
                 if int(rule.get('is_deleted') or 0):
-                    continue
+                    # Vecchie versioni salvavano "eliminato per sempre": ora non blocchiamo più la ricreazione/importazione.
+                    _upsert_sales_report_rule(cur, store, name, user.get('username') or 'system', target_group_name='', target_name='', is_deleted=0)
+                    rule = {}
                 target_name = (rule.get('target_name') or '').strip() or name
                 target_group_name = (rule.get('target_group_name') or '').strip()
                 if target_group_name:
@@ -3575,6 +3699,69 @@ async def sales_report_clear_month(request: Request):
     return RedirectResponse(f'/gestionale/report-vendite?store={store}&month_key={month_key}', status_code=HTTP_303_SEE_OTHER)
 
 
+
+@app.post("/gestionale/report-vendite/gruppo-fisso/{model_id}/rename")
+async def sales_report_rename_model_group(request: Request, model_id: int):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    new_name = str(form.get('name') or '').strip()
+    month_key = _month_key_from_value(str(form.get('month_key') or ''))
+    store = str(form.get('store') or '').strip()
+    ph = _ph()
+    brand = _current_store_scope(request, user)
+
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(f"SELECT id, store, name FROM sales_report_group_models WHERE id={ph}", (int(model_id),)).fetchone()
+        if not row:
+            return RedirectResponse(f"/gestionale/report-vendite?store={store}&month_key={month_key}", status_code=HTTP_303_SEE_OTHER)
+        row = dict(row)
+        real_store = row.get('store') or store or 'spinza'
+        if brand != 'ALL' and real_store != brand:
+            return RedirectResponse("/gestionale/report-vendite", status_code=HTTP_303_SEE_OTHER)
+        if new_name:
+            _rename_sales_report_root_group_everywhere(cur, real_store, row.get('name') or '', new_name, user.get('username') or 'system')
+            _log(cur, store=real_store, username=user['username'], action='UPDATE', category='REPORT_VENDITE', name=f"Rinominato gruppo fisso {row.get('name','')} -> {new_name}", delta=0)
+            conn.commit()
+
+    return RedirectResponse(f"/gestionale/report-vendite?store={real_store}&month_key={month_key}", status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/gestionale/report-vendite/gruppo-fisso/{model_id}/delete")
+async def sales_report_delete_model_group(request: Request, model_id: int):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    month_key = _month_key_from_value(str(form.get('month_key') or ''))
+    store = str(form.get('store') or '').strip()
+    ph = _ph()
+    brand = _current_store_scope(request, user)
+
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(f"SELECT id, store, name FROM sales_report_group_models WHERE id={ph}", (int(model_id),)).fetchone()
+        if not row:
+            return RedirectResponse(f"/gestionale/report-vendite?store={store}&month_key={month_key}", status_code=HTTP_303_SEE_OTHER)
+        row = dict(row)
+        real_store = row.get('store') or store or 'spinza'
+        if brand != 'ALL' and real_store != brand:
+            return RedirectResponse("/gestionale/report-vendite", status_code=HTTP_303_SEE_OTHER)
+        _delete_sales_report_root_group_everywhere(cur, real_store, row.get('name') or '')
+        _log(cur, store=real_store, username=user['username'], action='DELETE', category='REPORT_VENDITE', name=f"Eliminato gruppo fisso {row.get('name','')}", delta=0)
+        conn.commit()
+
+    return RedirectResponse(f"/gestionale/report-vendite?store={real_store}&month_key={month_key}", status_code=HTTP_303_SEE_OTHER)
+
+
 @app.post("/gestionale/report-vendite/voce")
 async def sales_report_add_group(request: Request):
     user = require_login(request)
@@ -3614,6 +3801,10 @@ async def sales_report_add_group(request: Request):
         placeholders = f"{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()}" if parent_id is not None else f"{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()},{_ph()}"
         params = (period_id, parent_id, name, name, amount, quantity, int(next_sort)+10, user.get('username') or 'system') if parent_id is not None else (period_id, name, name, amount, quantity, int(next_sort)+10, user.get('username') or 'system')
         cur.execute(f"INSERT INTO sales_report_groups({cols}) VALUES({placeholders})", params)
+        # Se in passato questa voce era stata cancellata con una regola permanente, permetti di ricrearla.
+        old_rule = _sales_report_rule_for_name(cur, store, name)
+        if old_rule and int(old_rule.get('is_deleted') or 0):
+            _upsert_sales_report_rule(cur, store, name, user.get('username') or 'system', target_group_name='', target_name='', is_deleted=0)
         if parent_id is None and persist_model:
             _upsert_sales_report_model_group(cur, store, name, username=user.get('username') or 'system', sort_order=int(next_sort)+10, is_active=1)
         _log(cur, store=store, username=user['username'], action='CREATE', category='REPORT_VENDITE', name=f"Report vendite {month_key} - {name}", delta=float(amount or 0))
@@ -3650,24 +3841,18 @@ async def sales_report_move_group(request: Request, group_id: int):
         row = dict(row)
         if brand != 'ALL' and row.get('store') != brand:
             return RedirectResponse("/gestionale/report-vendite", status_code=HTTP_303_SEE_OTHER)
+
         period_id = int(row['period_id'])
+        real_store = row.get('store') or 'spinza'
         if store not in STORES:
-            store = row.get('store') or 'spinza'
+            store = real_store
         if not month_key:
             month_key = row.get('month_key') or _today_str()[:7]
+
         if target_parent == group_id:
             target_parent = None
 
-        descendants = {group_id}
-        frontier = [group_id]
-        while frontier:
-            current = frontier.pop()
-            children = _dict_rows(cur, f"SELECT id FROM sales_report_groups WHERE parent_id={ph}", (current,))
-            for c in children:
-                cid = int(c['id'])
-                if cid not in descendants:
-                    descendants.add(cid)
-                    frontier.append(cid)
+        descendants = set(_sales_report_descendant_ids(cur, group_id))
         if target_parent in descendants:
             target_parent = None
         if target_parent is not None:
@@ -3675,25 +3860,37 @@ async def sales_report_move_group(request: Request, group_id: int):
             if not valid:
                 target_parent = None
 
-        base_name = (row.get('base_name') or row.get('name') or '').strip()
-        target_group_name = ''
-        if target_parent is not None:
-            target_row = cur.execute(f"SELECT id, name, parent_id FROM sales_report_groups WHERE id={ph}", (target_parent,)).fetchone()
-            if target_row:
-                target_group_name = (dict(target_row).get('name') or '').strip() if dict(target_row).get('parent_id') is None else ''
         is_leaf = _fetch_one_int(cur, f"SELECT COUNT(*) FROM sales_report_groups WHERE parent_id={ph}", (group_id,)) == 0
-        if is_leaf and base_name:
-            _upsert_sales_report_rule(cur, row.get('store') or 'spinza', base_name, user.get('username') or 'system', target_group_name=target_group_name)
-            _sales_report_apply_rules_to_existing_rows(cur, row.get('store') or 'spinza', base_name, user.get('username') or 'system')
-        else:
-            was_root = row.get('parent_id') is None
+        is_root = row.get('parent_id') is None
+        fixed_root = is_root and _sales_report_model_group_for_name(cur, real_store, row.get('name') or '') is not None
+        root_group = is_root and (fixed_root or not is_leaf)
+        base_name = (row.get('base_name') or row.get('name') or '').strip()
+
+        if is_leaf and not root_group and base_name:
+            # Voce singola importata: cambia il gruppo di appartenenza e salva la regola per i prossimi import.
+            target_group_name = _sales_report_root_name_for_group_id(cur, target_parent) if target_parent is not None else ''
+            _upsert_sales_report_rule(
+                cur,
+                real_store,
+                base_name,
+                user.get('username') or 'system',
+                target_group_name=target_group_name,
+                target_name=(row.get('name') or '').strip(),
+                is_deleted=0,
+            )
+            _sales_report_apply_rules_to_existing_rows(cur, real_store, base_name, user.get('username') or 'system')
+            # Se l'utente ha scelto un sottolivello preciso, mantienilo almeno nel mese aperto.
             cur.execute(f"UPDATE sales_report_groups SET parent_id={ph} WHERE id={ph}", (target_parent, group_id))
-            if was_root and target_parent is not None:
-                _delete_sales_report_model_group(cur, row.get('store') or 'spinza', row.get('name') or '')
-            elif (not was_root) and target_parent is None:
-                next_sort_model = _fetch_one_int(cur, f"SELECT COALESCE(MAX(sort_order),0) FROM sales_report_group_models WHERE store={ph}", (row.get('store') or 'spinza',)) + 10
-                _upsert_sales_report_model_group(cur, row.get('store') or 'spinza', row.get('name') or '', username=user.get('username') or 'system', sort_order=next_sort_model, is_active=1)
-        _log(cur, store=row.get('store') or 'spinza', username=user['username'], action='UPDATE', category='REPORT_VENDITE', name=f"Spostata voce report {row.get('name','')}", delta=0)
+        else:
+            # Gruppo principale o ramo: spostamento diretto.
+            cur.execute(f"UPDATE sales_report_groups SET parent_id={ph} WHERE id={ph}", (target_parent, group_id))
+            if fixed_root and target_parent is not None:
+                _delete_sales_report_model_group(cur, real_store, row.get('name') or '')
+            elif (not is_root) and target_parent is None and not is_leaf:
+                next_sort_model = _fetch_one_int(cur, f"SELECT COALESCE(MAX(sort_order),0) FROM sales_report_group_models WHERE store={ph}", (real_store,)) + 10
+                _upsert_sales_report_model_group(cur, real_store, row.get('name') or '', username=user.get('username') or 'system', sort_order=next_sort_model, is_active=1)
+
+        _log(cur, store=real_store, username=user['username'], action='UPDATE', category='REPORT_VENDITE', name=f"Spostata voce report {row.get('name','')}", delta=0)
         conn.commit()
 
     return RedirectResponse(f"/gestionale/report-vendite?store={store}&month_key={month_key}", status_code=HTTP_303_SEE_OTHER)
@@ -3716,93 +3913,109 @@ async def sales_report_rename_group(request: Request, group_id: int):
     with connect() as conn:
         cur = conn.cursor()
         row = cur.execute(
-            f"SELECT g.id, g.name, g.base_name, p.store, p.month_key FROM sales_report_groups g JOIN sales_report_periods p ON p.id=g.period_id WHERE g.id={ph}",
+            f"SELECT g.id, g.parent_id, g.name, g.base_name, p.store, p.month_key FROM sales_report_groups g JOIN sales_report_periods p ON p.id=g.period_id WHERE g.id={ph}",
             (group_id,),
         ).fetchone()
         if not row:
             return RedirectResponse("/gestionale/report-vendite", status_code=HTTP_303_SEE_OTHER)
         row = dict(row)
-        if brand != 'ALL' and row.get('store') != brand:
+        real_store = row.get('store') or 'spinza'
+        if brand != 'ALL' and real_store != brand:
             return RedirectResponse("/gestionale/report-vendite", status_code=HTTP_303_SEE_OTHER)
-        base_name = (row.get('base_name') or row.get('name') or '').strip()
+
         is_leaf = _fetch_one_int(cur, f"SELECT COUNT(*) FROM sales_report_groups WHERE parent_id={ph}", (group_id,)) == 0
-        parent_row = cur.execute(f"SELECT parent_id FROM sales_report_groups WHERE id={ph}", (group_id,)).fetchone()
-        is_root = (dict(parent_row).get('parent_id') if parent_row else None) is None
-        if is_leaf and base_name:
-            rule = _sales_report_rule_for_name(cur, row.get('store') or 'spinza', base_name) or {}
-            _upsert_sales_report_rule(cur, row.get('store') or 'spinza', base_name, user.get('username') or 'system', target_group_name=rule.get('target_group_name') or '', target_name=new_name, is_deleted=0)
-            _sales_report_apply_rules_to_existing_rows(cur, row.get('store') or 'spinza', base_name, user.get('username') or 'system')
-        elif is_root:
-            cur.execute(f"UPDATE sales_report_groups SET name={ph}, base_name=CASE WHEN COALESCE(base_name,'')='' THEN {ph} ELSE base_name END WHERE period_id IN (SELECT id FROM sales_report_periods WHERE store={ph}) AND parent_id IS NULL AND LOWER(TRIM(name))={ph}", (new_name, new_name, row.get('store') or 'spinza', _sales_name_norm(row.get('name') or '')))
-            model_row = cur.execute(f"SELECT sort_order FROM sales_report_group_models WHERE store={ph} AND name_norm={ph}", (row.get('store') or 'spinza', _sales_name_norm(row.get('name') or ''))).fetchone()
-            sort_order = int((dict(model_row).get('sort_order') if model_row else 0) or 0) if model_row else None
-            _delete_sales_report_model_group(cur, row.get('store') or 'spinza', row.get('name') or '')
-            _upsert_sales_report_model_group(cur, row.get('store') or 'spinza', new_name, username=user.get('username') or 'system', sort_order=sort_order, is_active=1)
+        is_root = row.get('parent_id') is None
+        fixed_root = is_root and _sales_report_model_group_for_name(cur, real_store, row.get('name') or '') is not None
+        root_group = is_root and (fixed_root or not is_leaf)
+        base_name = (row.get('base_name') or row.get('name') or '').strip()
+
+        if fixed_root:
+            _rename_sales_report_root_group_everywhere(cur, real_store, row.get('name') or '', new_name, user.get('username') or 'system')
+        elif is_leaf and not root_group and base_name:
+            rule = _sales_report_rule_for_name(cur, real_store, base_name) or {}
+            _upsert_sales_report_rule(
+                cur,
+                real_store,
+                base_name,
+                user.get('username') or 'system',
+                target_group_name=rule.get('target_group_name') or '',
+                target_name=new_name,
+                is_deleted=0,
+            )
+            _sales_report_apply_rules_to_existing_rows(cur, real_store, base_name, user.get('username') or 'system')
         else:
             cur.execute(f"UPDATE sales_report_groups SET name={ph} WHERE id={ph}", (new_name, group_id))
-        _log(cur, store=row.get('store') or 'spinza', username=user['username'], action='UPDATE', category='REPORT_VENDITE', name=f"Rinominata voce report {row.get('name','')} -> {new_name}", delta=0)
+
+        _log(cur, store=real_store, username=user['username'], action='UPDATE', category='REPORT_VENDITE', name=f"Rinominata voce report {row.get('name','')} -> {new_name}", delta=0)
         conn.commit()
-        return RedirectResponse(f"/gestionale/report-vendite?store={row.get('store')}&month_key={row.get('month_key')}", status_code=HTTP_303_SEE_OTHER)
+        return RedirectResponse(f"/gestionale/report-vendite?store={real_store}&month_key={row.get('month_key')}", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.post("/gestionale/report-vendite/voce/{group_id}/delete")
-def sales_report_delete_group(request: Request, group_id: int):
+async def sales_report_delete_group(request: Request, group_id: int):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
     if not can_view_management_finance(request, user):
         return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
 
+    form = await request.form()
+    remember_delete = str(form.get('remember_delete') or '').strip().lower() in ('1', 'true', 'on', 'yes')
     brand = _current_store_scope(request, user)
     ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
         row = cur.execute(
-            f"SELECT g.id, g.name, g.amount, p.store, p.month_key FROM sales_report_groups g JOIN sales_report_periods p ON p.id=g.period_id WHERE g.id={ph}",
+            f"SELECT g.id, g.parent_id, g.name, g.base_name, g.amount, p.store, p.month_key FROM sales_report_groups g JOIN sales_report_periods p ON p.id=g.period_id WHERE g.id={ph}",
             (group_id,),
         ).fetchone()
         if not row:
             return RedirectResponse("/gestionale/report-vendite", status_code=HTTP_303_SEE_OTHER)
         row = dict(row)
-        if brand != 'ALL' and row.get('store') != brand:
+        real_store = row.get('store') or 'spinza'
+        if brand != 'ALL' and real_store != brand:
             return RedirectResponse("/gestionale/report-vendite", status_code=HTTP_303_SEE_OTHER)
+
         is_leaf = _fetch_one_int(cur, f"SELECT COUNT(*) FROM sales_report_groups WHERE parent_id={ph}", (group_id,)) == 0
-        parent_row = cur.execute(f"SELECT parent_id FROM sales_report_groups WHERE id={ph}", (group_id,)).fetchone()
-        is_root = (dict(parent_row).get('parent_id') if parent_row else None) is None
-        base_row = cur.execute(f"SELECT base_name FROM sales_report_groups WHERE id={ph}", (group_id,)).fetchone()
-        base_name = ((dict(base_row).get('base_name') if base_row else '') or row.get('name') or '').strip()
-        if is_leaf and base_name:
-            rule = _sales_report_rule_for_name(cur, row.get('store') or 'spinza', base_name) or {}
-            _upsert_sales_report_rule(cur, row.get('store') or 'spinza', base_name, user.get('username') or 'system', target_group_name=rule.get('target_group_name') or '', target_name=rule.get('target_name') or '', is_deleted=1)
-            _sales_report_apply_rules_to_existing_rows(cur, row.get('store') or 'spinza', base_name, user.get('username') or 'system')
+        is_root = row.get('parent_id') is None
+        fixed_root = is_root and _sales_report_model_group_for_name(cur, real_store, row.get('name') or '') is not None
+        root_group = is_root and (fixed_root or not is_leaf)
+        base_name = ((row.get('base_name') or '') or row.get('name') or '').strip()
+
+        if fixed_root:
+            _delete_sales_report_root_group_everywhere(cur, real_store, row.get('name') or '')
+        elif root_group or not is_leaf:
+            ids = _sales_report_descendant_ids(cur, group_id)
+            if ids:
+                placeholders = ','.join([ph] * len(ids))
+                cur.execute(f"DELETE FROM sales_report_groups WHERE id IN ({placeholders})", tuple(ids))
         else:
-            if is_root:
-                _delete_sales_report_model_group(cur, row.get('store') or 'spinza', row.get('name') or '')
-                period_ids = _dict_rows(cur, f"SELECT id FROM sales_report_periods WHERE store={ph}", (row.get('store') or 'spinza',))
-                for pr in period_ids:
-                    rid = cur.execute(f"SELECT id FROM sales_report_groups WHERE period_id={ph} AND parent_id IS NULL AND LOWER(TRIM(name))={ph}", (int(pr['id']), _sales_name_norm(row.get('name') or ''))).fetchone()
-                    if not rid:
-                        continue
-                    gid2 = int(dict(rid).get('id'))
-                    ids = [gid2]
-                    cursor = 0
-                    while cursor < len(ids):
-                        children = _dict_rows(cur, f"SELECT id FROM sales_report_groups WHERE parent_id={ph}", (ids[cursor],))
-                        ids.extend(int(c['id']) for c in children if int(c['id']) not in ids)
-                        cursor += 1
-                    placeholders = ','.join([ph] * len(ids))
-                    cur.execute(f"DELETE FROM sales_report_groups WHERE id IN ({placeholders})", tuple(ids))
-            ids = [group_id]
-            cursor = 0
-            while cursor < len(ids):
-                children = _dict_rows(cur, f"SELECT id FROM sales_report_groups WHERE parent_id={ph}", (ids[cursor],))
-                ids.extend(int(c['id']) for c in children if int(c['id']) not in ids)
-                cursor += 1
-            placeholders = ','.join([ph] * len(ids))
-            cur.execute(f"DELETE FROM sales_report_groups WHERE id IN ({placeholders})", tuple(ids))
-        _log(cur, store=row.get('store') or 'spinza', username=user['username'], action='DELETE', category='REPORT_VENDITE', name=f"Report vendite eliminato {row.get('month_key','')} - {row.get('name','')}", delta=float(row.get('amount') or 0))
+            if remember_delete and base_name:
+                rule = _sales_report_rule_for_name(cur, real_store, base_name) or {}
+                _upsert_sales_report_rule(
+                    cur,
+                    real_store,
+                    base_name,
+                    user.get('username') or 'system',
+                    target_group_name=rule.get('target_group_name') or '',
+                    target_name=rule.get('target_name') or '',
+                    is_deleted=1,
+                )
+                _sales_report_apply_rules_to_existing_rows(cur, real_store, base_name, user.get('username') or 'system')
+            else:
+                # Eliminazione normale: cancella la riga, ma non blocca la ricreazione/importazione futura.
+                cur.execute(f"DELETE FROM sales_report_groups WHERE id={ph}", (group_id,))
+                if base_name:
+                    old_rule = _sales_report_rule_for_name(cur, real_store, base_name)
+                    if old_rule and int(old_rule.get('is_deleted') or 0):
+                        _upsert_sales_report_rule(cur, real_store, base_name, user.get('username') or 'system', target_group_name='', target_name='', is_deleted=0)
+
+        _log(cur, store=real_store, username=user['username'], action='DELETE', category='REPORT_VENDITE', name=f"Report vendite eliminato {row.get('month_key','')} - {row.get('name','')}", delta=float(row.get('amount') or 0))
         conn.commit()
-        return RedirectResponse(f"/gestionale/report-vendite?store={row.get('store')}&month_key={row.get('month_key')}", status_code=HTTP_303_SEE_OTHER)
+        return RedirectResponse(f"/gestionale/report-vendite?store={real_store}&month_key={row.get('month_key')}", status_code=HTTP_303_SEE_OTHER)
+
+
+
 
 
 

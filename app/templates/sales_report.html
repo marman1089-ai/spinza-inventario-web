@@ -26,6 +26,9 @@
   .danger-soft{background:rgba(244,63,94,.10);border-color:rgba(248,113,113,.34)}
   .insight-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
   .insight{border:1px solid var(--line-soft);border-radius:18px;padding:14px;background:var(--panel)}
+  .model-group-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+  .model-group-card{border:1px solid var(--line-soft);border-radius:16px;padding:12px;background:rgba(255,255,255,.03);display:flex;flex-direction:column;gap:8px}
+  .model-group-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
   @media(max-width:900px){.report-top,.summary-grid,.form-grid,.tree-row,.insight-grid{grid-template-columns:1fr}.ring{width:118px;height:118px}.ring::before{width:82px;height:82px}.ring-center{margin-top:-82px}.mode-bar{align-items:flex-start}}
 </style>
 
@@ -135,7 +138,7 @@
       <div class="muted" style="margin-bottom:6px;">Inserimento iniziale</div>
       <select name="parent_id">
         <option value="">Automatico / fuori dai gruppi se nuovo</option>
-        {% for opt in parent_options %}<option value="{{ opt.id }}">{{ opt.label }}</option>{% endfor %}
+        {% for opt in root_parent_options %}<option value="{{ opt.id }}">{{ opt.label }}</option>{% endfor %}
       </select>
     </div>
     <div style="display:flex;align-items:end;">
@@ -146,10 +149,22 @@
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Gruppi principali prestabiliti</h3>
-  <div class="tiny" style="margin-bottom:10px;">Questi gruppi rimangono disponibili anche quando svuoti un mese. Se sposti dentro o fuori dei sottogruppi, i totali si aggiornano automaticamente.</div>
-  <div class="row" style="margin-bottom:12px;">
+  <div class="tiny" style="margin-bottom:10px;">Qui puoi modificare o cancellare i gruppi grandi. Se ne cancelli uno, puoi ricrearne subito un altro dal blocco sotto.</div>
+  <div class="model-group-grid">
     {% for g in model_groups %}
-      <span class="pill">{{ g.name }}</span>
+      <div class="model-group-card">
+        <form method="post" action="/gestionale/report-vendite/gruppo-fisso/{{ g.id }}/rename" class="model-group-actions">
+          <input type="hidden" name="month_key" value="{{ selected_month }}">
+          <input type="hidden" name="store" value="{{ selected_store }}">
+          <input name="name" value="{{ g.name }}" style="min-width:150px;flex:1;">
+          <button class="btn2" type="submit">Salva nome</button>
+        </form>
+        <form method="post" action="/gestionale/report-vendite/gruppo-fisso/{{ g.id }}/delete" onsubmit="return confirm('Eliminare questo gruppo principale e i suoi sottogruppi dai mesi salvati? Potrai ricrearlo quando vuoi.');">
+          <input type="hidden" name="month_key" value="{{ selected_month }}">
+          <input type="hidden" name="store" value="{{ selected_store }}">
+          <button class="btn2 danger-soft" type="submit">Elimina gruppo</button>
+        </form>
+      </div>
     {% endfor %}
     {% if not model_groups %}<span class="muted">Ancora nessun gruppo principale fisso.</span>{% endif %}
   </div>
@@ -193,7 +208,7 @@
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Struttura salvata</h3>
-  <div class="tiny" style="margin-bottom:10px;">Qui sistemi le voci importate. Quando sposti, rinomini o elimini una voce finale, la regola viene ricordata e si applica anche agli altri mesi dello stesso negozio.</div>
+  <div class="tiny" style="margin-bottom:10px;">Qui sistemi le voci importate. Spostando una voce singola dentro un gruppo principale, il gestionale se lo ricorda anche per i prossimi import.</div>
   {% macro render_rows(nodes, depth=0) %}
     {% for n in nodes %}
       <div class="tree-row">
@@ -208,10 +223,10 @@
             <input type="hidden" name="month_key" value="{{ selected_month }}">
             <input type="hidden" name="store" value="{{ selected_store }}">
             <select name="parent_id">
-              <option value="">Fuori dai gruppi</option>
-              {% for opt in parent_options %}
+              <option value="" {% if not n.parent_id %}selected{% endif %}>Fuori dai gruppi</option>
+              {% for opt in root_parent_options %}
                 {% if opt.id != n.id %}
-                <option value="{{ opt.id }}">{{ opt.label }}</option>
+                <option value="{{ opt.id }}" {% if n.parent_id == opt.id %}selected{% endif %}>{{ opt.label }}</option>
                 {% endif %}
               {% endfor %}
             </select>
@@ -223,7 +238,7 @@
             <input type="text" name="name" value="{{ n.name }}" placeholder="Nuovo nome" style="min-width:140px;">
             <button class="btn2" type="submit">Rinomina</button>
           </form>
-          <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/delete" onsubmit="return confirm('Eliminare questa voce? Se è una voce finale, verrà nascosta anche negli altri mesi.');">
+          <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/delete" onsubmit="return confirm('Eliminare questa voce? Potrai ricrearla quando vuoi.');">
             <button class="btn2" type="submit" style="border-color:rgba(248,113,113,.34);background:rgba(244,63,94,.10);">Elimina</button>
           </form>
         </div>
