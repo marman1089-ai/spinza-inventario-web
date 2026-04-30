@@ -1170,18 +1170,35 @@ def _expense_category_options():
     return out
 
 
+
+def _import_expense_override_key(block, expense_idx, fallback_store: str = 'spinza'):
+    """Chiave stabile per collegare una spesa del preview alla categoria scelta prima del salvataggio."""
+    store_key = str((block or {}).get('store') or fallback_store or 'spinza').strip()
+    if store_key not in STORES:
+        store_key = fallback_store if fallback_store in STORES else 'spinza'
+    flow_date = str((block or {}).get('date') or '').strip()
+    try:
+        idx = int(expense_idx or 0)
+    except Exception:
+        idx = 0
+    return f"{store_key}|{flow_date}|{idx}"
+
 def _build_import_preview(blocks, raw_text: str, fallback_store: str, include_expenses: bool, replace_existing_dates: bool):
     """Riepilogo leggibile prima di salvare l'import TXT: totali, righe estratte e giorni mancanti."""
     preview_rows = []
+    expense_rows = []
     month_map = {}
     income_total = 0.0
     expense_total = 0.0
     income_count = 0
     expense_count = 0
+    category_options = _expense_category_options()
 
     for block in blocks or []:
         ds = str(block.get('date') or '').strip()
         store_key = str(block.get('store') or fallback_store or 'spinza').strip()
+        if store_key not in STORES:
+            store_key = fallback_store if fallback_store in STORES else 'spinza'
         incomes = block.get('incomes') or []
         expenses = block.get('expenses') or []
         inc_total = round(sum(float(x.get('amount') or 0) for x in incomes), 2)
@@ -1203,12 +1220,32 @@ def _build_import_preview(blocks, raw_text: str, fallback_store: str, include_ex
             methods[name] = methods.get(name, 0.0) + float(item.get('amount') or 0)
 
         expense_samples = []
-        for item in expenses[:6]:
-            expense_samples.append({
-                'name': str(item.get('name') or 'Import TXT')[:80],
-                'amount': round(float(item.get('amount') or 0), 2),
-                'category': _auto_expense_category('import txt', str(item.get('name') or ''), str(item.get('raw') or '')),
-            })
+        for exp_idx, item in enumerate(expenses):
+            amount = round(float(item.get('amount') or 0), 2)
+            if amount <= 0:
+                continue
+            raw_line = str(item.get('raw') or '').strip()
+            supplier = str(item.get('name') or raw_line or 'Import TXT').strip()[:120]
+            category = _auto_expense_category('import txt', supplier, raw_line)
+            if category and category not in category_options:
+                category_options.append(category)
+            expense_row = {
+                'key': _import_expense_override_key(block, exp_idx, fallback_store),
+                'date': ds,
+                'store': store_key,
+                'store_label': STORES.get(store_key, store_key),
+                'name': supplier[:80],
+                'raw': raw_line[:180],
+                'amount': amount,
+                'category': category,
+            }
+            expense_rows.append(expense_row)
+            if len(expense_samples) < 6:
+                expense_samples.append({
+                    'name': expense_row['name'],
+                    'amount': amount,
+                    'category': category,
+                })
 
         preview_rows.append({
             'date': ds,
@@ -1248,6 +1285,8 @@ def _build_import_preview(blocks, raw_text: str, fallback_store: str, include_ex
         'include_expenses': bool(include_expenses),
         'replace_existing_dates': bool(replace_existing_dates),
         'rows': preview_rows,
+        'expense_rows': expense_rows,
+        'category_options': category_options,
         'days_count': len(preview_rows),
         'income_count': income_count,
         'expense_count': expense_count,
@@ -3914,6 +3953,18 @@ async def cash_entries_import_txt(request: Request):
     include_expenses = _is_truthy(form.get('import_expenses'))
     replace_existing_dates = _is_truthy(form.get('replace_existing_dates'))
     confirm_import = _is_truthy(form.get('confirm_import'))
+    expense_category_overrides = {}
+    if confirm_import:
+        posted_expense_keys = list(form.getlist('expense_key'))
+        posted_expense_categories = list(form.getlist('expense_category'))
+        allowed_categories = {_normalize_signature(x): x for x in _expense_category_options()}
+        for idx, key in enumerate(posted_expense_keys):
+            key = str(key or '').strip()
+            category = str(posted_expense_categories[idx] if idx < len(posted_expense_categories) else '').strip()
+            if not key or not category:
+                continue
+            normalized = _normalize_signature(category)
+            expense_category_overrides[key] = allowed_categories.get(normalized, category[:80])
 
     fallback_store = str(form.get('fallback_store') or form.get('store') or '').strip()
     if fallback_store not in STORES:
@@ -4009,14 +4060,16 @@ async def cash_entries_import_txt(request: Request):
                     imported_entries += 1
 
                 if include_expenses:
-                    for expense in expenses:
+                    for expense_idx, expense in enumerate(expenses):
                         amount = _safe_amount(expense.get('amount'), 0.0)
                         if amount <= 0:
                             continue
                         raw_line = str(expense.get('raw') or '').strip()
                         supplier = str(expense.get('name') or raw_line or 'Import TXT').strip()[:120]
                         expense_notes = _join_unique_notes([raw_line, block_notes])
-                        auto_category = _auto_expense_category('import txt', supplier, raw_line)
+                        override_key = _import_expense_override_key(block, expense_idx, fallback_store)
+                        selected_category = expense_category_overrides.get(override_key)
+                        auto_category = selected_category or _auto_expense_category('import txt', supplier, raw_line)
                         _insert_cash_expense_compat(cur, store_key, flow_date, auto_category, supplier, '', amount, expense_notes, user['username'])
                         _log(cur, store=store_key, username=user['username'], action='CREATE', category='USCITE', name=f"Import TXT {flow_date} - {supplier}", delta=float(amount or 0))
                         imported_expenses += 1

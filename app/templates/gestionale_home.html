@@ -139,70 +139,6 @@
   <div class="muted" style="margin-top:12px;">Stai guardando: <strong>{{ period_meta.start }}</strong> → <strong>{{ period_meta.end }}</strong></div>
 </div>
 
-<div class="card" style="margin-bottom:14px;">
-  <div class="chart-head" style="margin-bottom:12px;">
-    <div>
-      <div class="muted">Mesi salvati nel gestionale</div>
-      <h3 style="margin:4px 0 0 0;">Riepilogo entrate / uscite per mese</h3>
-      <div class="muted" style="margin-top:6px;">Da qui puoi pulire velocemente un mese sbagliato: il pulsante elimina insieme incassi e uscite di quel mese.</div>
-    </div>
-    <div class="pill">{{ month_summaries|length }} mesi</div>
-  </div>
-  <div class="month-summary-wrap">
-    <table class="month-summary-table">
-      <thead>
-        <tr>
-          <th>Mese</th>
-          <th>Negozi</th>
-          <th>Entrate</th>
-          <th>Uscite</th>
-          <th>Divisione spese</th>
-          <th>Margine</th>
-          <th>Movimenti</th>
-          <th>Azioni</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in month_summaries %}
-        <tr>
-          <td><strong>{{ row.label }}</strong><div class="muted">{{ row.key }}</div></td>
-          <td>{{ row.store_labels }}</td>
-          <td><strong>€ {{ '%.2f'|format(row.income_total or 0) }}</strong><div class="muted">{{ row.income_count }} entrate</div></td>
-          <td><strong>€ {{ '%.2f'|format(row.expense_total or 0) }}</strong><div class="muted">{{ row.expense_count }} uscite</div></td>
-          <td>
-            {% if row.expense_breakdown %}
-            <div class="expense-chip-list">
-              {% for fam in row.expense_breakdown %}
-              <span class="expense-chip" title="{{ fam.name }} · € {{ '%.2f'|format(fam.total or 0) }}">
-                <strong>{{ fam.name }}</strong><span class="pct">{{ '%.1f'|format(fam.share_pct or 0) }}%</span>
-              </span>
-              {% endfor %}
-              {% if row.expense_breakdown_count > 4 %}
-              <span class="expense-chip">+{{ row.expense_breakdown_count - 4 }}</span>
-              {% endif %}
-            </div>
-            {% else %}
-            <span class="muted">—</span>
-            {% endif %}
-          </td>
-          <td class="{% if row.net_total >= 0 %}pos{% else %}neg{% endif %}"><strong>€ {{ '%.2f'|format(row.net_total or 0) }}</strong></td>
-          <td>{{ row.total_count }}</td>
-          <td>
-            <form method="post" action="/gestionale/mese/elimina" class="delete-month-form" data-label="{{ row.label }}" data-income="{{ row.income_count }}" data-expense="{{ row.expense_count }}">
-              <input type="hidden" name="month_key" value="{{ row.key }}">
-              <input type="hidden" name="return_to" value="/gestionale?period_type={{ period_meta.type }}&month_key={{ selected_month }}&anchor_date={{ period_meta.anchor }}">
-              <button type="submit" class="danger-btn">Elimina mese</button>
-            </form>
-          </td>
-        </tr>
-        {% else %}
-        <tr><td colspan="8" class="muted" style="text-align:left;">Ancora nessuna entrata o uscita salvata.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-
 <div class="kpi-grid" style="margin-bottom:14px;">
   <div class="kpi"><div class="muted">Totale incassi</div><div class="big">€ {{ '%.2f'|format(totals.income_period or 0) }}</div><div class="muted" style="margin-top:8px;">{{ summary_labels.current }}</div></div>
   <div class="kpi"><div class="muted">Totale spese</div><div class="big">€ {{ '%.2f'|format(totals.expense_period or 0) }}</div><div class="muted" style="margin-top:8px;">{{ summary_labels.current }}</div></div>
@@ -410,6 +346,70 @@
         {% endfor %}
       </div>
     </div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:14px;">
+  <div class="chart-head" style="margin-bottom:12px;">
+    <div>
+      <div class="muted">Mesi salvati nel gestionale</div>
+      <h3 style="margin:4px 0 0 0;">Riepilogo entrate / uscite per mese</h3>
+      <div class="muted" style="margin-top:6px;">Da qui puoi pulire velocemente un mese sbagliato: il pulsante elimina insieme incassi e uscite di quel mese.</div>
+    </div>
+    <div class="pill">{{ month_summaries|length }} mesi</div>
+  </div>
+  <div class="month-summary-wrap">
+    <table class="month-summary-table">
+      <thead>
+        <tr>
+          <th>Mese</th>
+          <th>Negozi</th>
+          <th>Entrate</th>
+          <th>Uscite</th>
+          <th>Divisione spese</th>
+          <th>Margine</th>
+          <th>Movimenti</th>
+          <th>Azioni</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in month_summaries %}
+        <tr>
+          <td><strong>{{ row.label }}</strong><div class="muted">{{ row.key }}</div></td>
+          <td>{{ row.store_labels }}</td>
+          <td><strong>€ {{ '%.2f'|format(row.income_total or 0) }}</strong><div class="muted">{{ row.income_count }} entrate</div></td>
+          <td><strong>€ {{ '%.2f'|format(row.expense_total or 0) }}</strong><div class="muted">{{ row.expense_count }} uscite</div></td>
+          <td>
+            {% if row.expense_breakdown %}
+            <div class="expense-chip-list">
+              {% for fam in row.expense_breakdown %}
+              <span class="expense-chip" title="{{ fam.name }} · € {{ '%.2f'|format(fam.total or 0) }}">
+                <strong>{{ fam.name }}</strong><span class="pct">{{ '%.1f'|format(fam.share_pct or 0) }}%</span>
+              </span>
+              {% endfor %}
+              {% if row.expense_breakdown_count > 4 %}
+              <span class="expense-chip">+{{ row.expense_breakdown_count - 4 }}</span>
+              {% endif %}
+            </div>
+            {% else %}
+            <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td class="{% if row.net_total >= 0 %}pos{% else %}neg{% endif %}"><strong>€ {{ '%.2f'|format(row.net_total or 0) }}</strong></td>
+          <td>{{ row.total_count }}</td>
+          <td>
+            <form method="post" action="/gestionale/mese/elimina" class="delete-month-form" data-label="{{ row.label }}" data-income="{{ row.income_count }}" data-expense="{{ row.expense_count }}">
+              <input type="hidden" name="month_key" value="{{ row.key }}">
+              <input type="hidden" name="return_to" value="/gestionale?period_type={{ period_meta.type }}&month_key={{ selected_month }}&anchor_date={{ period_meta.anchor }}">
+              <button type="submit" class="danger-btn">Elimina mese</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="muted" style="text-align:left;">Ancora nessuna entrata o uscita salvata.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
 </div>
 

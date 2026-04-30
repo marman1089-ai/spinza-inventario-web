@@ -255,7 +255,7 @@
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Importa incassi e spese da testo</h3>
-  <div class="muted" style="margin-bottom:10px;">Puoi scegliere un file TXT/CSV oppure incollare direttamente il testo nella casella qui sotto. Il sistema legge POS, contanti/QCash, Deliveroo, Glovo, Just Eat, Scuola, le spese con importo e i totali di controllo del giorno.</div>
+  <div class="muted" style="margin-bottom:10px;">Puoi scegliere un file TXT/CSV oppure incollare direttamente il testo nella casella qui sotto. Il sistema legge POS, contanti/QCash, Deliveroo, Glovo, Just Eat, Scuola, le spese con importo e i totali di controllo del giorno. Prima di salvare puoi correggere una a una le categorie delle spese.</div>
   <form method="post" action="/gestionale/incassi/import-txt" enctype="multipart/form-data">
     <div class="row">
       <select name="fallback_store">
@@ -360,6 +360,42 @@ Qonto subscription 54€" style="width:100%;margin-top:12px;min-height:180px;res
       {% if import_preview.replace_existing_dates %}<input type="hidden" name="replace_existing_dates" value="on">{% endif %}
       {% if import_preview.include_expenses %}<input type="hidden" name="import_expenses" value="on">{% endif %}
       <textarea name="import_text" style="display:none;">{{ import_preview.raw_text }}</textarea>
+
+      {% if import_preview.include_expenses and import_preview.expense_rows %}
+      <div class="card" style="margin:14px 0;background:rgba(15,23,42,.58);border-color:rgba(148,163,184,.22);">
+        <h4 style="margin:0 0 8px 0;">Correggi le divisioni delle spese prima di salvare</h4>
+        <div class="muted" style="margin-bottom:10px;">Qui puoi modificare una spesa alla volta: la categoria scelta in questa tabella sarà quella salvata quando premi <strong>Conferma e salva tutto</strong>.</div>
+        <div style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr><th>Data</th><th>Sede</th><th>Spesa letta</th><th>Importo</th><th>Gruppo spesa da salvare</th></tr>
+            </thead>
+            <tbody>
+              {% for ex in import_preview.expense_rows %}
+              <tr>
+                <td><strong>{{ ex.date }}</strong></td>
+                <td>{{ ex.store_label }}</td>
+                <td>
+                  <strong>{{ ex.name }}</strong>
+                  {% if ex.raw and ex.raw != ex.name %}<div class="tiny">{{ ex.raw }}</div>{% endif %}
+                </td>
+                <td><strong>€ {{ '%.2f'|format(ex.amount or 0) }}</strong></td>
+                <td>
+                  <input type="hidden" name="expense_key" value="{{ ex.key }}">
+                  <select name="expense_category" style="min-width:230px;">
+                    {% for cat in import_preview.category_options %}
+                      <option value="{{ cat }}" {% if cat == ex.category %}selected{% endif %}>{{ cat }}</option>
+                    {% endfor %}
+                  </select>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
+
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
         <button class="btn" type="submit">Conferma e salva tutto</button>
         <a class="btn2" href="/gestionale/incassi" style="text-decoration:none;display:inline-block;">Annulla</a>
