@@ -1367,7 +1367,7 @@ _EXPENSE_RULES = [
     ('Professionisti', [
         'commercialist', 'consulent', 'consulente del lavoro', 'cedolino', 'paghe', 'professionist',
         'avvocato', 'notaio', 'studio professionale', 'labor consultant', 'architect', 'architetto',
-        'architett', 'geometra', 'ingegnere', 'progettista'
+        'architett', 'geometra', 'ingegnere', 'progettista', 'sicurezza lavoro', 'haccp', 'medico competente'
     ]),
     ('Tasse', [
         'inps', 'iva', 'tari', 'imu', 'tassa', 'tasse', 'f24', 'imposta', 'agenzia entrate',
@@ -1388,7 +1388,7 @@ _EXPENSE_RULES = [
         'canone bancario', 'qonto', 'rata qonto', 'qonto subscription', 'subscription qonto'
     ]),
     ('Servizi piattaforme', [
-        'the fork', 'fork pay', 'thefork', 'forkpay', 'just eat fee', 'glovo fee', 'deliveroo fee'
+        'the fork', 'fork pay', 'thefork', 'forkpay', 'just eat fee', 'glovo fee', 'deliveroo fee', 'commissione glovo', 'commissioni glovo', 'commissione deliveroo', 'commissioni deliveroo', 'commissione just eat', 'commissioni just eat', 'promo glovo', 'promo deliveroo'
     ]),
     ('Marketing', [
         'social', 'social media', 'ads', 'marketing', 'pubblic', 'sponsorizz', 'meta', 'instagram',
@@ -1397,7 +1397,8 @@ _EXPENSE_RULES = [
     ]),
     ('Packaging', [
         'packaging', 'cartoni', 'cartone', 'vaschette', 'buste', 'sacchetti', 'tovagliol',
-        'posate', 'bicchieri', 'contenitori', 'etichette', 'lecure packaging', 'packaging lecure'
+        'posate', 'bicchieri', 'contenitori', 'etichette', 'lecure packaging', 'packaging lecure',
+        'scatole', 'scatola', 'take away', 'takeaway', 'monouso', 'coperchi', 'porta pinza', 'porta pizza'
     ]),
     ('Manutenzione e attrezzature', [
         'ripar', 'manut', 'attrezz', 'guasto', 'tecnic', 'frigo', 'freezer', 'lavastoviglie',
@@ -1428,7 +1429,7 @@ _EXPENSE_RULES = [
     ]),
     ('Pulizie e consumo interno', [
         'detersiv', 'pulizia', 'sanificant', 'carta mani', 'scottex', 'sapone', 'sgrassatore',
-        'candeggina', 'igiene'
+        'candeggina', 'igiene', 'guanti', 'rotoloni', 'bobine', 'carta igienica', 'lavaggio', 'detergente'
     ]),
     ('Da verificare / movimento interno', [
         'return on investment', 'investimento', 'roi', 'movimento interno', 'giroconto'
@@ -1601,6 +1602,7 @@ _STRICT_CATEGORY_RULES = [
     ]),
     ('Stipendi', [
         'stipendio', 'stipendi', 'salario', 'salari', 'busta paga', 'paghe dipendenti', 'dipendente',
+        'paga', 'paghe', 'personale', 'collaborazione', 'collaboratore', 'straordinari',
         'anticipo', 'acconto stipendio', 'extra sala', 'extra cucina', 'extra marzo', 'extra aprile',
         'consegna', 'turno', 'turni', 'ore lavoro', 'alberghiera',
         # nomi/persone usate nei tuoi appunti: se compaiono come voce principale, sono personale
@@ -1630,7 +1632,8 @@ _STRICT_CATEGORY_RULES = [
     ]),
     ('Packaging', [
         'packaging', 'cartoni', 'cartone', 'vaschette', 'buste', 'sacchetti', 'tovaglioli', 'bicchieri',
-        'contenitori', 'packaging lecure', 'packaging le cure'
+        'contenitori', 'scatole', 'scatola', 'monouso', 'coperchi', 'take away', 'takeaway',
+        'packaging lecure', 'packaging le cure'
     ]),
     ('Manutenzione e attrezzature', [
         'amazon', 'brico', 'ferramenta', 'vetraio', 'cappa', 'impastatrice', 'motorino', 'mini pinner',
@@ -2481,6 +2484,8 @@ def _cash_month_summaries(cur, scope_store: str):
             'income_count': 0,
             'expense_count': 0,
             'stores': set(),
+            # Serve alla home: accanto a ogni mese mostro subito come sono divise le uscite.
+            'expense_families': {},
         })
 
     for row in _dict_rows(cur, f"SELECT store, flow_date, amount FROM cash_entries WHERE {where_sql}", params):
@@ -2495,14 +2500,19 @@ def _cash_month_summaries(cur, scope_store: str):
         if store:
             item['stores'].add(store)
 
-    for row in _dict_rows(cur, f"SELECT store, flow_date, amount FROM cash_expenses WHERE {where_sql}", params):
+    for row in _dict_rows(cur, f"SELECT store, flow_date, category, supplier, notes, amount FROM cash_expenses WHERE {where_sql}", params):
         flow_date = str(row.get('flow_date') or '').strip()
         if len(flow_date) < 7:
             continue
+        amount = float(row.get('amount') or 0)
         month_key = flow_date[:7]
         item = slot(month_key)
-        item['expense_total'] += float(row.get('amount') or 0)
+        item['expense_total'] += amount
         item['expense_count'] += 1
+        family = _expense_family(row)
+        fam = item['expense_families'].setdefault(family, {'name': family, 'total': 0.0, 'count': 0})
+        fam['total'] += amount
+        fam['count'] += 1
         store = str(row.get('store') or '').strip()
         if store:
             item['stores'].add(store)
@@ -2514,9 +2524,18 @@ def _cash_month_summaries(cur, scope_store: str):
         item['net_total'] = income - expense
         item['total_count'] = int(item.get('income_count') or 0) + int(item.get('expense_count') or 0)
         item['store_labels'] = ', '.join(_store_label(s) for s in sorted(item.get('stores') or [])) or '—'
+        families = sorted((item.get('expense_families') or {}).values(), key=lambda x: (-float(x.get('total') or 0), x.get('name') or ''))
+        for fam in families:
+            fam['total'] = round(float(fam.get('total') or 0), 2)
+            fam['share_pct'] = round((float(fam.get('total') or 0) / expense) * 100.0, 1) if expense > 0 else 0.0
+        item['expense_breakdown'] = families[:4]
+        item['expense_breakdown_count'] = len(families)
+        item['expense_top_family'] = families[0] if families else {'name': '—', 'total': 0.0, 'share_pct': 0.0}
         item['income_total'] = round(income, 2)
         item['expense_total'] = round(expense, 2)
         item['net_total'] = round(item['net_total'], 2)
+        # I set/dizionari tecnici non servono al template.
+        item.pop('expense_families', None)
         rows.append(item)
     rows.sort(key=lambda x: x.get('key') or '', reverse=True)
     return rows[:120]
@@ -4084,7 +4103,7 @@ def cash_expenses_create(
     request: Request,
     flow_date: str = Form(...),
     store: str = Form(...),
-    category: str = Form(...),
+    category: str = Form(""),
     supplier: str = Form(""),
     payment_method: str = Form(""),
     amount: str = Form(''),
@@ -4105,8 +4124,11 @@ def cash_expenses_create(
     category_clean = (category or '').strip()
     supplier_clean = (supplier or '').strip()
     notes_clean = (notes or '').strip()
-    if _should_auto_replace_expense_category(category_clean, supplier_clean, notes_clean):
-        category_clean = _auto_expense_category(category_clean, supplier_clean, notes_clean)
+    auto_category = _auto_expense_category(category_clean, supplier_clean, notes_clean)
+    # Se la categoria è vuota/generica o le parole forti indicano chiaramente altro,
+    # salvo direttamente la divisione giusta. Così non resta tutto in "Varie".
+    if (not category_clean) or _should_auto_replace_expense_category(category_clean, supplier_clean, notes_clean):
+        category_clean = auto_category or 'Spese secondarie'
     ph = _ph()
     with connect() as conn:
         cur = conn.cursor()

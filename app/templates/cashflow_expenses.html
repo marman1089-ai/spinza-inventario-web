@@ -29,6 +29,7 @@
   .legend-row{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center}
   .swatch{width:11px;height:11px;border-radius:999px}
   .list-card{border:1px solid var(--line-soft);border-radius:14px;padding:12px;background:var(--panel-2)}
+  .expense-hint{font-size:12px;color:var(--muted);margin-top:8px}
   @media(max-width:900px){.toolbar,.period-form,.kpi-grid,.split-grid,.pie-wrap{grid-template-columns:1fr}.day-box{min-width:50px;flex-basis:50px}.arrow-btn{width:100%;height:48px}}
 </style>
 
@@ -36,7 +37,7 @@
   <div class="row" style="justify-content:space-between;align-items:center;">
     <div>
       <h2 style="margin:0 0 6px 0;">💸 Uscite</h2>
-      <div class="muted">Prima hai il quadro delle spese, con ricorrenti, gruppi di routine e pesi reali. Poi sotto trovi lo storico e l'inserimento.</div>
+      <div class="muted">Prima hai il quadro delle spese divise bene: materie prime, stipendi, affitti, utenze, packaging, marketing, manutenzioni, tasse e servizi. Poi sotto trovi storico e inserimento.</div>
     </div>
     <div class="row">
       <form method="post" action="/gestionale/uscite/ricategorizza" style="margin:0;">
@@ -240,13 +241,19 @@
           {% endif %}
         {% endfor %}
       </select>
-      <input name="category" placeholder="Categoria: fornitori, stipendi, affitto..." required>
+      <input name="category" list="expense-category-options" placeholder="Categoria: puoi lasciarla vuota, la decide il gestionale">
+      <datalist id="expense-category-options">
+        {% for cat in expense_overview.category_options %}
+        <option value="{{ cat }}">
+        {% endfor %}
+      </datalist>
       <input name="supplier" placeholder="Fornitore / destinatario">
       <input name="payment_method" placeholder="Metodo: contanti, bonifico, carta...">
       <input type="number" step="0.01" min="0" name="amount" placeholder="Importo €" required>
       <input name="notes" placeholder="Note" style="min-width:260px;flex:1;">
       <button class="btn" type="submit">Salva uscita</button>
     </div>
+    <div class="expense-hint">Consiglio: scrivi bene il fornitore o la voce, ad esempio “Metro”, “Nexi”, “Affitto”, “Luce”, “Packaging”, “Giulia stipendio”. Anche se lasci la categoria vuota, il gestionale prova a dividerla da solo.</div>
   </form>
 </div>
 {% endif %}

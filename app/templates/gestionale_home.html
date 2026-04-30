@@ -52,7 +52,7 @@
   .mini-item{border:1px solid var(--line-soft);border-radius:16px;padding:12px;background:var(--panel)}
   .doc-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
   .month-summary-wrap{overflow:auto;border:1px solid var(--line-soft);border-radius:18px;background:var(--panel)}
-  .month-summary-table{width:100%;border-collapse:collapse;min-width:760px}
+  .month-summary-table{width:100%;border-collapse:collapse;min-width:980px}
   .month-summary-table th,.month-summary-table td{padding:12px;border-bottom:1px solid var(--line-soft);text-align:right;vertical-align:middle}
   .month-summary-table th:first-child,.month-summary-table td:first-child{text-align:left}
   .month-summary-table thead th{background:var(--panel-2);color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
@@ -61,6 +61,10 @@
   .danger-btn{border:1px solid rgba(248,113,113,.35);background:rgba(239,68,68,.12);color:#fecaca;border-radius:12px;padding:10px 12px;font-weight:800;cursor:pointer;white-space:nowrap}
   .danger-btn:hover{background:rgba(239,68,68,.22)}
   .ok-alert{border:1px solid rgba(16,185,129,.35);background:rgba(16,185,129,.10);border-radius:18px;padding:12px;margin-bottom:14px;color:var(--text)}
+  .expense-chip-list{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;max-width:360px;margin-left:auto}
+  .expense-chip{border:1px solid var(--line-soft);background:rgba(148,163,184,.08);border-radius:999px;padding:5px 8px;font-size:12px;white-space:nowrap}
+  .expense-chip strong{font-size:12px}
+  .expense-chip .pct{color:var(--muted);margin-left:4px}
   @media(max-width:980px){.hero-grid,.chart-grid,.split-grid,.doc-grid,.kpi-grid,.pie-wrap,.toolbar,.period-form{grid-template-columns:1fr}.arrow-btn{width:100%;height:48px}.pie{width:160px;height:160px}.pie::after{width:96px;height:96px}}
 </style>
 
@@ -152,6 +156,7 @@
           <th>Negozi</th>
           <th>Entrate</th>
           <th>Uscite</th>
+          <th>Divisione spese</th>
           <th>Margine</th>
           <th>Movimenti</th>
           <th>Azioni</th>
@@ -164,6 +169,22 @@
           <td>{{ row.store_labels }}</td>
           <td><strong>€ {{ '%.2f'|format(row.income_total or 0) }}</strong><div class="muted">{{ row.income_count }} entrate</div></td>
           <td><strong>€ {{ '%.2f'|format(row.expense_total or 0) }}</strong><div class="muted">{{ row.expense_count }} uscite</div></td>
+          <td>
+            {% if row.expense_breakdown %}
+            <div class="expense-chip-list">
+              {% for fam in row.expense_breakdown %}
+              <span class="expense-chip" title="{{ fam.name }} · € {{ '%.2f'|format(fam.total or 0) }}">
+                <strong>{{ fam.name }}</strong><span class="pct">{{ '%.1f'|format(fam.share_pct or 0) }}%</span>
+              </span>
+              {% endfor %}
+              {% if row.expense_breakdown_count > 4 %}
+              <span class="expense-chip">+{{ row.expense_breakdown_count - 4 }}</span>
+              {% endif %}
+            </div>
+            {% else %}
+            <span class="muted">—</span>
+            {% endif %}
+          </td>
           <td class="{% if row.net_total >= 0 %}pos{% else %}neg{% endif %}"><strong>€ {{ '%.2f'|format(row.net_total or 0) }}</strong></td>
           <td>{{ row.total_count }}</td>
           <td>
@@ -175,7 +196,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="7" class="muted" style="text-align:left;">Ancora nessuna entrata o uscita salvata.</td></tr>
+        <tr><td colspan="8" class="muted" style="text-align:left;">Ancora nessuna entrata o uscita salvata.</td></tr>
         {% endfor %}
       </tbody>
     </table>
