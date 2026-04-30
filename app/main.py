@@ -2455,6 +2455,101 @@ def _month_options_for_scope(cur, scope_store: str, selected_month: str = ''):
     return options[:60]
 
 
+
+def _next_month_start(month_key: str) -> date:
+    month_key = _month_key_from_value(month_key)
+    try:
+        start = datetime.strptime(month_key + '-01', '%Y-%m-%d').date()
+    except Exception:
+        start = date.today().replace(day=1)
+    if start.month == 12:
+        return date(start.year + 1, 1, 1)
+    return date(start.year, start.month + 1, 1)
+
+
+def _cash_month_summaries(cur, scope_store: str):
+    """Riepilogo mensile di entrate e uscite salvate nel gestionale."""
+    where_sql, params = _cash_scope_where(scope_store)
+    months = {}
+
+    def slot(month_key: str):
+        return months.setdefault(month_key, {
+            'key': month_key,
+            'label': _month_label(month_key),
+            'income_total': 0.0,
+            'expense_total': 0.0,
+            'income_count': 0,
+            'expense_count': 0,
+            'stores': set(),
+        })
+
+    for row in _dict_rows(cur, f"SELECT store, flow_date, amount FROM cash_entries WHERE {where_sql}", params):
+        flow_date = str(row.get('flow_date') or '').strip()
+        if len(flow_date) < 7:
+            continue
+        month_key = flow_date[:7]
+        item = slot(month_key)
+        item['income_total'] += float(row.get('amount') or 0)
+        item['income_count'] += 1
+        store = str(row.get('store') or '').strip()
+        if store:
+            item['stores'].add(store)
+
+    for row in _dict_rows(cur, f"SELECT store, flow_date, amount FROM cash_expenses WHERE {where_sql}", params):
+        flow_date = str(row.get('flow_date') or '').strip()
+        if len(flow_date) < 7:
+            continue
+        month_key = flow_date[:7]
+        item = slot(month_key)
+        item['expense_total'] += float(row.get('amount') or 0)
+        item['expense_count'] += 1
+        store = str(row.get('store') or '').strip()
+        if store:
+            item['stores'].add(store)
+
+    rows = []
+    for item in months.values():
+        income = float(item.get('income_total') or 0)
+        expense = float(item.get('expense_total') or 0)
+        item['net_total'] = income - expense
+        item['total_count'] = int(item.get('income_count') or 0) + int(item.get('expense_count') or 0)
+        item['store_labels'] = ', '.join(_store_label(s) for s in sorted(item.get('stores') or [])) or '—'
+        item['income_total'] = round(income, 2)
+        item['expense_total'] = round(expense, 2)
+        item['net_total'] = round(item['net_total'], 2)
+        rows.append(item)
+    rows.sort(key=lambda x: x.get('key') or '', reverse=True)
+    return rows[:120]
+
+
+def _cash_month_delete_stats(cur, scope_store: str, month_key: str):
+    month_key = _month_key_from_value(month_key)
+    start_s = month_key + '-01'
+    end_s = _next_month_start(month_key).isoformat()
+    where_sql, params = _cash_scope_where(scope_store)
+    ph = _ph()
+    stats = {'income_count': 0, 'expense_count': 0, 'income_total': 0.0, 'expense_total': 0.0}
+
+    income_rows = _dict_rows(
+        cur,
+        f"SELECT COUNT(*) AS count_items, COALESCE(SUM(amount),0) AS total_amount FROM cash_entries WHERE {where_sql} AND flow_date >= {ph} AND flow_date < {ph}",
+        params + (start_s, end_s),
+    )
+    if income_rows:
+        stats['income_count'] = int(income_rows[0].get('count_items') or 0)
+        stats['income_total'] = float(income_rows[0].get('total_amount') or 0)
+
+    expense_rows = _dict_rows(
+        cur,
+        f"SELECT COUNT(*) AS count_items, COALESCE(SUM(amount),0) AS total_amount FROM cash_expenses WHERE {where_sql} AND flow_date >= {ph} AND flow_date < {ph}",
+        params + (start_s, end_s),
+    )
+    if expense_rows:
+        stats['expense_count'] = int(expense_rows[0].get('count_items') or 0)
+        stats['expense_total'] = float(expense_rows[0].get('total_amount') or 0)
+    return stats
+
+
 def _build_scope_period_chart(cur, scope_store: str, period_type: str = 'week', anchor_s: str = ''):
     anchor_day = _parse_date_safe(anchor_s, date.today())
     period_type, start_d, end_d = _period_bounds(period_type, anchor_day)
@@ -3043,7 +3138,7 @@ def workspace_home(request: Request):
 @app.get("/gestionale", response_class=HTMLResponse)
 
 
-def gestionale_home(request: Request, period_type: str = 'month', anchor_date: str = '', month_key: str = '', nav: str = ''):
+def gestionale_home(request: Request, period_type: str = 'month', anchor_date: str = '', month_key: str = '', nav: str = '', deleted_month: str = '', deleted_entries: int = -1, deleted_expenses: int = -1):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -3115,6 +3210,7 @@ def gestionale_home(request: Request, period_type: str = 'month', anchor_date: s
         month_options = _month_options_for_scope(cur, store, selected_month)
         sales_store = store if store != 'ALL' else (active_store or 'spinza')
         sales_overview = _sales_month_overview(cur, sales_store, selected_month)
+        month_summaries = _cash_month_summaries(cur, store) if can_view_finance else []
 
     prev_anchor = _shift_anchor_date(period_type, anchor_day, -1).isoformat()
     next_anchor = _shift_anchor_date(period_type, anchor_day, 1).isoformat()
@@ -3149,8 +3245,59 @@ def gestionale_home(request: Request, period_type: str = 'month', anchor_date: s
         nav_prev_url=nav_prev_url,
         nav_next_url=nav_next_url,
         summary_labels=summary_labels,
+        month_summaries=month_summaries,
+        deleted_month=deleted_month,
+        deleted_entries=deleted_entries,
+        deleted_expenses=deleted_expenses,
     )
 
+
+
+@app.post("/gestionale/mese/elimina")
+async def gestionale_delete_month(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    raw_month = str(form.get('month_key') or '').strip()
+    return_to = _safe_next_url(str(form.get('return_to') or '/gestionale'), '/gestionale')
+    if not re.match(r'^\d{4}-\d{2}$', raw_month):
+        return RedirectResponse(return_to, status_code=HTTP_303_SEE_OTHER)
+    month_key = _month_key_from_value(raw_month)
+    brand = _current_store_scope(request, user)
+    start_s = month_key + '-01'
+    end_s = _next_month_start(month_key).isoformat()
+    where_sql, params = _cash_scope_where(brand)
+    ph = _ph()
+
+    with connect() as conn:
+        cur = conn.cursor()
+        stats = _cash_month_delete_stats(cur, brand, month_key)
+        cur.execute(f"DELETE FROM cash_entries WHERE {where_sql} AND flow_date >= {ph} AND flow_date < {ph}", params + (start_s, end_s))
+        cur.execute(f"DELETE FROM cash_expenses WHERE {where_sql} AND flow_date >= {ph} AND flow_date < {ph}", params + (start_s, end_s))
+        log_store = brand if brand != 'ALL' else (request.session.get('active_store') or user.get('store') or 'spinza')
+        _log(
+            cur,
+            store=log_store,
+            username=user['username'],
+            action='DELETE',
+            category='CASSA',
+            name=(
+                f"Eliminato mese {month_key}: "
+                f"{stats.get('income_count', 0)} entrate (€ {float(stats.get('income_total') or 0):.2f}) + "
+                f"{stats.get('expense_count', 0)} uscite (€ {float(stats.get('expense_total') or 0):.2f})"
+            ),
+            delta=-(float(stats.get('income_total') or 0)) + float(stats.get('expense_total') or 0),
+        )
+
+    sep = '&' if '?' in return_to else '?'
+    return RedirectResponse(
+        f"{return_to}{sep}deleted_month={quote_plus(month_key)}&deleted_entries={int(stats.get('income_count') or 0)}&deleted_expenses={int(stats.get('expense_count') or 0)}",
+        status_code=HTTP_303_SEE_OTHER,
+    )
 
 
 @app.get("/gestionale/dashboard", response_class=HTMLResponse)

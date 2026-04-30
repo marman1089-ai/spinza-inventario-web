@@ -51,6 +51,16 @@
   .mini-list{display:grid;gap:10px}
   .mini-item{border:1px solid var(--line-soft);border-radius:16px;padding:12px;background:var(--panel)}
   .doc-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+  .month-summary-wrap{overflow:auto;border:1px solid var(--line-soft);border-radius:18px;background:var(--panel)}
+  .month-summary-table{width:100%;border-collapse:collapse;min-width:760px}
+  .month-summary-table th,.month-summary-table td{padding:12px;border-bottom:1px solid var(--line-soft);text-align:right;vertical-align:middle}
+  .month-summary-table th:first-child,.month-summary-table td:first-child{text-align:left}
+  .month-summary-table thead th{background:var(--panel-2);color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+  .month-summary-table tbody tr:hover{background:rgba(148,163,184,.08)}
+  .month-summary-table .pos{color:var(--accent-emerald);font-weight:800}.month-summary-table .neg{color:var(--accent-red);font-weight:800}
+  .danger-btn{border:1px solid rgba(248,113,113,.35);background:rgba(239,68,68,.12);color:#fecaca;border-radius:12px;padding:10px 12px;font-weight:800;cursor:pointer;white-space:nowrap}
+  .danger-btn:hover{background:rgba(239,68,68,.22)}
+  .ok-alert{border:1px solid rgba(16,185,129,.35);background:rgba(16,185,129,.10);border-radius:18px;padding:12px;margin-bottom:14px;color:var(--text)}
   @media(max-width:980px){.hero-grid,.chart-grid,.split-grid,.doc-grid,.kpi-grid,.pie-wrap,.toolbar,.period-form{grid-template-columns:1fr}.arrow-btn{width:100%;height:48px}.pie{width:160px;height:160px}.pie::after{width:96px;height:96px}}
 </style>
 
@@ -90,6 +100,11 @@
 </div>
 
 {% if can_view_finance %}
+{% if deleted_month and deleted_entries >= 0 and deleted_expenses >= 0 %}
+<div class="ok-alert">
+  ✅ Mese <strong>{{ deleted_month }}</strong> eliminato: <strong>{{ deleted_entries }}</strong> entrate e <strong>{{ deleted_expenses }}</strong> uscite rimosse.
+</div>
+{% endif %}
 <div class="card" style="margin-bottom:14px;">
   <div class="toolbar">
     <a class="arrow-btn" href="{{ nav_prev_url }}">‹</a>
@@ -118,6 +133,53 @@
     <a class="arrow-btn" href="{{ nav_next_url }}">›</a>
   </div>
   <div class="muted" style="margin-top:12px;">Stai guardando: <strong>{{ period_meta.start }}</strong> → <strong>{{ period_meta.end }}</strong></div>
+</div>
+
+<div class="card" style="margin-bottom:14px;">
+  <div class="chart-head" style="margin-bottom:12px;">
+    <div>
+      <div class="muted">Mesi salvati nel gestionale</div>
+      <h3 style="margin:4px 0 0 0;">Riepilogo entrate / uscite per mese</h3>
+      <div class="muted" style="margin-top:6px;">Da qui puoi pulire velocemente un mese sbagliato: il pulsante elimina insieme incassi e uscite di quel mese.</div>
+    </div>
+    <div class="pill">{{ month_summaries|length }} mesi</div>
+  </div>
+  <div class="month-summary-wrap">
+    <table class="month-summary-table">
+      <thead>
+        <tr>
+          <th>Mese</th>
+          <th>Negozi</th>
+          <th>Entrate</th>
+          <th>Uscite</th>
+          <th>Margine</th>
+          <th>Movimenti</th>
+          <th>Azioni</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in month_summaries %}
+        <tr>
+          <td><strong>{{ row.label }}</strong><div class="muted">{{ row.key }}</div></td>
+          <td>{{ row.store_labels }}</td>
+          <td><strong>€ {{ '%.2f'|format(row.income_total or 0) }}</strong><div class="muted">{{ row.income_count }} entrate</div></td>
+          <td><strong>€ {{ '%.2f'|format(row.expense_total or 0) }}</strong><div class="muted">{{ row.expense_count }} uscite</div></td>
+          <td class="{% if row.net_total >= 0 %}pos{% else %}neg{% endif %}"><strong>€ {{ '%.2f'|format(row.net_total or 0) }}</strong></td>
+          <td>{{ row.total_count }}</td>
+          <td>
+            <form method="post" action="/gestionale/mese/elimina" class="delete-month-form" data-label="{{ row.label }}" data-income="{{ row.income_count }}" data-expense="{{ row.expense_count }}">
+              <input type="hidden" name="month_key" value="{{ row.key }}">
+              <input type="hidden" name="return_to" value="/gestionale?period_type={{ period_meta.type }}&month_key={{ selected_month }}&anchor_date={{ period_meta.anchor }}">
+              <button type="submit" class="danger-btn">Elimina mese</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="muted" style="text-align:left;">Ancora nessuna entrata o uscita salvata.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <div class="kpi-grid" style="margin-bottom:14px;">
@@ -443,6 +505,16 @@ Bilancio
     el.addEventListener('click', function(){
       var first = document.querySelector('.js-expense-family');
       if(first){ openExpensePanel(first.getAttribute('data-target')); }
+    });
+  });
+
+  document.querySelectorAll('.delete-month-form').forEach(function(form){
+    form.addEventListener('submit', function(e){
+      var label = form.getAttribute('data-label') || 'questo mese';
+      var inc = form.getAttribute('data-income') || '0';
+      var usc = form.getAttribute('data-expense') || '0';
+      var ok = confirm('Confermi eliminazione di ' + label + '?\nVerranno cancellate ' + inc + ' entrate e ' + usc + ' uscite. Operazione non reversibile.');
+      if(!ok){ e.preventDefault(); }
     });
   });
 })();
