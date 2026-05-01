@@ -13,6 +13,7 @@ from .pdf_tools import ensure_pdf, merge_pdfs
 from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.status import HTTP_303_SEE_OTHER
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -41,6 +42,17 @@ def _safe_next_url(next_url: str | None, default: str = "/inventario") -> str:
     return u
 
 app = FastAPI(title="Spinza Inventario")
+
+# Compressione sicura: rende più leggere le pagine HTML/CSS/JS senza cambiare la logica.
+app.add_middleware(GZipMiddleware, minimum_size=700)
+
+@app.middleware("http")
+async def add_static_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        # Gli asset hanno versionamento ?v=... nei template: possiamo tenerli in cache.
+        response.headers.setdefault("Cache-Control", "public, max-age=604800, immutable")
+    return response
 
 # === Multi-inventory (stores) ===
 STORES = {
