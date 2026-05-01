@@ -1309,7 +1309,21 @@ def _build_import_preview(blocks, raw_text: str, fallback_store: str, include_ex
 
 
 PALETTE_DARK = [
-    '#38bdf8', '#2563eb', '#818cf8', '#f59e0b', '#ef4444', '#14b8a6', '#a855f7', '#22c55e', '#f97316', '#eab308'
+    '#38bdf8',  # azzurro
+    '#2563eb',  # blu
+    '#818cf8',  # indaco
+    '#a855f7',  # viola
+    '#ec4899',  # rosa
+    '#ef4444',  # rosso
+    '#f97316',  # arancio
+    '#f59e0b',  # ambra
+    '#eab308',  # giallo
+    '#22c55e',  # verde
+    '#14b8a6',  # teal
+    '#06b6d4',  # ciano
+    '#84cc16',  # lime
+    '#f43f5e',  # rose
+    '#8b5cf6',  # violetto
 ]
 
 
@@ -2738,7 +2752,7 @@ def _sales_month_overview(cur, store: str, month_key: str):
     tree = _sales_report_tree(cur, int(row['id'])) if row else []
     groups = sorted(tree, key=lambda x: float(x.get('total_amount') or 0), reverse=True)[:7]
     total = sum(float(g.get('total_amount') or 0) for g in groups)
-    palette = ['#2563eb', '#38bdf8', '#8b5cf6', '#14b8a6', '#22c55e', '#f59e0b', '#ef4444']
+    palette = ['#2563eb', '#38bdf8', '#8b5cf6', '#ec4899', '#14b8a6', '#22c55e', '#f59e0b', '#ef4444', '#f97316', '#84cc16']
     out = []
     cursor = 0.0
     segments = []

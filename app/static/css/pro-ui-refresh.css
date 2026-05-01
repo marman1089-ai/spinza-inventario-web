@@ -30,6 +30,69 @@
   --fast:150ms;
   --normal:260ms;
 }
+/* ===== Temi brand reali =====
+   Colori campionati dai loghi:
+   Spinza: rosso mattone logo scritta/omino.
+   Reburger: verde oliva scuro logo.
+*/
+body.brand-spinza{
+  --brand-bg:#120606;
+  --brand-bg-soft:#1a0908;
+  --brand-panel:rgba(32,12,12,.88);
+  --brand-panel-solid:#1f0d0d;
+  --brand-panel-2:rgba(48,18,17,.88);
+  --brand-line:rgba(152,48,40,.28);
+  --brand-line-strong:rgba(152,48,40,.46);
+  --brand-primary:#903030;
+  --brand-primary-2:#983028;
+  --brand-blue:#b94a3c;
+  --brand-cyan:#e0a39b;
+  --brand-green:#22c55e;
+  --brand-red:#ef4444;
+}
+
+body.brand-reburger_camaldoli,
+body.brand-reburger-palazzuolo-fallback{
+  --brand-bg:#050805;
+  --brand-bg-soft:#0b1008;
+  --brand-panel:rgba(13,22,14,.90);
+  --brand-panel-solid:#10180d;
+  --brand-panel-2:rgba(18,31,18,.90);
+  --brand-line:rgba(40,56,32,.36);
+  --brand-line-strong:rgba(48,64,40,.56);
+  --brand-primary:#283018;
+  --brand-primary-2:#283820;
+  --brand-blue:#44542c;
+  --brand-cyan:#93a56a;
+  --brand-green:#283820;
+  --brand-red:#ef4444;
+}
+
+body.brand-reburger_palazzuolo{
+  --brand-bg:#040704;
+  --brand-bg-soft:#091108;
+  --brand-panel:rgba(12,24,13,.90);
+  --brand-panel-solid:#0e180d;
+  --brand-panel-2:rgba(16,34,18,.90);
+  --brand-line:rgba(40,56,32,.40);
+  --brand-line-strong:rgba(64,80,56,.58);
+  --brand-primary:#283018;
+  --brand-primary-2:#304020;
+  --brand-blue:#52683c;
+  --brand-cyan:#a3b57d;
+  --brand-green:#304020;
+  --brand-red:#ef4444;
+}
+
+body.brand-ALL{
+  --brand-bg:#050712;
+  --brand-bg-soft:#0a1020;
+  --brand-primary:#903030;
+  --brand-primary-2:#283820;
+  --brand-blue:#2563eb;
+  --brand-cyan:#06b6d4;
+}
+
 
 html{
   scroll-behavior:smooth;
@@ -40,9 +103,9 @@ html{
 body{
   min-height:100vh;
   background:
-    radial-gradient(1100px 520px at 5% -12%, rgba(245,158,11,.13), transparent 58%),
-    radial-gradient(900px 520px at 100% -8%, rgba(37,99,235,.18), transparent 52%),
-    radial-gradient(700px 420px at 60% 110%, rgba(6,182,212,.08), transparent 52%),
+    radial-gradient(1100px 520px at 5% -12%, color-mix(in srgb, var(--brand-primary) 28%, transparent), transparent 58%),
+    radial-gradient(900px 520px at 100% -8%, color-mix(in srgb, var(--brand-primary-2) 24%, transparent), transparent 52%),
+    radial-gradient(700px 420px at 60% 110%, color-mix(in srgb, var(--brand-cyan) 16%, transparent), transparent 52%),
     linear-gradient(180deg, var(--brand-bg-soft), var(--brand-bg) 58%, #03050c) !important;
   color:var(--brand-text) !important;
 }
@@ -57,7 +120,7 @@ body{
   z-index:99999;
   pointer-events:none;
   background:linear-gradient(90deg, var(--brand-primary), var(--brand-cyan), var(--brand-blue));
-  box-shadow:0 0 18px rgba(245,158,11,.58);
+  box-shadow:0 0 18px color-mix(in srgb, var(--brand-primary-2) 58%, transparent);
   opacity:0;
   transition:width .28s var(--ease-ui), opacity .18s ease;
 }
@@ -126,9 +189,13 @@ header{
   padding:7px 12px;
   border-radius:20px;
   background:
-    linear-gradient(135deg, rgba(255,255,255,.96), rgba(255,247,237,.93));
-  border:1px solid rgba(245,158,11,.20);
-  box-shadow:0 12px 30px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.85);
+    radial-gradient(circle at 12% 20%, color-mix(in srgb, var(--brand-primary) 13%, transparent), transparent 42%),
+    linear-gradient(135deg, rgba(255,255,255,.98), color-mix(in srgb, var(--brand-primary) 9%, white) 100%);
+  border:1px solid color-mix(in srgb, var(--brand-primary) 24%, rgba(255,255,255,.70));
+  box-shadow:
+    0 12px 30px rgba(0,0,0,.22),
+    0 0 0 1px color-mix(in srgb, var(--brand-primary) 16%, transparent),
+    inset 0 1px 0 rgba(255,255,255,.88);
 }
 .brand-line img{
   display:block;
@@ -156,7 +223,6 @@ header{
 .report-card,
 .daily-table-wrap,
 .month-summary-wrap,
-.pie,
 .chart-detail,
 .expense-detail-panel,
 .nav-dd[open] .nav-dd-panel,
@@ -184,7 +250,7 @@ header{
 .insight:hover,
 .kpi:hover,
 .report-card:hover{
-  border-color:rgba(245,158,11,.25) !important;
+  border-color:var(--brand-line-strong) !important;
 }
 
 h1,h2,h3{
@@ -206,7 +272,7 @@ a.btn{
   font-weight:850;
   background:linear-gradient(135deg, var(--brand-primary), var(--brand-primary-2) 42%, var(--brand-blue)) !important;
   color:#fff !important;
-  box-shadow:0 14px 32px rgba(245,158,11,.18), 0 6px 18px rgba(37,99,235,.16) !important;
+  box-shadow:0 14px 32px color-mix(in srgb, var(--brand-primary) 22%, transparent), 0 6px 18px color-mix(in srgb, var(--brand-primary-2) 16%, transparent) !important;
 }
 .btn::after,
 button.btn::after,
@@ -317,7 +383,7 @@ th{
 }
 td,th{border-bottom:1px solid rgba(148,163,184,.12) !important;}
 tbody tr{transition:background var(--fast) ease;}
-tbody tr:hover{background:rgba(245,158,11,.055) !important;}
+tbody tr:hover{background:color-mix(in srgb, var(--brand-primary) 8%, transparent) !important;}
 .daily-table thead th,
 .month-summary-table thead th{
   background:rgba(8,13,28,.96) !important;
@@ -353,6 +419,32 @@ tbody tr:hover{background:rgba(245,158,11,.055) !important;}
 }
 .legend-row.clickable:hover{transform:translateX(2px);}
 
+
+
+/* ===== Fix grafici a torta / ciambella =====
+   Non forziamo MAI il background della .pie: il backend lo passa inline
+   come conic-gradient, quindi deve rimanere visibile.
+*/
+.pie{
+  background-clip:padding-box !important;
+  border:1px solid color-mix(in srgb, var(--brand-primary) 22%, rgba(255,255,255,.18)) !important;
+  box-shadow:0 10px 28px rgba(0,0,0,.24) !important;
+  overflow:hidden;
+}
+.pie::after{
+  background:linear-gradient(180deg, var(--brand-panel-solid), color-mix(in srgb, var(--brand-panel-solid) 88%, black)) !important;
+  border:1px solid rgba(255,255,255,.08);
+}
+.pie-center{
+  color:var(--brand-text) !important;
+  text-shadow:0 1px 10px rgba(0,0,0,.36);
+}
+.legend-row [style*="background"],
+.legend-dot,
+.dot{
+  box-shadow:0 0 0 1px rgba(255,255,255,.16), 0 3px 10px rgba(0,0,0,.18);
+}
+
 /* Report vendite */
 .report-grid{gap:12px !important;}
 .report-card{
@@ -378,14 +470,15 @@ tbody tr:hover{background:rgba(245,158,11,.055) !important;}
 
 /* Content visibility: aiuta le pagine lunghe a renderizzare più velocemente */
 @supports (content-visibility:auto){
-  .card,
-  .chart-card,
-  .report-card,
   .month-summary-wrap,
   .daily-table-wrap{
     content-visibility:auto;
     contain-intrinsic-size:1px 220px;
   }
+  .chart-card,
+  .report-card,
+  .pie,
+  .ring,
   header,.menu-overlay,.nav-dd-panel{content-visibility:visible;}
 }
 
@@ -601,3 +694,22 @@ tbody tr:hover{background:rgba(245,158,11,.055) !important;}
   from{opacity:0;transform:translateY(8px) scale(.992)}
   to{opacity:1;transform:none}
 }
+
+
+body.brand-spinza .brand-line{
+  border-color:color-mix(in srgb, #983028 30%, white);
+}
+body.brand-reburger_camaldoli .brand-line,
+body.brand-reburger_palazzuolo .brand-line{
+  border-color:color-mix(in srgb, #283820 34%, white);
+}
+body.brand-reburger_camaldoli header{
+  box-shadow:0 8px 28px rgba(40,56,32,.26) !important;
+}
+body.brand-reburger_palazzuolo header{
+  box-shadow:0 8px 28px rgba(48,64,32,.30) !important;
+}
+body.brand-spinza header{
+  box-shadow:0 8px 28px rgba(152,48,40,.24) !important;
+}
+
