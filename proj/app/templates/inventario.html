@@ -1,6 +1,18 @@
 {% extends "base.html" %}
 {% set title = "Inventario" %}
 {% block content %}
+{% macro render_total(g) -%}
+  {%- if g.disp and g.disp.conv_val is not none and g.disp.show_pieces -%}
+    {{ "%.0f"|format(g.disp.pieces) }} pz · {{ "%.2f"|format(g.disp.conv_val) }} {{ g.disp.conv_unit }}
+  {%- elif g.unit and g.disp and g.disp.conv_val is not none and (g.disp.conv_unit in ['kg','l']) -%}
+    {{ "%.2f"|format(g.disp.conv_val) }} {{ g.disp.conv_unit }}
+  {%- else -%}
+    {{ "%.2f"|format(g.total) }}{% if g.unit %} {{ g.unit }}{% endif %}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro jsq(v) -%}{{ (v or '')|replace('\\', '\\\\')|replace("'", "\\'") }}{%- endmacro %}
+
   <div class="card" style="margin-bottom:12px;">
     <form method="get" action="/inventario">
       <div class="row">
@@ -50,7 +62,7 @@
           {% else %}
             Negozio: <strong>{{ user.store_label }}</strong>
           {% endif %}
-          • Usa 🧮 (calcolatrice) o Set per modificare la quantità. “Sotto minimo” va in rosso.
+          • Tocca il totale per aprire le posizioni. Usa 🧮 o Set per modificare le quantità.
           {% if admin and not can_bulk_edit %}
             • Per modificare, seleziona un inventario singolo.
           {% endif %}
@@ -95,117 +107,142 @@
       {% endif %}
     </div>
 
-    <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
+    <div class="inv-list">
       {% for g in groups %}
-        <div class="card" style="padding:12px;{% if g.any_low %}border-color:rgba(248,113,113,.34);background:rgba(239,68,68,.08);{% endif %}">
-          <div class="row" style="justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
-            <div style="min-width:220px;">
-              <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;">
-                <span class="pill">{{ g.category }}</span>
-                {% if g.any_low %}<span class="pill" style="background:rgba(239,68,68,.10);border-color:rgba(248,113,113,.34);">● Sotto minimo</span>{% endif %}
+        {% set multi = (g.positions|length > 1) %}
+        <article class="inv-product-card {% if g.any_low %}is-low{% endif %}">
+          <div class="inv-mainline">
+            <div class="inv-titleblock">
+              <div class="inv-meta-row">
+                <span class="pill inv-cat">{{ g.category }}</span>
+                {% if g.unit %}<span class="pill inv-unit">{{ g.unit }}</span>{% endif %}
+                {% if g.any_low %}<span class="pill inv-low-pill">● Sotto minimo</span>{% endif %}
               </div>
-              
-<div style="margin-top:6px;display:flex;gap:10px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;">
-  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-    <strong style="font-size:16px;">{{ g.name }}</strong>
-    {% if g.unit %}<span class="pill">📏 {{ g.unit }}</span>{% endif %}
-  </div>
-
-  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
-    {% if g.positions|length > 1 %}
-      <button class="btn2" type="button"
-        onclick="openTransfer('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}', [{% for pp in g.positions %}'{{ pp.location|replace("'","\\'") }}'{% if not loop.last %},{% endif %}{% endfor %}])">
-        ⇄ SCAMBIA
-      </button>
-    {% endif %}
-    <button class="btn2" type="button"
-      onclick="openAddPos('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}','{{ g.unit|replace("'","\\'") }}')">
-      ➕ AGGIUNGI POSIZIONE
-    </button>
-  </div>
-</div>
-
-<div class="muted" style="margin-top:6px;font-size:12px;">
-
-                Totale: <strong>
-{% if g.disp and g.disp.conv_val is not none and g.disp.show_pieces %}
-  {{ "%.0f"|format(g.disp.pieces) }}<br/>
-  {{ "%.2f"|format(g.disp.conv_val) }} {{ g.disp.conv_unit }}
-{% elif g.unit and g.disp and g.disp.conv_val is not none and (g.disp.conv_unit in ['kg','l']) %}
-  {{ "%.2f"|format(g.disp.conv_val) }} {{ g.disp.conv_unit }}
-{% else %}
-  {{ "%.2f"|format(g.total) }}{% if g.unit %} {{ g.unit }}{% endif %}
-{% endif %}
-</strong>
-              </div>
+              <strong class="inv-product-name">{{ g.name }}</strong>
             </div>
 
-            <div style="flex:1;min-width:260px;">
-              <div style="display:flex;gap:10px;align-items:stretch;overflow-x:auto;padding-bottom:6px;">
-                {% for p in g.positions %}
-
-                  <div class="card" style="padding:10px;min-width:220px;">
-                    <div class="row" style="justify-content:space-between;align-items:center;gap:8px;">
-                      <span class="pill">📍 {{ p.location }}</span>
-                      <span class="muted" style="font-size:12px;">Min: {{ "%.2f"|format(p.min_qty) }}</span>
-                    </div>
-
-                    <div style="margin-top:8px;font-size:22px;font-weight:800;line-height:1;" class="{% if p.low %}low{% endif %}">
-                      {{ "%.2f"|format(p.qty) }}
-                    </div>
-
-                    {% if p.missing_qty and p.missing_qty > 0 %}
-                      <div class="pill" style="margin-top:8px;background:rgba(239,68,68,.10);border-color:rgba(248,113,113,.34);">⚠️ Mancante: {{ "%.2f"|format(p.missing_qty) }} (ordine {{ p.missing_order_date or '?' }})</div>
-                    {% endif %}
-
-                    {% if can_edit %}
-                      <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
-                        <div class="row" style="gap:8px;flex-wrap:wrap;">
-                          <button class="mini btn2" type="button" title="Calcolatrice (+ / -)" onclick="openCalc({{ p.id }}, {{ p.qty }}, '{{ (p.unit or '')|replace("'","\\'") }}', '{{ p.store }}')">🧮</button>
-                          <details>
-                            <summary class="mini btn2" style="list-style:none;cursor:pointer;">✏️ Modifica</summary>
-                            <div style="margin-top:8px;">
-                              <form method="post" action="/items/{{ p.id }}/edit" class="row" style="gap:6px;flex-wrap:wrap;">
-                                <input type="hidden" name="next_url" value="" />
-                                <input type="hidden" name="store" value="{{ p.store }}" />
-                                <input class="mini" name="category" value="{{ p.category }}" style="width:130px;" required />
-                                <input class="mini" name="name" value="{{ p.name }}" style="width:200px;" required />
-                                <input class="mini" name="location" value="{{ p.location }}" style="width:140px;" required />
-                                <input class="mini" name="unit" value="{{ p.unit or '' }}" placeholder="Unità" style="width:120px;" />
-                                <input class="mini" name="min_qty" type="number" step="0.01" value="{{ p.min_qty }}" style="width:110px;" />
-                                <button class="mini btn" type="submit">Salva</button>
-                              </form>
-                            </div>
-                          </details>
-                          <form method="post" action="/items/{{ p.id }}/delete" onsubmit="return confirm('Eliminare {{ p.name }} ({{ p.location }})?')">
-                            <input type="hidden" name="next_url" value="" />
-                            <input type="hidden" name="store" value="{{ p.store }}" />
-                            <button class="mini" type="submit" title="Elimina posizione">🗑</button>
-                          </form>
+            <div class="inv-total-wrap">
+              {% if multi %}
+                <details class="inv-locations">
+                  <summary class="inv-total-summary" title="Apri per vedere sala, magazzino e altre posizioni">
+                    <span class="inv-total-label">Totale</span>
+                    <strong>{{ render_total(g) }}</strong>
+                    <span class="inv-total-hint">tocca per vedere sala/magazzino</span>
+                  </summary>
+                  <div class="inv-position-list">
+                    {% for p in g.positions %}
+                      <div class="inv-position-row {% if p.low %}is-low-row{% endif %}">
+                        <div class="inv-position-info">
+                          <span class="inv-location">📍 {{ p.location }}</span>
+                          <span class="muted">Min {{ "%.2f"|format(p.min_qty) }}</span>
                         </div>
-
-                        <div class="row" style="gap:8px;flex-wrap:wrap;">
-                          <form method="post" action="/items/{{ p.id }}/set" class="row" style="gap:6px;">
-                            <input type="hidden" name="next_url" value="" />
-                            <input type="hidden" name="store" value="{{ p.store }}" />
-                            <input class="mini" name="qty" type="number" step="0.01" value="{{ p.qty }}" style="width:120px;" inputmode="decimal">
-                            <button class="mini btn" type="submit">Set</button>
-                          </form>
-                        </div>
+                        <div class="inv-position-qty {% if p.low %}low{% endif %}">{{ "%.2f"|format(p.qty) }}</div>
+                        {% if p.missing_qty and p.missing_qty > 0 %}
+                          <div class="pill inv-missing">⚠️ Mancante {{ "%.2f"|format(p.missing_qty) }}</div>
+                        {% endif %}
+                        {% if can_edit %}
+                          <div class="inv-actions-compact">
+                            <button class="mini btn2" type="button" title="Calcolatrice" onclick="openCalc({{ p.id }}, {{ p.qty }}, '{{ jsq(p.unit or '') }}', '{{ p.store }}')">🧮</button>
+                            <details class="inv-edit-details">
+                              <summary class="mini btn2">✏️</summary>
+                              <div class="inv-edit-panel">
+                                <form method="post" action="/items/{{ p.id }}/edit" class="row inv-edit-form">
+                                  <input type="hidden" name="next_url" value="" />
+                                  <input type="hidden" name="store" value="{{ p.store }}" />
+                                  <input class="mini" name="category" value="{{ p.category }}" placeholder="Categoria" required />
+                                  <input class="mini" name="name" value="{{ p.name }}" placeholder="Nome" required />
+                                  <input class="mini" name="location" value="{{ p.location }}" placeholder="Posizione" required />
+                                  <input class="mini" name="unit" value="{{ p.unit or '' }}" placeholder="Unità" />
+                                  <input class="mini" name="min_qty" type="number" step="0.01" value="{{ p.min_qty }}" placeholder="Min" />
+                                  <button class="mini btn" type="submit">Salva</button>
+                                </form>
+                              </div>
+                            </details>
+                            <form method="post" action="/items/{{ p.id }}/set" class="row inv-set-form">
+                              <input type="hidden" name="next_url" value="" />
+                              <input type="hidden" name="store" value="{{ p.store }}" />
+                              <input class="mini" name="qty" type="number" step="0.01" value="{{ p.qty }}" inputmode="decimal" aria-label="Quantità" />
+                              <button class="mini btn" type="submit">Set</button>
+                            </form>
+                            <form method="post" action="/items/{{ p.id }}/delete" onsubmit="return confirm('Eliminare {{ jsq(p.name) }} ({{ jsq(p.location) }})?')">
+                              <input type="hidden" name="next_url" value="" />
+                              <input type="hidden" name="store" value="{{ p.store }}" />
+                              <button class="mini inv-trash" type="submit" title="Elimina posizione">🗑</button>
+                            </form>
+                          </div>
+                        {% endif %}
                       </div>
-                    {% endif %}
+                    {% endfor %}
                   </div>
-                {% endfor %}
-
-                {% if g.positions|length == 1 and can_edit %}
-                  <button class="btn2" type="button" style="white-space:nowrap;align-self:center;" onclick="openAddPos('{{ g.store }}','{{ g.area }}','{{ g.category|replace("'","\\'") }}','{{ g.name|replace("'","\\'") }}','{{ g.unit|replace("'","\\'") }}')">+ 
-                {% endif %}
-              </div>
-
-              <div class="muted" style="font-size:12px;">Tip: puoi “SCAMBIA” tra posizioni e vedere subito il totale in alto.</div>
+                </details>
+              {% else %}
+                {% set p = g.positions[0] %}
+                <div class="inv-total-single">
+                  <span class="inv-total-label">Totale</span>
+                  <strong>{{ render_total(g) }}</strong>
+                  <span class="inv-total-hint">📍 {{ p.location }}</span>
+                </div>
+              {% endif %}
             </div>
           </div>
-        </div>
+
+          {% if not multi %}
+            {% set p = g.positions[0] %}
+            <div class="inv-single-line {% if p.low %}is-low-row{% endif %}">
+              <div class="inv-position-info">
+                <span class="inv-location">{{ "%.2f"|format(p.qty) }}</span>
+                <span class="muted">Min {{ "%.2f"|format(p.min_qty) }}</span>
+                {% if p.missing_qty and p.missing_qty > 0 %}<span class="pill inv-missing">⚠️ Mancante {{ "%.2f"|format(p.missing_qty) }}</span>{% endif %}
+              </div>
+              {% if can_edit %}
+                <div class="inv-actions-compact">
+                  <button class="mini btn2" type="button" title="Calcolatrice" onclick="openCalc({{ p.id }}, {{ p.qty }}, '{{ jsq(p.unit or '') }}', '{{ p.store }}')">🧮</button>
+                  <details class="inv-edit-details">
+                    <summary class="mini btn2">✏️</summary>
+                    <div class="inv-edit-panel">
+                      <form method="post" action="/items/{{ p.id }}/edit" class="row inv-edit-form">
+                        <input type="hidden" name="next_url" value="" />
+                        <input type="hidden" name="store" value="{{ p.store }}" />
+                        <input class="mini" name="category" value="{{ p.category }}" placeholder="Categoria" required />
+                        <input class="mini" name="name" value="{{ p.name }}" placeholder="Nome" required />
+                        <input class="mini" name="location" value="{{ p.location }}" placeholder="Posizione" required />
+                        <input class="mini" name="unit" value="{{ p.unit or '' }}" placeholder="Unità" />
+                        <input class="mini" name="min_qty" type="number" step="0.01" value="{{ p.min_qty }}" placeholder="Min" />
+                        <button class="mini btn" type="submit">Salva</button>
+                      </form>
+                    </div>
+                  </details>
+                  <form method="post" action="/items/{{ p.id }}/set" class="row inv-set-form">
+                    <input type="hidden" name="next_url" value="" />
+                    <input type="hidden" name="store" value="{{ p.store }}" />
+                    <input class="mini" name="qty" type="number" step="0.01" value="{{ p.qty }}" inputmode="decimal" aria-label="Quantità" />
+                    <button class="mini btn" type="submit">Set</button>
+                  </form>
+                  <form method="post" action="/items/{{ p.id }}/delete" onsubmit="return confirm('Eliminare {{ jsq(p.name) }} ({{ jsq(p.location) }})?')">
+                    <input type="hidden" name="next_url" value="" />
+                    <input type="hidden" name="store" value="{{ p.store }}" />
+                    <button class="mini inv-trash" type="submit" title="Elimina posizione">🗑</button>
+                  </form>
+                </div>
+              {% endif %}
+            </div>
+          {% endif %}
+
+          {% if can_edit %}
+            <div class="inv-footer-actions">
+              {% if multi %}
+                <button class="mini btn2" type="button"
+                  onclick="openTransfer('{{ g.store }}','{{ g.area }}','{{ jsq(g.category) }}','{{ jsq(g.name) }}', [{% for pp in g.positions %}'{{ jsq(pp.location) }}'{% if not loop.last %},{% endif %}{% endfor %}])">
+                  ⇄ Sposta tra posizioni
+                </button>
+              {% endif %}
+              <button class="mini btn2" type="button"
+                onclick="openAddPos('{{ g.store }}','{{ g.area }}','{{ jsq(g.category) }}','{{ jsq(g.name) }}','{{ jsq(g.unit) }}')">
+                + Posizione
+              </button>
+            </div>
+          {% endif %}
+        </article>
       {% endfor %}
       {% if not groups %}
         <div class="muted">Nessun prodotto trovato.</div>
@@ -290,20 +327,20 @@
   </div>
 
   <!-- Modal: Calcolatrice (+ / -) -->
-  <div id="calcModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:100;align-items:center;justify-content:center;">
-    <div class="card" style="max-width:360px;width:92%;">
+  <div id="calcModal" class="inv-modal" style="display:none;">
+    <div class="card inv-calc-card">
       <div class="row" style="justify-content:space-between;align-items:center;">
         <strong>🧮 Modifica quantità</strong>
         <button class="mini" type="button" onclick="closeCalc()">✖</button>
       </div>
       <div class="muted" id="calcInfo" style="margin-top:6px;"></div>
-      <div class="row" style="gap:8px;margin-top:10px;align-items:center;">
-        <input id="calcDelta" class="mini" inputmode="numeric" pattern="[0-9]*" placeholder="0" style="flex:1;min-width:0;" />
-        <button class="mini btn2" type="button" onclick="calcSetSign(1)">+</button>
-        <button class="mini btn2" type="button" onclick="calcSetSign(-1)">-</button>
+      <div class="inv-calc-signs">
+        <button id="calcMinusBtn" class="btn2 is-active" type="button" onclick="calcSetSign(-1)">− Scarico</button>
+        <button id="calcPlusBtn" class="btn2" type="button" onclick="calcSetSign(1)">+ Aggiungo</button>
       </div>
-      <div class="muted" id="calcResult" style="margin-top:6px;"></div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;">
+      <input id="calcDelta" class="inv-calc-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0" />
+      <div class="muted" id="calcResult" style="margin-top:6px;min-height:18px;"></div>
+      <div class="inv-calc-grid">
         <button class="btn2" type="button" onclick="calcAppend('1')">1</button>
         <button class="btn2" type="button" onclick="calcAppend('2')">2</button>
         <button class="btn2" type="button" onclick="calcAppend('3')">3</button>
@@ -315,9 +352,8 @@
         <button class="btn2" type="button" onclick="calcAppend('9')">9</button>
         <button class="btn2" type="button" onclick="calcClear()">C</button>
         <button class="btn2" type="button" onclick="calcAppend('0')">0</button>
+        <button class="btn2" type="button" onclick="calcAppend(',')">,</button>
         <button class="btn2" type="button" onclick="calcBack()">⌫</button>
-      </div>
-      <div class="row" style="justify-content:flex-end;margin-top:12px;">
         <button class="btn" type="button" onclick="calcSubmit()">Applica</button>
       </div>
     </div>
@@ -356,8 +392,14 @@
     let _calcSign = -1;
     let _calcUnit = '';
     let _calcStore = '';
+    let _calcSubmitting = false;
 
-    // aggiorna il "Totale: ..." sotto al prodotto (solo informativo, non sostituisce la quantità)
+    function parseCalcNumber(value) {
+      const cleaned = String(value || '').trim().replace(/\s+/g, '').replace(',', '.');
+      const n = Number(cleaned);
+      return Number.isFinite(n) ? n : NaN;
+    }
+
     function updateTotalForItem(itemId, qty){
       const el = document.getElementById('total-' + itemId);
       if(!el) return;
@@ -371,27 +413,45 @@
       _calcSign = -1;
       _calcUnit = (unitStr || '');
       _calcStore = (storeCode || '');
-      document.getElementById('calcDelta').value = '';
-      document.getElementById('calcInfo').textContent = `Rimasti: ${_calcCurrent.toFixed(2)}. Scegli + o - e scrivi la quantità.`;
+      _calcSubmitting = false;
+      const input = document.getElementById('calcDelta');
+      input.value = '';
+      document.getElementById('calcInfo').textContent = `Quantità attuale: ${_calcCurrent.toFixed(2)}. Scegli scarico o aggiunta.`;
       document.getElementById('calcResult').textContent = '';
+      calcRefreshSignButtons();
       const m = document.getElementById('calcModal');
       m.style.display = 'flex';
+      document.documentElement.classList.add('modal-open');
       setTimeout(()=>{
-        const inp = document.getElementById('calcDelta');
-        inp.focus();
-        inp.oninput = calcUpdateResult;
-      }, 50);
+        input.focus({preventScroll:true});
+        input.oninput = calcUpdateResult;
+      }, 80);
     }
     function closeCalc() {
       document.getElementById('calcModal').style.display = 'none';
+      document.documentElement.classList.remove('modal-open');
+    }
+    function calcRefreshSignButtons(){
+      const minus = document.getElementById('calcMinusBtn');
+      const plus = document.getElementById('calcPlusBtn');
+      if(minus) minus.classList.toggle('is-active', _calcSign === -1);
+      if(plus) plus.classList.toggle('is-active', _calcSign === 1);
     }
     function calcSetSign(s) {
-      _calcSign = s;
+      _calcSign = s === 1 ? 1 : -1;
+      calcRefreshSignButtons();
       calcUpdateResult();
     }
     function calcAppend(ch) {
       const el = document.getElementById('calcDelta');
-      el.value = (el.value || '') + ch;
+      let value = el.value || '';
+      if(ch === ',' || ch === '.') {
+        if(/[\.,]/.test(value)) return;
+        if(!value) value = '0';
+        el.value = value + ',';
+      } else {
+        el.value = value + ch;
+      }
       calcUpdateResult();
     }
     function calcBack() {
@@ -405,17 +465,23 @@
     }
     function calcUpdateResult() {
       const raw = document.getElementById('calcDelta').value;
-      const n = raw ? Number(raw) : 0;
-      const delta = (_calcSign * (Number.isFinite(n) ? n : 0));
+      const n = raw ? parseCalcNumber(raw) : 0;
+      const safeN = Number.isFinite(n) ? n : 0;
+      const delta = (_calcSign * safeN);
       const res = Math.max(0, _calcCurrent + delta);
-      const signChar = _calcSign === 1 ? '+' : '-';
+      const signChar = _calcSign === 1 ? '+' : '−';
       const totalText = (window.computeTotalText ? window.computeTotalText(res, _calcUnit) : '');
       document.getElementById('calcResult').textContent = `Risultato: ${_calcCurrent.toFixed(2)} ${signChar} ${Math.abs(delta).toFixed(2)} = ${res.toFixed(2)}${totalText ? (' • ' + totalText) : ''}`;
     }
     function calcSubmit() {
+      if (_calcSubmitting) return;
       const raw = document.getElementById('calcDelta').value;
-      const n = raw ? Number(raw) : 0;
-      if (!Number.isFinite(n) || n <= 0) { closeCalc(); return; }
+      const n = raw ? parseCalcNumber(raw) : 0;
+      if (!Number.isFinite(n) || n <= 0) {
+        document.getElementById('calcResult').textContent = 'Scrivi una quantità maggiore di 0.';
+        return;
+      }
+      _calcSubmitting = true;
       const delta = _calcSign * n;
       const f = document.getElementById('calcForm');
       f.action = `/items/${_calcItemId}/delta`;
@@ -465,7 +531,6 @@
       document.getElementById('tCat').value = category || '';
       document.getElementById('tName').value = name || '';
 
-      // Popola i menu a tendina con le posizioni disponibili
       const fromSel = document.getElementById('tFrom');
       const toSel = document.getElementById('tTo');
       fromSel.innerHTML = '';
@@ -482,7 +547,6 @@
         toSel.appendChild(opt2);
       });
 
-      // default: prima posizione -> seconda posizione (se esistono)
       if(locs.length >= 1) fromSel.value = locs[0];
       if(locs.length >= 2) toSel.value = locs[1];
       else if(locs.length >= 1) toSel.value = locs[0];
@@ -525,22 +589,95 @@
 
 
 <style>
-@media (max-width: 768px) {
 
-  .card { padding:8px !important; }
-  strong { font-size:14px !important; }
-  .btn, .btn2, .mini {
-    padding:6px 10px !important;
-    font-size:13px !important;
-  }
-  input, select {
-    font-size:13px !important;
-    padding:6px !important;
-  }
-  .row { gap:6px !important; }
-  .muted { font-size:12px !important; }
+    .card > form[action="/inventario"] .row{align-items:center;}
+    @media(max-width:768px){
+      .card > form[action="/inventario"] .row{display:grid!important;grid-template-columns:1fr 1fr;gap:6px!important;}
+      .card > form[action="/inventario"] input[name="q"]{grid-column:1 / -1;min-width:0!important;width:100%;box-sizing:border-box;}
+      .card > form[action="/inventario"] select,
+      .card > form[action="/inventario"] button,
+      .card > form[action="/inventario"] .pill{width:100%;box-sizing:border-box;text-align:center;}
+      .card > form[action="/inventario"] label.pill{justify-content:center;}
+    }
+  .inv-list{margin-top:12px;display:grid;grid-template-columns:1fr;gap:8px;}
+  .inv-product-card{padding:10px 12px !important;border-radius:16px;}
+  .inv-product-card.is-low{border-color:rgba(248,113,113,.42)!important;background:linear-gradient(180deg, rgba(127,29,29,.16), rgba(15,23,42,.94))!important;}
+  .inv-mainline{display:grid;grid-template-columns:minmax(0,1fr) minmax(230px,320px);gap:10px;align-items:center;}
+  .inv-titleblock{min-width:0;display:flex;flex-direction:column;gap:5px;}
+  .inv-meta-row{display:flex;gap:5px;align-items:center;flex-wrap:wrap;}
+  .inv-cat,.inv-unit{font-size:12px!important;padding:4px 8px!important;}
+  .inv-low-pill{font-size:12px!important;color:#fecaca!important;border-color:rgba(248,113,113,.45)!important;background:rgba(239,68,68,.14)!important;}
+  .inv-product-name{font-size:17px!important;line-height:1.15;white-space:normal;overflow-wrap:anywhere;}
+  .inv-total-wrap{min-width:0;}
+  .inv-total-summary,.inv-total-single{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;align-items:center;width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:14px;background:rgba(15,23,42,.74);cursor:pointer;list-style:none;}
+  .inv-total-summary::-webkit-details-marker{display:none;}
+  .inv-total-label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+  .inv-total-summary strong,.inv-total-single strong{font-size:18px!important;text-align:right;white-space:normal;}
+  .inv-total-hint{grid-column:1 / -1;color:var(--muted);font-size:12px;text-align:right;}
+  .inv-locations[open] .inv-total-summary{border-color:rgba(96,165,250,.56)!important;background:rgba(37,99,235,.12)!important;}
+  .inv-position-list{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+  .inv-position-row,.inv-single-line{display:grid;grid-template-columns:minmax(110px,1fr) auto minmax(230px,auto);gap:8px;align-items:center;padding:7px 8px;border:1px solid rgba(148,163,184,.13);border-radius:14px;background:rgba(2,6,23,.20);}
+  .inv-single-line{margin-top:8px;grid-template-columns:minmax(130px,1fr) minmax(230px,auto);}
+  .inv-position-info{min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .inv-location{font-weight:750;overflow-wrap:anywhere;}
+  .inv-position-qty{font-size:18px;font-weight:850;}
+  .inv-missing{font-size:12px!important;padding:4px 7px!important;color:#fecaca!important;border-color:rgba(248,113,113,.42)!important;background:rgba(239,68,68,.14)!important;}
+  .inv-actions-compact{display:flex;align-items:center;justify-content:flex-end;gap:5px;flex-wrap:nowrap;}
+  .inv-actions-compact form{margin:0;}
+  .inv-set-form{gap:4px!important;flex-wrap:nowrap!important;}
+  .inv-set-form input{width:76px!important;text-align:center;}
+  .inv-trash{background:rgba(239,68,68,.10)!important;border-color:rgba(248,113,113,.34)!important;}
+  .inv-edit-details{position:relative;}
+  .inv-edit-details > summary{list-style:none;cursor:pointer;}
+  .inv-edit-details > summary::-webkit-details-marker{display:none;}
+  .inv-edit-details[open] .inv-edit-panel{position:absolute;right:0;top:calc(100% + 6px);z-index:2500;min-width:320px;max-width:min(92vw,620px);padding:10px;border:1px solid var(--line-soft);border-radius:14px;background:rgba(7,12,24,.98);box-shadow:var(--shadow);}
+  .inv-edit-form{gap:6px!important;}
+  .inv-edit-form input[name="category"]{width:120px;}
+  .inv-edit-form input[name="name"]{width:170px;}
+  .inv-edit-form input[name="location"]{width:140px;}
+  .inv-edit-form input[name="unit"]{width:90px;}
+  .inv-edit-form input[name="min_qty"]{width:80px;}
+  .inv-footer-actions{display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap;margin-top:8px;}
+  .inv-modal{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:5000;align-items:center;justify-content:center;padding:14px;box-sizing:border-box;}
+  .modal-open{overflow:hidden;}
+  .inv-calc-card{max-width:380px;width:min(94vw,380px);padding:14px!important;}
+  .inv-calc-signs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;}
+  .inv-calc-signs .is-active{border-color:rgba(96,165,250,.75)!important;background:rgba(37,99,235,.22)!important;}
+  .inv-calc-input{width:100%;box-sizing:border-box;text-align:center;font-size:28px!important;font-weight:850;margin-top:10px;padding:12px!important;}
+  .inv-calc-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;}
+  .inv-calc-grid button{min-height:44px;font-size:17px!important;font-weight:800;touch-action:manipulation;}
+  .inv-calc-grid .btn{grid-column:span 2;}
 
-}
+  @media (max-width: 768px) {
+    .card { padding:8px !important; }
+    .row { gap:6px !important; }
+    .muted { font-size:12px !important; }
+    input, select { font-size:14px !important; padding:7px !important; }
+    .btn, .btn2, .mini { padding:6px 8px !important; font-size:13px !important; }
+    .inv-list{gap:7px;margin-top:10px;}
+    .inv-product-card{padding:8px!important;border-radius:14px;}
+    .inv-mainline{grid-template-columns:1fr;gap:7px;}
+    .inv-product-name{font-size:15px!important;}
+    .inv-meta-row{gap:4px;}
+    .inv-cat,.inv-unit,.inv-low-pill{font-size:11px!important;padding:3px 7px!important;}
+    .inv-total-summary,.inv-total-single{padding:7px 8px;border-radius:12px;}
+    .inv-total-summary strong,.inv-total-single strong{font-size:16px!important;}
+    .inv-total-hint{font-size:11px;text-align:left;}
+    .inv-position-row{grid-template-columns:1fr auto;gap:6px;padding:7px;border-radius:12px;}
+    .inv-position-row .inv-actions-compact{grid-column:1 / -1;justify-content:space-between;overflow-x:auto;padding-top:2px;}
+    .inv-single-line{grid-template-columns:1fr;gap:6px;padding:7px;border-radius:12px;}
+    .inv-single-line .inv-actions-compact{justify-content:space-between;overflow-x:auto;}
+    .inv-position-qty{font-size:16px;}
+    .inv-set-form input{width:64px!important;}
+    .inv-edit-details[open] .inv-edit-panel{position:fixed;left:8px;right:8px;top:76px;max-height:70vh;overflow:auto;min-width:0;}
+    .inv-edit-form{display:grid!important;grid-template-columns:1fr 1fr;}
+    .inv-edit-form input{width:100%!important;box-sizing:border-box;}
+    .inv-edit-form button{grid-column:1 / -1;}
+    .inv-footer-actions{justify-content:flex-start;margin-top:6px;}
+    .inv-calc-card{width:100%;max-width:420px;}
+    .inv-calc-grid button{min-height:48px;font-size:18px!important;}
+  }
 </style>
+
 
 {% endblock %}
