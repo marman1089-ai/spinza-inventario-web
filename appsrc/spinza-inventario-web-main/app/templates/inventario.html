@@ -1,6 +1,18 @@
 {% extends "base.html" %}
 {% set title = "Inventario" %}
 {% block content %}
+{% macro render_total(g) -%}
+  {%- if g.disp and g.disp.conv_val is not none and g.disp.show_pieces -%}
+    {{ "%.0f"|format(g.disp.pieces) }} pz · {{ "%.2f"|format(g.disp.conv_val) }} {{ g.disp.conv_unit }}
+  {%- elif g.unit and g.disp and g.disp.conv_val is not none and (g.disp.conv_unit in ['kg','l']) -%}
+    {{ "%.2f"|format(g.disp.conv_val) }} {{ g.disp.conv_unit }}
+  {%- else -%}
+    {{ "%.2f"|format(g.total) }}{% if g.unit %} {{ g.unit }}{% endif %}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro jsq(v) -%}{{ (v or '')|replace('\\', '\\\\')|replace("'", "\\'") }}{%- endmacro %}
+
   <div class="card" style="margin-bottom:12px;">
     <form method="get" action="/inventario">
       <div class="row">
@@ -50,8 +62,8 @@
           {% else %}
             Negozio: <strong>{{ user.store_label }}</strong>
           {% endif %}
-          • Tocca +1 / -1 per scarichi veloci. “Sotto minimo” va in rosso.
-          {% if admin and not can_edit %}
+          • Tocca il totale per aprire le posizioni. Usa 🧮 o Set per modificare le quantità.
+          {% if admin and not can_bulk_edit %}
             • Per modificare, seleziona un inventario singolo.
           {% endif %}
         </div>
@@ -59,12 +71,14 @@
       <details>
         <summary class="pill" style="cursor:pointer;">➕ Aggiungi prodotto</summary>
         <div style="margin-top:10px;">
-          {% if can_edit %}
+          {% if can_bulk_edit %}
           <form method="post" action="/items/add">
+            <input type="hidden" name="next_url" value="" />
             <div class="row">
               <input name="category" placeholder="Categoria" required />
               <input name="name" placeholder="Nome prodotto" required />
               <input name="location" placeholder="Posizione (es. Frigo 1, Magazzino A…)" />
+              <input name="unit" placeholder="Unità (es. 1kg, 120g, 1L)" />
               <input name="qty" placeholder="Q.tà" type="number" step="0.01" />
               <input name="min_qty" placeholder="Minimo" type="number" step="0.01" />
               <button class="btn" type="submit">Salva</button>
@@ -76,7 +90,7 @@
         </div>
       </details>
 
-      {% if can_edit %}
+      {% if can_bulk_edit %}
       <details>
         <summary class="pill" style="cursor:pointer;">⬇️⬆️ Import / Export CSV</summary>
         <div style="margin-top:10px;">
@@ -93,77 +107,577 @@
       {% endif %}
     </div>
 
-    <div style="overflow:auto;margin-top:10px;">
-      <table>
-        <thead>
-          <tr>
-            <th>Categoria</th>
-            <th>Prodotto</th>
-            <th>Q.tà</th>
-            <th class="hide-mobile">Min</th>
-            <th style="text-align:right;">Azioni <span class="pill" style="margin-left:6px;">-1 / +1 / Set</span></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for it in items %}
-            {% set low = (it.qty <= it.min_qty) %}
-            <tr {% if low %}style="background:rgba(239,68,68,.08)"{% endif %}>
-              <td><span class="pill">{{ it.category }}</span></td>
-              <td><strong>{{ it.name }}</strong>
-                  {% if it.location %}<span class="pill" style="width:fit-content;">📍 {{ it.location }}</span>{% endif %}</td>
-              <td class="qty {% if low %}low{% endif %}">{{ "%.2f"|format(it.qty) }}</td>
-              <td class="hide-mobile">{{ "%.2f"|format(it.min_qty) }}</td>
-              <td>
-                <div class="actions">
-                  {% if can_edit %}
-                  <form method="post" action="/items/{{ it.id }}/delta">
-                    <input type="hidden" name="delta" value="-1">
-                    <button class="mini btn2" type="submit" title="Diminuisci quantità di 1">-1</button>
-                  </form>
-                  <form method="post" action="/items/{{ it.id }}/delta">
-                    <input type="hidden" name="delta" value="1">
-                    <button class="mini btn2" type="submit" title="Aumenta quantità di 1">+1</button>
-                  </form>
-                  <form method="post" action="/items/{{ it.id }}/set" class="row" style="gap:6px;">
-                    <input class="mini" name="qty" type="number" step="0.01" value="{{ it.qty }}" style="width:110px;">
-                    <button class="mini btn" type="submit">Set</button>
-                  </form>
+    <div class="inv-list">
+      {% for g in groups %}
+        {% set multi = (g.positions|length > 1) %}
+        <article class="inv-product-card {% if g.any_low %}is-low{% endif %}">
+          <div class="inv-mainline">
+            <div class="inv-titleblock">
+              <div class="inv-meta-row">
+                <span class="pill inv-cat">{{ g.category }}</span>
+                {% if g.unit %}<span class="pill inv-unit">{{ g.unit }}</span>{% endif %}
+                {% if g.any_low %}<span class="pill inv-low-pill">● Sotto minimo</span>{% endif %}
+              </div>
+              <strong class="inv-product-name">{{ g.name }}</strong>
+            </div>
 
-                  <form method="post" action="/ordini/add" style="display:inline;">
-                    <input type="hidden" name="item_id" value="{{ it.id }}">
-                    <button class="mini btn2" type="submit" title="Aggiungi agli ordini da fare">🛒 Ordina</button>
-                  </form>
+            <div class="inv-total-wrap">
+              {% if multi %}
+                <details class="inv-locations">
+                  <summary class="inv-total-summary" title="Apri per vedere sala, magazzino e altre posizioni">
+                    <span class="inv-total-label">Totale</span>
+                    <strong>{{ render_total(g) }}</strong>
+                    <span class="inv-total-hint">tocca per vedere sala/magazzino</span>
+                  </summary>
+                  <div class="inv-position-list">
+                    {% for p in g.positions %}
+                      <div class="inv-position-row {% if p.low %}is-low-row{% endif %}">
+                        <div class="inv-position-info">
+                          <span class="inv-location">📍 {{ p.location }}</span>
+                          <span class="muted">Min {{ "%.2f"|format(p.min_qty) }}</span>
+                        </div>
+                        <div class="inv-position-qty {% if p.low %}low{% endif %}">{{ "%.2f"|format(p.qty) }}</div>
+                        {% if p.missing_qty and p.missing_qty > 0 %}
+                          <div class="pill inv-missing">⚠️ Mancante {{ "%.2f"|format(p.missing_qty) }}</div>
+                        {% endif %}
+                        {% if can_edit %}
+                          <div class="inv-actions-compact">
+                            <button class="mini btn2" type="button" title="Calcolatrice" onclick="openCalc({{ p.id }}, {{ p.qty }}, '{{ jsq(p.unit or '') }}', '{{ p.store }}')">🧮</button>
+                            <details class="inv-edit-details">
+                              <summary class="mini btn2">✏️</summary>
+                              <div class="inv-edit-panel">
+                                <form method="post" action="/items/{{ p.id }}/edit" class="row inv-edit-form">
+                                  <input type="hidden" name="next_url" value="" />
+                                  <input type="hidden" name="store" value="{{ p.store }}" />
+                                  <input class="mini" name="category" value="{{ p.category }}" placeholder="Categoria" required />
+                                  <input class="mini" name="name" value="{{ p.name }}" placeholder="Nome" required />
+                                  <input class="mini" name="location" value="{{ p.location }}" placeholder="Posizione" required />
+                                  <input class="mini" name="unit" value="{{ p.unit or '' }}" placeholder="Unità" />
+                                  <input class="mini" name="min_qty" type="number" step="0.01" value="{{ p.min_qty }}" placeholder="Min" />
+                                  <button class="mini btn" type="submit">Salva</button>
+                                </form>
+                              </div>
+                            </details>
+                            <form method="post" action="/items/{{ p.id }}/set" class="row inv-set-form">
+                              <input type="hidden" name="next_url" value="" />
+                              <input type="hidden" name="store" value="{{ p.store }}" />
+                              <input class="mini" name="qty" type="number" step="0.01" value="{{ p.qty }}" inputmode="decimal" aria-label="Quantità" />
+                              <button class="mini btn" type="submit">Set</button>
+                            </form>
+                            <form method="post" action="/items/{{ p.id }}/delete" onsubmit="return confirm('Eliminare {{ jsq(p.name) }} ({{ jsq(p.location) }})?')">
+                              <input type="hidden" name="next_url" value="" />
+                              <input type="hidden" name="store" value="{{ p.store }}" />
+                              <button class="mini inv-trash" type="submit" title="Elimina posizione">🗑</button>
+                            </form>
+                          </div>
+                        {% endif %}
+                      </div>
+                    {% endfor %}
+                  </div>
+                </details>
+              {% else %}
+                {% set p = g.positions[0] %}
+                <div class="inv-total-single">
+                  <span class="inv-total-label">Totale</span>
+                  <strong>{{ render_total(g) }}</strong>
+                  <span class="inv-total-hint">📍 {{ p.location }}</span>
+                </div>
+              {% endif %}
+            </div>
+          </div>
 
-                  <details>
-                    <summary class="mini btn2" style="list-style:none;cursor:pointer;">✏️ Modifica</summary>
-                    <div style="margin-top:8px;">
-                      <form method="post" action="/items/{{ it.id }}/edit" class="row" style="gap:6px;">
-                        <input class="mini" name="category" value="{{ it.category }}" style="width:140px;" required />
-                        <input class="mini" name="name" value="{{ it.name }}" style="width:200px;" required />
-                        <input class="mini" name="location" value="{{ it.location or '' }}" placeholder="Posizione" style="width:160px;" />
-                        <input class="mini" name="min_qty" type="number" step="0.01" value="{{ it.min_qty }}" style="width:110px;" />
+          {% if not multi %}
+            {% set p = g.positions[0] %}
+            <div class="inv-single-line {% if p.low %}is-low-row{% endif %}">
+              <div class="inv-position-info">
+                <span class="inv-location">{{ "%.2f"|format(p.qty) }}</span>
+                <span class="muted">Min {{ "%.2f"|format(p.min_qty) }}</span>
+                {% if p.missing_qty and p.missing_qty > 0 %}<span class="pill inv-missing">⚠️ Mancante {{ "%.2f"|format(p.missing_qty) }}</span>{% endif %}
+              </div>
+              {% if can_edit %}
+                <div class="inv-actions-compact">
+                  <button class="mini btn2" type="button" title="Calcolatrice" onclick="openCalc({{ p.id }}, {{ p.qty }}, '{{ jsq(p.unit or '') }}', '{{ p.store }}')">🧮</button>
+                  <details class="inv-edit-details">
+                    <summary class="mini btn2">✏️</summary>
+                    <div class="inv-edit-panel">
+                      <form method="post" action="/items/{{ p.id }}/edit" class="row inv-edit-form">
+                        <input type="hidden" name="next_url" value="" />
+                        <input type="hidden" name="store" value="{{ p.store }}" />
+                        <input class="mini" name="category" value="{{ p.category }}" placeholder="Categoria" required />
+                        <input class="mini" name="name" value="{{ p.name }}" placeholder="Nome" required />
+                        <input class="mini" name="location" value="{{ p.location }}" placeholder="Posizione" required />
+                        <input class="mini" name="unit" value="{{ p.unit or '' }}" placeholder="Unità" />
+                        <input class="mini" name="min_qty" type="number" step="0.01" value="{{ p.min_qty }}" placeholder="Min" />
                         <button class="mini btn" type="submit">Salva</button>
                       </form>
-                      <div class="muted" style="margin-top:6px;">Modifica categoria/nome/minimo (la quantità si cambia con Set / +/-).</div>
                     </div>
                   </details>
-                  {% if admin %}
-                    <form method="post" action="/items/{{ it.id }}/delete" onsubmit="return confirm('Eliminare {{ it.name }}?')">
-                      <button class="mini" type="submit">🗑</button>
-                    </form>
-                  {% endif %}
-                  {% else %}
-                    <span class="muted" style="font-size:12px;">(Vista sola lettura)</span>
-                  {% endif %}
+                  <form method="post" action="/items/{{ p.id }}/set" class="row inv-set-form">
+                    <input type="hidden" name="next_url" value="" />
+                    <input type="hidden" name="store" value="{{ p.store }}" />
+                    <input class="mini" name="qty" type="number" step="0.01" value="{{ p.qty }}" inputmode="decimal" aria-label="Quantità" />
+                    <button class="mini btn" type="submit">Set</button>
+                  </form>
+                  <form method="post" action="/items/{{ p.id }}/delete" onsubmit="return confirm('Eliminare {{ jsq(p.name) }} ({{ jsq(p.location) }})?')">
+                    <input type="hidden" name="next_url" value="" />
+                    <input type="hidden" name="store" value="{{ p.store }}" />
+                    <button class="mini inv-trash" type="submit" title="Elimina posizione">🗑</button>
+                  </form>
                 </div>
-              </td>
-            </tr>
-          {% endfor %}
-          {% if not items %}
-            <tr><td colspan="5" class="muted">Nessun prodotto trovato.</td></tr>
+              {% endif %}
+            </div>
           {% endif %}
-        </tbody>
-      </table>
+
+          {% if can_edit %}
+            <div class="inv-footer-actions">
+              {% if multi %}
+                <button class="mini btn2" type="button"
+                  onclick="openTransfer('{{ g.store }}','{{ g.area }}','{{ jsq(g.category) }}','{{ jsq(g.name) }}', [{% for pp in g.positions %}'{{ jsq(pp.location) }}'{% if not loop.last %},{% endif %}{% endfor %}])">
+                  ⇄ Sposta tra posizioni
+                </button>
+              {% endif %}
+              <button class="mini btn2" type="button"
+                onclick="openAddPos('{{ g.store }}','{{ g.area }}','{{ jsq(g.category) }}','{{ jsq(g.name) }}','{{ jsq(g.unit) }}')">
+                + Posizione
+              </button>
+            </div>
+          {% endif %}
+        </article>
+      {% endfor %}
+      {% if not groups %}
+        <div class="muted">Nessun prodotto trovato.</div>
+      {% endif %}
     </div>
   </div>
+
+  <!-- Modal: SCAMBIA tra posizioni -->
+  <div id="transferModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:120;align-items:center;justify-content:center;">
+    <div class="card" style="max-width:420px;width:92%;">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <strong>⇄ Scambia / Sposta</strong>
+        <button class="mini" type="button" onclick="closeTransfer()">✖</button>
+      </div>
+      <div class="muted" id="transferInfo" style="margin-top:6px;"></div>
+      <form method="post" action="/items/transfer" style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
+        <input type="hidden" name="next_url" value="" />
+        <input type="hidden" name="store" id="tStore" value="" />
+        <input type="hidden" name="category" id="tCat" value="" />
+        <input type="hidden" name="name" id="tName" value="" />
+        <div class="row" style="gap:8px;align-items:flex-end;">
+          <div style="flex:1;">
+            <div class="muted" style="font-size:12px;">Da</div>
+            <select class="mini" name="from_location" id="tFrom" required></select>
+          </div>
+
+          <div style="display:flex;align-items:center;">
+            <button type="button" class="mini" onclick="swapLocations()" style="height:36px;">⇄</button>
+          </div>
+
+          <div style="flex:1;">
+            <div class="muted" style="font-size:12px;">A</div>
+            <select class="mini" name="to_location" id="tTo" required></select>
+          </div>
+          
+        </div>
+        <div>
+          <div class="muted" style="font-size:12px;">Quantità</div>
+          <input class="mini" name="qty" type="number" step="0.01" inputmode="decimal" required />
+        </div>
+        <div class="row" style="justify-content:flex-end;">
+          <button class="btn" type="submit">Conferma</button>
+        </div>
+      </form>
+      <div class="muted" style="font-size:12px;">Puoi anche invertire Da/A per spostare al contrario.</div>
+    </div>
+  </div>
+
+  <!-- Modal: Aggiungi nuova posizione -->
+  <div id="addPosModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:121;align-items:center;justify-content:center;">
+    <div class="card" style="max-width:420px;width:92%;">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <strong>➕ Aggiungi posizione</strong>
+        <button class="mini" type="button" onclick="closeAddPos()">✖</button>
+      </div>
+      <div class="muted" id="addPosInfo" style="margin-top:6px;"></div>
+      <form method="post" action="/items/add" style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
+        <input type="hidden" name="next_url" value="" />
+        <input type="hidden" name="category" id="aCat" value="" />
+        <input type="hidden" name="name" id="aName" value="" />
+        <input type="hidden" name="unit" id="aUnit" value="" />
+        <div>
+          <div class="muted" style="font-size:12px;">Nuova posizione</div>
+          <input class="mini" name="location" id="aLoc" placeholder="Es. SALA, CUCINA, MAGAZZINO…" required />
+        </div>
+        <div class="row" style="gap:8px;">
+          <div style="flex:1;">
+            <div class="muted" style="font-size:12px;">Quantità iniziale</div>
+            <input class="mini" name="qty" type="number" step="0.01" inputmode="decimal" value="0" />
+          </div>
+          <div style="flex:1;">
+            <div class="muted" style="font-size:12px;">Minimo</div>
+            <input class="mini" name="min_qty" type="number" step="0.01" inputmode="decimal" value="0" />
+          </div>
+        </div>
+        <div class="row" style="justify-content:flex-end;">
+          <button class="btn" type="submit">Salva</button>
+        </div>
+      </form>
+      <div class="muted" style="font-size:12px;">Dopo averla creata, puoi usare “SCAMBIA” per spostare quantità tra posizioni.</div>
+    </div>
+  </div>
+
+  <!-- Modal: Calcolatrice (+ / -) -->
+  <div id="calcModal" class="inv-modal" style="display:none;">
+    <div class="card inv-calc-card">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <strong>🧮 Modifica quantità</strong>
+        <button class="mini" type="button" onclick="closeCalc()">✖</button>
+      </div>
+      <div class="muted" id="calcInfo" style="margin-top:6px;"></div>
+      <div class="inv-calc-signs">
+        <button id="calcMinusBtn" class="btn2 is-active" type="button" onclick="calcSetSign(-1)">− Scarico</button>
+        <button id="calcPlusBtn" class="btn2" type="button" onclick="calcSetSign(1)">+ Aggiungo</button>
+      </div>
+      <input id="calcDelta" class="inv-calc-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0" />
+      <div class="muted" id="calcResult" style="margin-top:6px;min-height:18px;"></div>
+      <div class="inv-calc-grid">
+        <button class="btn2" type="button" onclick="calcAppend('1')">1</button>
+        <button class="btn2" type="button" onclick="calcAppend('2')">2</button>
+        <button class="btn2" type="button" onclick="calcAppend('3')">3</button>
+        <button class="btn2" type="button" onclick="calcAppend('4')">4</button>
+        <button class="btn2" type="button" onclick="calcAppend('5')">5</button>
+        <button class="btn2" type="button" onclick="calcAppend('6')">6</button>
+        <button class="btn2" type="button" onclick="calcAppend('7')">7</button>
+        <button class="btn2" type="button" onclick="calcAppend('8')">8</button>
+        <button class="btn2" type="button" onclick="calcAppend('9')">9</button>
+        <button class="btn2" type="button" onclick="calcClear()">C</button>
+        <button class="btn2" type="button" onclick="calcAppend('0')">0</button>
+        <button class="btn2" type="button" onclick="calcAppend(',')">,</button>
+        <button class="btn2" type="button" onclick="calcBack()">⌫</button>
+        <button class="btn" type="button" onclick="calcSubmit()">Applica</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Quantità ordine -->
+  <div id="orderModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:101;align-items:center;justify-content:center;">
+    <div class="card" style="max-width:360px;width:92%;">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <strong>🛒 Ordina</strong>
+        <button class="mini" type="button" onclick="closeOrderQty()">✖</button>
+      </div>
+      <div class="muted" id="orderInfo" style="margin-top:6px;"></div>
+      <div class="row" style="gap:8px;margin-top:10px;align-items:center;">
+        <input id="orderQty" class="mini" type="number" step="0.01" inputmode="decimal" placeholder="Quantità da ordinare" style="flex:1;min-width:0;" />
+        <button class="mini btn2" type="button" onclick="orderQtySet(1)">+1</button>
+        <button class="mini btn2" type="button" onclick="orderQtySet(5)">+5</button>
+      </div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px;">
+        <button class="btn" type="button" onclick="orderQtySubmit()">Aggiungi</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- hidden forms -->
+  <form id="calcForm" method="post" style="display:none;"></form>
+  <form id="orderForm" method="post" action="/ordini/add_with_qty" style="display:none;">
+    <input type="hidden" name="next_url" value="" />
+    <input type="hidden" name="item_id" id="orderItemId" value="" />
+    <input type="hidden" name="qty_to_order" id="orderItemQty" value="" />
+  </form>
+
+  <script>
+    let _calcItemId = null;
+    let _calcCurrent = 0;
+    let _calcSign = -1;
+    let _calcUnit = '';
+    let _calcStore = '';
+    let _calcSubmitting = false;
+
+    function parseCalcNumber(value) {
+      const cleaned = String(value || '').trim().replace(/\s+/g, '').replace(',', '.');
+      const n = Number(cleaned);
+      return Number.isFinite(n) ? n : NaN;
+    }
+
+    function updateTotalForItem(itemId, qty){
+      const el = document.getElementById('total-' + itemId);
+      if(!el) return;
+      el.dataset.qty = String(qty ?? '');
+      if(window._updateTotalEl) window._updateTotalEl(el);
+    }
+
+    function openCalc(id, currentQty, unitStr, storeCode) {
+      _calcItemId = id;
+      _calcCurrent = Number(currentQty) || 0;
+      _calcSign = -1;
+      _calcUnit = (unitStr || '');
+      _calcStore = (storeCode || '');
+      _calcSubmitting = false;
+      const input = document.getElementById('calcDelta');
+      input.value = '';
+      document.getElementById('calcInfo').textContent = `Quantità attuale: ${_calcCurrent.toFixed(2)}. Scegli scarico o aggiunta.`;
+      document.getElementById('calcResult').textContent = '';
+      calcRefreshSignButtons();
+      const m = document.getElementById('calcModal');
+      m.style.display = 'flex';
+      document.documentElement.classList.add('modal-open');
+      setTimeout(()=>{
+        input.focus({preventScroll:true});
+        input.oninput = calcUpdateResult;
+      }, 80);
+    }
+    function closeCalc() {
+      document.getElementById('calcModal').style.display = 'none';
+      document.documentElement.classList.remove('modal-open');
+    }
+    function calcRefreshSignButtons(){
+      const minus = document.getElementById('calcMinusBtn');
+      const plus = document.getElementById('calcPlusBtn');
+      if(minus) minus.classList.toggle('is-active', _calcSign === -1);
+      if(plus) plus.classList.toggle('is-active', _calcSign === 1);
+    }
+    function calcSetSign(s) {
+      _calcSign = s === 1 ? 1 : -1;
+      calcRefreshSignButtons();
+      calcUpdateResult();
+    }
+    function calcAppend(ch) {
+      const el = document.getElementById('calcDelta');
+      let value = el.value || '';
+      if(ch === ',' || ch === '.') {
+        if(/[\.,]/.test(value)) return;
+        if(!value) value = '0';
+        el.value = value + ',';
+      } else {
+        el.value = value + ch;
+      }
+      calcUpdateResult();
+    }
+    function calcBack() {
+      const el = document.getElementById('calcDelta');
+      el.value = (el.value || '').slice(0, -1);
+      calcUpdateResult();
+    }
+    function calcClear() {
+      document.getElementById('calcDelta').value = '';
+      calcUpdateResult();
+    }
+    function calcUpdateResult() {
+      const raw = document.getElementById('calcDelta').value;
+      const n = raw ? parseCalcNumber(raw) : 0;
+      const safeN = Number.isFinite(n) ? n : 0;
+      const delta = (_calcSign * safeN);
+      const res = Math.max(0, _calcCurrent + delta);
+      const signChar = _calcSign === 1 ? '+' : '−';
+      const totalText = (window.computeTotalText ? window.computeTotalText(res, _calcUnit) : '');
+      document.getElementById('calcResult').textContent = `Risultato: ${_calcCurrent.toFixed(2)} ${signChar} ${Math.abs(delta).toFixed(2)} = ${res.toFixed(2)}${totalText ? (' • ' + totalText) : ''}`;
+    }
+    function calcSubmit() {
+      if (_calcSubmitting) return;
+      const raw = document.getElementById('calcDelta').value;
+      const n = raw ? parseCalcNumber(raw) : 0;
+      if (!Number.isFinite(n) || n <= 0) {
+        document.getElementById('calcResult').textContent = 'Scrivi una quantità maggiore di 0.';
+        return;
+      }
+      _calcSubmitting = true;
+      const delta = _calcSign * n;
+      const f = document.getElementById('calcForm');
+      f.action = `/items/${_calcItemId}/delta`;
+      f.innerHTML = '';
+      const next = document.createElement('input');
+      next.type = 'hidden'; next.name = 'next_url'; next.value = window.location.pathname + window.location.search;
+      const st = document.createElement('input');
+      st.type = 'hidden'; st.name = 'store'; st.value = (_calcStore || '');
+      const d = document.createElement('input');
+      d.type = 'hidden'; d.name = 'delta'; d.value = String(delta);
+      f.appendChild(next); f.appendChild(st); f.appendChild(d);
+      f.submit();
+    }
+
+    let _orderItemId = null;
+    let _orderCurrent = 0;
+    function openOrderQty(id, currentQty) {
+      _orderItemId = id;
+      _orderCurrent = Number(currentQty) || 0;
+      document.getElementById('orderQty').value = '';
+      document.getElementById('orderInfo').textContent = `Ti sono rimasti: ${_orderCurrent.toFixed(2)}. Quanto vuoi ordinare?`;
+      document.getElementById('orderModal').style.display = 'flex';
+      setTimeout(()=>document.getElementById('orderQty').focus(), 50);
+    }
+    function closeOrderQty() { document.getElementById('orderModal').style.display = 'none'; }
+    function orderQtySet(add) {
+      const el = document.getElementById('orderQty');
+      const cur = Number(el.value || 0) || 0;
+      el.value = String(cur + add);
+    }
+    function orderQtySubmit() {
+      const el = document.getElementById('orderQty');
+      const n = Number(el.value);
+      if (!Number.isFinite(n) || n <= 0) { closeOrderQty(); return; }
+      document.getElementById('orderItemId').value = String(_orderItemId);
+      document.getElementById('orderItemQty').value = String(n);
+      document.getElementById('orderForm').querySelector('input[name=next_url]').value = window.location.pathname + window.location.search;
+      document.getElementById('orderForm').submit();
+    }
+
+    // ===== SCAMBIA / AGGIUNGI POSIZIONE =====
+    function openTransfer(store, area, category, name, locations){
+      const next = window.location.pathname + window.location.search;
+      const modal = document.getElementById('transferModal');
+      document.getElementById('transferInfo').textContent = `${name} • ${category}`;
+      document.getElementById('tStore').value = store || '';
+      document.getElementById('tCat').value = category || '';
+      document.getElementById('tName').value = name || '';
+
+      const fromSel = document.getElementById('tFrom');
+      const toSel = document.getElementById('tTo');
+      fromSel.innerHTML = '';
+      toSel.innerHTML = '';
+      const locs = Array.isArray(locations) ? locations : [];
+      locs.forEach((l)=>{
+        const opt1 = document.createElement('option');
+        opt1.value = l;
+        opt1.textContent = l;
+        fromSel.appendChild(opt1);
+        const opt2 = document.createElement('option');
+        opt2.value = l;
+        opt2.textContent = l;
+        toSel.appendChild(opt2);
+      });
+
+      if(locs.length >= 1) fromSel.value = locs[0];
+      if(locs.length >= 2) toSel.value = locs[1];
+      else if(locs.length >= 1) toSel.value = locs[0];
+
+      modal.querySelector('input[name=next_url]').value = next;
+      modal.style.display = 'flex';
+      setTimeout(()=>{
+        const q = modal.querySelector('input[name=qty]');
+        if(q) q.focus();
+      }, 50);
+    }
+    function swapLocations(){
+      const fromSel = document.getElementById('tFrom');
+      const toSel = document.getElementById('tTo');
+      const tmp = fromSel.value;
+      fromSel.value = toSel.value;
+      toSel.value = tmp;
+    }
+
+    function closeTransfer(){
+      document.getElementById('transferModal').style.display = 'none';
+    }
+
+    function openAddPos(store, area, category, name, unit){
+      const next = window.location.pathname + window.location.search;
+      const modal = document.getElementById('addPosModal');
+      document.getElementById('addPosInfo').textContent = `${name} • ${category}`;
+      document.getElementById('aCat').value = category || '';
+      document.getElementById('aName').value = name || '';
+      document.getElementById('aUnit').value = unit || '';
+      modal.querySelector('input[name=next_url]').value = next;
+      document.getElementById('aLoc').value = '';
+      modal.style.display = 'flex';
+      setTimeout(()=>document.getElementById('aLoc').focus(), 50);
+    }
+    function closeAddPos(){
+      document.getElementById('addPosModal').style.display = 'none';
+    }
+  </script>
+
+
+<style>
+
+    .card > form[action="/inventario"] .row{align-items:center;}
+    @media(max-width:768px){
+      .card > form[action="/inventario"] .row{display:grid!important;grid-template-columns:1fr 1fr;gap:6px!important;}
+      .card > form[action="/inventario"] input[name="q"]{grid-column:1 / -1;min-width:0!important;width:100%;box-sizing:border-box;}
+      .card > form[action="/inventario"] select,
+      .card > form[action="/inventario"] button,
+      .card > form[action="/inventario"] .pill{width:100%;box-sizing:border-box;text-align:center;}
+      .card > form[action="/inventario"] label.pill{justify-content:center;}
+    }
+  .inv-list{margin-top:12px;display:grid;grid-template-columns:1fr;gap:8px;}
+  .inv-product-card{padding:10px 12px !important;border-radius:16px;}
+  .inv-product-card.is-low{border-color:rgba(248,113,113,.42)!important;background:linear-gradient(180deg, rgba(127,29,29,.16), rgba(15,23,42,.94))!important;}
+  .inv-mainline{display:grid;grid-template-columns:minmax(0,1fr) minmax(230px,320px);gap:10px;align-items:center;}
+  .inv-titleblock{min-width:0;display:flex;flex-direction:column;gap:5px;}
+  .inv-meta-row{display:flex;gap:5px;align-items:center;flex-wrap:wrap;}
+  .inv-cat,.inv-unit{font-size:12px!important;padding:4px 8px!important;}
+  .inv-low-pill{font-size:12px!important;color:#fecaca!important;border-color:rgba(248,113,113,.45)!important;background:rgba(239,68,68,.14)!important;}
+  .inv-product-name{font-size:17px!important;line-height:1.15;white-space:normal;overflow-wrap:anywhere;}
+  .inv-total-wrap{min-width:0;}
+  .inv-total-summary,.inv-total-single{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;align-items:center;width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:14px;background:rgba(15,23,42,.74);cursor:pointer;list-style:none;}
+  .inv-total-summary::-webkit-details-marker{display:none;}
+  .inv-total-label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+  .inv-total-summary strong,.inv-total-single strong{font-size:18px!important;text-align:right;white-space:normal;}
+  .inv-total-hint{grid-column:1 / -1;color:var(--muted);font-size:12px;text-align:right;}
+  .inv-locations[open] .inv-total-summary{border-color:rgba(96,165,250,.56)!important;background:rgba(37,99,235,.12)!important;}
+  .inv-position-list{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+  .inv-position-row,.inv-single-line{display:grid;grid-template-columns:minmax(110px,1fr) auto minmax(230px,auto);gap:8px;align-items:center;padding:7px 8px;border:1px solid rgba(148,163,184,.13);border-radius:14px;background:rgba(2,6,23,.20);}
+  .inv-single-line{margin-top:8px;grid-template-columns:minmax(130px,1fr) minmax(230px,auto);}
+  .inv-position-info{min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .inv-location{font-weight:750;overflow-wrap:anywhere;}
+  .inv-position-qty{font-size:18px;font-weight:850;}
+  .inv-missing{font-size:12px!important;padding:4px 7px!important;color:#fecaca!important;border-color:rgba(248,113,113,.42)!important;background:rgba(239,68,68,.14)!important;}
+  .inv-actions-compact{display:flex;align-items:center;justify-content:flex-end;gap:5px;flex-wrap:nowrap;}
+  .inv-actions-compact form{margin:0;}
+  .inv-set-form{gap:4px!important;flex-wrap:nowrap!important;}
+  .inv-set-form input{width:76px!important;text-align:center;}
+  .inv-trash{background:rgba(239,68,68,.10)!important;border-color:rgba(248,113,113,.34)!important;}
+  .inv-edit-details{position:relative;}
+  .inv-edit-details > summary{list-style:none;cursor:pointer;}
+  .inv-edit-details > summary::-webkit-details-marker{display:none;}
+  .inv-edit-details[open] .inv-edit-panel{position:absolute;right:0;top:calc(100% + 6px);z-index:2500;min-width:320px;max-width:min(92vw,620px);padding:10px;border:1px solid var(--line-soft);border-radius:14px;background:rgba(7,12,24,.98);box-shadow:var(--shadow);}
+  .inv-edit-form{gap:6px!important;}
+  .inv-edit-form input[name="category"]{width:120px;}
+  .inv-edit-form input[name="name"]{width:170px;}
+  .inv-edit-form input[name="location"]{width:140px;}
+  .inv-edit-form input[name="unit"]{width:90px;}
+  .inv-edit-form input[name="min_qty"]{width:80px;}
+  .inv-footer-actions{display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap;margin-top:8px;}
+  .inv-modal{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:5000;align-items:center;justify-content:center;padding:14px;box-sizing:border-box;}
+  .modal-open{overflow:hidden;}
+  .inv-calc-card{max-width:380px;width:min(94vw,380px);padding:14px!important;}
+  .inv-calc-signs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;}
+  .inv-calc-signs .is-active{border-color:rgba(96,165,250,.75)!important;background:rgba(37,99,235,.22)!important;}
+  .inv-calc-input{width:100%;box-sizing:border-box;text-align:center;font-size:28px!important;font-weight:850;margin-top:10px;padding:12px!important;}
+  .inv-calc-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;}
+  .inv-calc-grid button{min-height:44px;font-size:17px!important;font-weight:800;touch-action:manipulation;}
+  .inv-calc-grid .btn{grid-column:span 2;}
+
+  @media (max-width: 768px) {
+    .card { padding:8px !important; }
+    .row { gap:6px !important; }
+    .muted { font-size:12px !important; }
+    input, select { font-size:14px !important; padding:7px !important; }
+    .btn, .btn2, .mini { padding:6px 8px !important; font-size:13px !important; }
+    .inv-list{gap:7px;margin-top:10px;}
+    .inv-product-card{padding:8px!important;border-radius:14px;}
+    .inv-mainline{grid-template-columns:1fr;gap:7px;}
+    .inv-product-name{font-size:15px!important;}
+    .inv-meta-row{gap:4px;}
+    .inv-cat,.inv-unit,.inv-low-pill{font-size:11px!important;padding:3px 7px!important;}
+    .inv-total-summary,.inv-total-single{padding:7px 8px;border-radius:12px;}
+    .inv-total-summary strong,.inv-total-single strong{font-size:16px!important;}
+    .inv-total-hint{font-size:11px;text-align:left;}
+    .inv-position-row{grid-template-columns:1fr auto;gap:6px;padding:7px;border-radius:12px;}
+    .inv-position-row .inv-actions-compact{grid-column:1 / -1;justify-content:space-between;overflow-x:auto;padding-top:2px;}
+    .inv-single-line{grid-template-columns:1fr;gap:6px;padding:7px;border-radius:12px;}
+    .inv-single-line .inv-actions-compact{justify-content:space-between;overflow-x:auto;}
+    .inv-position-qty{font-size:16px;}
+    .inv-set-form input{width:64px!important;}
+    .inv-edit-details[open] .inv-edit-panel{position:fixed;left:8px;right:8px;top:76px;max-height:70vh;overflow:auto;min-width:0;}
+    .inv-edit-form{display:grid!important;grid-template-columns:1fr 1fr;}
+    .inv-edit-form input{width:100%!important;box-sizing:border-box;}
+    .inv-edit-form button{grid-column:1 / -1;}
+    .inv-footer-actions{justify-content:flex-start;margin-top:6px;}
+    .inv-calc-card{width:100%;max-width:420px;}
+    .inv-calc-grid button{min-height:48px;font-size:18px!important;}
+  }
+</style>
+
+
 {% endblock %}
