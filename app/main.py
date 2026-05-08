@@ -5240,12 +5240,17 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
                 break
         positions = []
         total = 0.0
+        min_total = 0.0
+        missing_total = 0.0
         any_low = False
         for rr in lst_sorted:
             qty = float(rr.get("qty") or 0)
             mn = float(rr.get("min_qty") or 0)
+            missing = float(rr.get("missing_qty") or 0)
             low = qty <= mn
             total += qty
+            min_total += mn
+            missing_total += missing
             any_low = any_low or low
             positions.append({
                 "id": rr.get("id"),
@@ -5258,10 +5263,12 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
                 "qty": qty,
                 "min_qty": mn,
                 "low": low,
-                "missing_qty": float(rr.get("missing_qty") or 0),
+                "missing_qty": missing,
                 "missing_order_date": rr.get("missing_order_date"),
                 "missing_delivery_date": rr.get("missing_delivery_date"),
             })
+        # Interfaccia nuova: una sola riga per prodotto, senza più gestione posizioni.
+        # Se nel DB esistono vecchie posizioni multiple, qui vengono comunque mostrate come totale unico.
         groups.append({
             "store": store_k,
             "area": area_k,
@@ -5269,7 +5276,10 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
             "name": name_k,
             "unit": unit,
             "positions": positions,
+            "primary": positions[0] if positions else None,
             "total": total,
+            "min_total": min_total,
+            "missing_total": missing_total,
             "any_low": any_low,
             "disp": _compute_display_totals(total, unit),
         })
@@ -5298,6 +5308,58 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
         can_bulk_edit=(active_store != "ALL"),
         brand=active_store if active_store != "ALL" else "spinza",
     )
+
+
+def _collapse_product_rows_for_single_position(cur, *, row, effective_store, new_qty=None,
+                                               new_category=None, new_name=None,
+                                               new_unit=None, new_min_qty=None):
+    """Compatta eventuali vecchie posizioni multiple in una sola riga prodotto.
+
+    La nuova UI non usa più posizioni: ogni prodotto resta unico con location MAGAZZINO.
+    Se esistono righe vecchie tipo SALA/MAGAZZINO, il totale viene preservato e le righe extra rimosse.
+    """
+    ph = _ph()
+    now = _now()
+    area = (row.get("area") or "prodotti")
+    old_category = (row.get("category") or "").strip()
+    old_name = (row.get("name") or "").strip()
+    base_id = int(row.get("id"))
+
+    siblings = cur.execute(
+        f"SELECT * FROM products WHERE store={ph} AND area={ph} AND category={ph} AND name={ph} ORDER BY id",
+        (effective_store, area, old_category, old_name),
+    ).fetchall()
+
+    total_qty = sum(float(r.get("qty") or 0) for r in siblings) if siblings else float(row.get("qty") or 0)
+    total_min = sum(float(r.get("min_qty") or 0) for r in siblings) if siblings else float(row.get("min_qty") or 0)
+    total_missing = sum(float(r.get("missing_qty") or 0) for r in siblings) if siblings else float(row.get("missing_qty") or 0)
+
+    final_qty = float(total_qty if new_qty is None else new_qty)
+    if final_qty < 0:
+        final_qty = 0.0
+    final_category = (new_category if new_category is not None else old_category).strip()
+    final_name = (new_name if new_name is not None else old_name).strip()
+    final_unit = (new_unit if new_unit is not None else (row.get("unit") or "")).strip()
+    final_min = float(total_min if new_min_qty is None else new_min_qty)
+
+    # Prima elimina le altre posizioni: evita conflitti con l'indice unico su MAGAZZINO.
+    cur.execute(
+        f"DELETE FROM products WHERE store={ph} AND area={ph} AND category={ph} AND name={ph} AND id<>{ph}",
+        (effective_store, area, old_category, old_name, base_id),
+    )
+    cur.execute(
+        f"""UPDATE products
+            SET category={ph}, name={ph}, location={ph}, unit={ph}, qty={ph}, min_qty={ph}, missing_qty={ph}, updated_at={now}
+            WHERE id={ph} AND store={ph}""",
+        (final_category, final_name, "MAGAZZINO", final_unit, final_qty, final_min, total_missing, base_id, effective_store),
+    )
+    return {
+        "qty": final_qty,
+        "min_qty": final_min,
+        "category": final_category,
+        "name": final_name,
+        "unit": final_unit,
+    }
 
 
 @app.post("/items/{item_id}/delta")
@@ -5336,17 +5398,19 @@ def item_delta(request: Request, item_id: int, delta: float = Form(...), store: 
         if not row:
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
-        new_qty = float(row["qty"]) + float(delta)
-        if new_qty < 0:
-            new_qty = 0.0
-
-        cur.execute(
-            f"UPDATE products SET qty={ph}, updated_at={now} WHERE id={ph}",
-            (new_qty, int(item_id)),
-        )
+        # La UI ora è a posizione unica: se trova vecchie righe SALA/MAGAZZINO,
+        # usa il totale complessivo e compatta tutto in una sola riga.
+        area_row = (row.get("area") or "prodotti")
+        siblings = cur.execute(
+            f"SELECT qty FROM products WHERE store={ph} AND area={ph} AND category={ph} AND name={ph}",
+            (effective_store, area_row, row["category"], row["name"]),
+        ).fetchall()
+        current_total = sum(float(r.get("qty") or 0) for r in siblings) if siblings else float(row["qty"] or 0)
+        new_qty = current_total + float(delta)
+        info = _collapse_product_rows_for_single_position(cur, row=row, effective_store=effective_store, new_qty=new_qty)
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (effective_store, user["username"], "DELTA", row["category"], row["name"], float(delta)),
+            (effective_store, user["username"], "DELTA", info["category"], info["name"], float(delta)),
         )
 
     return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
@@ -5379,13 +5443,10 @@ def item_set(request: Request, item_id: int, qty: float = Form(...), store: str 
         if not row:
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
-        cur.execute(
-            f"UPDATE products SET qty={ph}, updated_at={now} WHERE id={ph}",
-            (float(qty), int(item_id)),
-        )
+        info = _collapse_product_rows_for_single_position(cur, row=row, effective_store=effective_store, new_qty=float(qty))
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (effective_store, user["username"], "SET", row["category"], row["name"], float(qty)),
+            (effective_store, user["username"], "SET", info["category"], info["name"], float(qty)),
         )
 
     return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
@@ -5591,13 +5652,18 @@ def item_edit(
         if not row:
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
-        cur.execute(
-            f"UPDATE products SET category={ph}, name={ph}, location={ph}, unit={ph}, min_qty={ph}, updated_at={now} WHERE id={ph}",
-            (category, name, location, unit, float(min_qty), int(item_id)),
+        info = _collapse_product_rows_for_single_position(
+            cur,
+            row=row,
+            effective_store=effective_store,
+            new_category=category,
+            new_name=name,
+            new_unit=unit,
+            new_min_qty=float(min_qty),
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (effective_store, user["username"], "EDIT", category, name, float(min_qty)),
+            (effective_store, user["username"], "EDIT", info["category"], info["name"], float(min_qty)),
         )
 
     return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
@@ -5628,7 +5694,11 @@ def item_delete(request: Request, item_id: int, store: str = Form(""), next_url:
             (int(item_id), effective_store),
         ).fetchone()
         if row:
-            cur.execute(f"DELETE FROM products WHERE id={ph}", (int(item_id),))
+            area_row = (row.get("area") or "prodotti")
+            cur.execute(
+                f"DELETE FROM products WHERE store={ph} AND area={ph} AND category={ph} AND name={ph}",
+                (effective_store, area_row, row["category"], row["name"]),
+            )
             cur.execute(
                 f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
                 (effective_store, user["username"], "DELETE", row["category"], row["name"], 0.0),

@@ -13,316 +13,151 @@
 
 {% macro jsq(v) -%}{{ (v or '')|replace('\\', '\\\\')|replace("'", "\\'") }}{%- endmacro %}
 
-  <div class="card" style="margin-bottom:12px;">
-    <form method="get" action="/inventario">
-      <div class="row">
-        <a class="pill" href="/select-area" style="text-decoration:none;color:var(--text)">
-          🧭 {{ areas.get(area, area) }}
-        </a>
-        {% if admin %}
-          <select name="store">
-            <option value="ALL" {% if active_store=='ALL' %}selected{% endif %}>Tutti gli inventari</option>
-            {% for code, label in stores.items() %}
-              <option value="{{ code }}" {% if active_store==code %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-          </select>
-        {% endif %}
-        <input name="q" value="{{ q or '' }}" placeholder="Cerca prodotto / categoria / posizione…" style="flex:1;min-width:200px" />
-        <select name="loc">
-          <option value="ALL" {% if loc=='ALL' %}selected{% endif %}>Tutte le posizioni</option>
-          {% for l in locations %}
-            <option value="{{ l }}" {% if loc==l %}selected{% endif %}>{{ l }}</option>
+  <div class="card inv-top-card">
+    <form method="get" action="/inventario" class="inv-filter-form">
+      <a class="pill inv-area-pill" href="/select-area" style="text-decoration:none;color:var(--text)">
+        🧭 {{ areas.get(area, area) }}
+      </a>
+      {% if admin %}
+        <select name="store" class="inv-filter-store">
+          <option value="ALL" {% if active_store=='ALL' %}selected{% endif %}>Tutti</option>
+          {% for code, label in stores.items() %}
+            <option value="{{ code }}" {% if active_store==code %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
-        <select name="cat">
-          <option value="ALL" {% if cat=='ALL' %}selected{% endif %}>Tutte le categorie</option>
-          {% for c in cats %}
-            <option value="{{ c }}" {% if cat==c %}selected{% endif %}>{{ c }}</option>
-          {% endfor %}
-        </select>
-        <label class="pill" style="display:flex;gap:8px;align-items:center;">
-          <input type="checkbox" name="only_low" value="1" {% if only_low %}checked{% endif %} />
-          Solo sotto minimo
-        </label>
-        <button class="btn2" type="submit">Filtra</button>
-        {% if admin %}
-          <a class="pill" href="/logs" style="text-decoration:none;color:var(--text)">📜 Log</a>
-        {% endif %}
-      </div>
+      {% endif %}
+      <input name="q" value="{{ q or '' }}" placeholder="Cerca prodotto…" class="inv-search" />
+      <select name="cat" class="inv-filter-cat">
+        <option value="ALL" {% if cat=='ALL' %}selected{% endif %}>Categorie</option>
+        {% for c in cats %}
+          <option value="{{ c }}" {% if cat==c %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+      <label class="pill inv-low-filter">
+        <input type="checkbox" name="only_low" value="1" {% if only_low %}checked{% endif %} />
+        Sotto min.
+      </label>
+      <button class="btn2" type="submit">Filtra</button>
+      {% if admin %}
+        <a class="pill inv-log-link" href="/logs" style="text-decoration:none;color:var(--text)">📜 Log</a>
+      {% endif %}
     </form>
   </div>
 
-  <div class="card">
-    <div class="row" style="justify-content:space-between;align-items:flex-start;">
-      <div>
-        <h2 style="margin:0 0 6px 0;">Inventario</h2>
-        <div class="muted">
+  <div class="card inv-card">
+    <div class="inv-toolbar">
+      <div class="inv-heading">
+        <h2>Inventario</h2>
+        <span class="muted">
           {% if admin %}
-            Vista: <strong>{% if active_store=='ALL' %}Tutti gli inventari{% else %}{{ stores.get(active_store, active_store) }}{% endif %}</strong>
+            Vista: <strong>{% if active_store=='ALL' %}Tutti{% else %}{{ stores.get(active_store, active_store) }}{% endif %}</strong>
           {% else %}
-            Negozio: <strong>{{ user.store_label }}</strong>
+            <strong>{{ user.store_label }}</strong>
           {% endif %}
-          • Tocca il totale per aprire le posizioni. Usa 🧮 o Set per modificare le quantità.
-          {% if admin and not can_bulk_edit %}
-            • Per modificare, seleziona un inventario singolo.
-          {% endif %}
-        </div>
+          · vista compatta a posizione unica
+        </span>
       </div>
-      <details>
-        <summary class="pill" style="cursor:pointer;">➕ Aggiungi prodotto</summary>
-        <div style="margin-top:10px;">
-          {% if can_bulk_edit %}
-          <form method="post" action="/items/add">
-            <input type="hidden" name="next_url" value="" />
-            <div class="row">
-              <input name="category" placeholder="Categoria" required />
-              <input name="name" placeholder="Nome prodotto" required />
-              <input name="location" placeholder="Posizione (es. Frigo 1, Magazzino A…)" />
-              <input name="unit" placeholder="Unità (es. 1kg, 120g, 1L)" />
-              <input name="qty" placeholder="Q.tà" type="number" step="0.01" />
-              <input name="min_qty" placeholder="Minimo" type="number" step="0.01" />
-              <button class="btn" type="submit">Salva</button>
-            </div>
-          </form>
-          {% else %}
-            <div class="muted">Seleziona un inventario singolo per aggiungere prodotti.</div>
-          {% endif %}
-        </div>
-      </details>
 
-      {% if can_bulk_edit %}
-      <details>
-        <summary class="pill" style="cursor:pointer;">⬇️⬆️ Import / Export CSV</summary>
-        <div style="margin-top:10px;">
-          <div class="row" style="align-items:center;">
+      <div class="inv-toolbar-actions">
+        <details class="inv-add-details">
+          <summary class="pill">➕ Prodotto</summary>
+          <div class="inv-popover inv-add-popover">
+            {% if can_bulk_edit %}
+            <form method="post" action="/items/add" class="inv-add-form">
+              <input type="hidden" name="next_url" value="" />
+              <input type="hidden" name="location" value="MAGAZZINO" />
+              <input name="category" placeholder="Categoria" required />
+              <input name="name" placeholder="Prodotto" required />
+              <input name="unit" placeholder="Unità" />
+              <input name="qty" placeholder="Q.tà" type="number" step="0.01" inputmode="decimal" />
+              <input name="min_qty" placeholder="Min" type="number" step="0.01" inputmode="decimal" />
+              <button class="btn" type="submit">Salva</button>
+            </form>
+            {% else %}
+              <div class="muted">Seleziona un inventario singolo per aggiungere prodotti.</div>
+            {% endif %}
+          </div>
+        </details>
+
+        {% if can_bulk_edit %}
+        <details class="inv-add-details">
+          <summary class="pill">CSV</summary>
+          <div class="inv-popover inv-csv-popover">
             <a class="pill" href="/export.csv" style="text-decoration:none;color:var(--text);">⬇️ Scarica CSV</a>
-            <form method="post" action="/import.csv" enctype="multipart/form-data" class="row" style="gap:8px;align-items:center;">
+            <form method="post" action="/import.csv" enctype="multipart/form-data" class="inv-csv-form">
               <input type="file" name="file" accept=".csv,text/csv" required />
               <button class="btn2" type="submit">⬆️ Importa</button>
             </form>
+            <div class="muted">CSV: <strong>category,name,qty,min_qty</strong></div>
           </div>
-          <div class="muted" style="margin-top:8px;">Formato CSV: <strong>category,name,qty,min_qty</strong> (intestazione inclusa). L'import fa <em>aggiornamento/aggiunta</em> automatico.</div>
-        </div>
-      </details>
-      {% endif %}
+        </details>
+        {% endif %}
+      </div>
     </div>
 
     <div class="inv-list">
       {% for g in groups %}
-        {% set multi = (g.positions|length > 1) %}
-        <article class="inv-product-card {% if g.any_low %}is-low{% endif %}">
-          <div class="inv-mainline">
-            <div class="inv-titleblock">
-              <div class="inv-meta-row">
-                <span class="pill inv-cat">{{ g.category }}</span>
-                {% if g.unit %}<span class="pill inv-unit">{{ g.unit }}</span>{% endif %}
-                {% if g.any_low %}<span class="pill inv-low-pill">● Sotto minimo</span>{% endif %}
-              </div>
-              <strong class="inv-product-name">{{ g.name }}</strong>
+        {% set p = g.primary %}
+        {% if p %}
+        <article class="inv-row {% if g.any_low %}is-low{% endif %}">
+          <div class="inv-name-cell">
+            <div class="inv-line-1">
+              <span class="inv-cat">{{ g.category }}</span>
+              {% if g.unit %}<span class="inv-unit">{{ g.unit }}</span>{% endif %}
+              {% if g.any_low %}<span class="inv-low-dot">min</span>{% endif %}
             </div>
-
-            <div class="inv-total-wrap">
-              {% if multi %}
-                <details class="inv-locations">
-                  <summary class="inv-total-summary" title="Apri per vedere sala, magazzino e altre posizioni">
-                    <span class="inv-total-label">Totale</span>
-                    <strong>{{ render_total(g) }}</strong>
-                    <span class="inv-total-hint">tocca per vedere sala/magazzino</span>
-                  </summary>
-                  <div class="inv-position-list">
-                    {% for p in g.positions %}
-                      <div class="inv-position-row {% if p.low %}is-low-row{% endif %}">
-                        <div class="inv-position-info">
-                          <span class="inv-location">📍 {{ p.location }}</span>
-                          <span class="muted">Min {{ "%.2f"|format(p.min_qty) }}</span>
-                        </div>
-                        <div class="inv-position-qty {% if p.low %}low{% endif %}">{{ "%.2f"|format(p.qty) }}</div>
-                        {% if p.missing_qty and p.missing_qty > 0 %}
-                          <div class="pill inv-missing">⚠️ Mancante {{ "%.2f"|format(p.missing_qty) }}</div>
-                        {% endif %}
-                        {% if can_edit %}
-                          <div class="inv-actions-compact">
-                            <button class="mini btn2" type="button" title="Calcolatrice" onclick="openCalc({{ p.id }}, {{ p.qty }}, '{{ jsq(p.unit or '') }}', '{{ p.store }}')">🧮</button>
-                            <details class="inv-edit-details">
-                              <summary class="mini btn2">✏️</summary>
-                              <div class="inv-edit-panel">
-                                <form method="post" action="/items/{{ p.id }}/edit" class="row inv-edit-form">
-                                  <input type="hidden" name="next_url" value="" />
-                                  <input type="hidden" name="store" value="{{ p.store }}" />
-                                  <input class="mini" name="category" value="{{ p.category }}" placeholder="Categoria" required />
-                                  <input class="mini" name="name" value="{{ p.name }}" placeholder="Nome" required />
-                                  <input class="mini" name="location" value="{{ p.location }}" placeholder="Posizione" required />
-                                  <input class="mini" name="unit" value="{{ p.unit or '' }}" placeholder="Unità" />
-                                  <input class="mini" name="min_qty" type="number" step="0.01" value="{{ p.min_qty }}" placeholder="Min" />
-                                  <button class="mini btn" type="submit">Salva</button>
-                                </form>
-                              </div>
-                            </details>
-                            <form method="post" action="/items/{{ p.id }}/set" class="row inv-set-form">
-                              <input type="hidden" name="next_url" value="" />
-                              <input type="hidden" name="store" value="{{ p.store }}" />
-                              <input class="mini" name="qty" type="number" step="0.01" value="{{ p.qty }}" inputmode="decimal" aria-label="Quantità" />
-                              <button class="mini btn" type="submit">Set</button>
-                            </form>
-                            <form method="post" action="/items/{{ p.id }}/delete" onsubmit="return confirm('Eliminare {{ jsq(p.name) }} ({{ jsq(p.location) }})?')">
-                              <input type="hidden" name="next_url" value="" />
-                              <input type="hidden" name="store" value="{{ p.store }}" />
-                              <button class="mini inv-trash" type="submit" title="Elimina posizione">🗑</button>
-                            </form>
-                          </div>
-                        {% endif %}
-                      </div>
-                    {% endfor %}
-                  </div>
-                </details>
-              {% else %}
-                {% set p = g.positions[0] %}
-                <div class="inv-total-single">
-                  <span class="inv-total-label">Totale</span>
-                  <strong>{{ render_total(g) }}</strong>
-                  <span class="inv-total-hint">📍 {{ p.location }}</span>
-                </div>
-              {% endif %}
-            </div>
+            <strong>{{ g.name }}</strong>
           </div>
 
-          {% if not multi %}
-            {% set p = g.positions[0] %}
-            <div class="inv-single-line {% if p.low %}is-low-row{% endif %}">
-              <div class="inv-position-info">
-                <span class="inv-location">{{ "%.2f"|format(p.qty) }}</span>
-                <span class="muted">Min {{ "%.2f"|format(p.min_qty) }}</span>
-                {% if p.missing_qty and p.missing_qty > 0 %}<span class="pill inv-missing">⚠️ Mancante {{ "%.2f"|format(p.missing_qty) }}</span>{% endif %}
-              </div>
-              {% if can_edit %}
-                <div class="inv-actions-compact">
-                  <button class="mini btn2" type="button" title="Calcolatrice" onclick="openCalc({{ p.id }}, {{ p.qty }}, '{{ jsq(p.unit or '') }}', '{{ p.store }}')">🧮</button>
-                  <details class="inv-edit-details">
-                    <summary class="mini btn2">✏️</summary>
-                    <div class="inv-edit-panel">
-                      <form method="post" action="/items/{{ p.id }}/edit" class="row inv-edit-form">
-                        <input type="hidden" name="next_url" value="" />
-                        <input type="hidden" name="store" value="{{ p.store }}" />
-                        <input class="mini" name="category" value="{{ p.category }}" placeholder="Categoria" required />
-                        <input class="mini" name="name" value="{{ p.name }}" placeholder="Nome" required />
-                        <input class="mini" name="location" value="{{ p.location }}" placeholder="Posizione" required />
-                        <input class="mini" name="unit" value="{{ p.unit or '' }}" placeholder="Unità" />
-                        <input class="mini" name="min_qty" type="number" step="0.01" value="{{ p.min_qty }}" placeholder="Min" />
-                        <button class="mini btn" type="submit">Salva</button>
-                      </form>
-                    </div>
-                  </details>
-                  <form method="post" action="/items/{{ p.id }}/set" class="row inv-set-form">
-                    <input type="hidden" name="next_url" value="" />
-                    <input type="hidden" name="store" value="{{ p.store }}" />
-                    <input class="mini" name="qty" type="number" step="0.01" value="{{ p.qty }}" inputmode="decimal" aria-label="Quantità" />
-                    <button class="mini btn" type="submit">Set</button>
-                  </form>
-                  <form method="post" action="/items/{{ p.id }}/delete" onsubmit="return confirm('Eliminare {{ jsq(p.name) }} ({{ jsq(p.location) }})?')">
-                    <input type="hidden" name="next_url" value="" />
-                    <input type="hidden" name="store" value="{{ p.store }}" />
-                    <button class="mini inv-trash" type="submit" title="Elimina posizione">🗑</button>
-                  </form>
-                </div>
-              {% endif %}
-            </div>
-          {% endif %}
+          <div class="inv-total-cell">
+            <span>Totale</span>
+            <strong>{{ render_total(g) }}</strong>
+            <small>Min {{ "%.2f"|format(g.min_total or 0) }}</small>
+            {% if g.missing_total and g.missing_total > 0 %}<small class="inv-missing">⚠ {{ "%.2f"|format(g.missing_total) }}</small>{% endif %}
+          </div>
 
           {% if can_edit %}
-            <div class="inv-footer-actions">
-              {% if multi %}
-                <button class="mini btn2" type="button"
-                  onclick="openTransfer('{{ g.store }}','{{ g.area }}','{{ jsq(g.category) }}','{{ jsq(g.name) }}', [{% for pp in g.positions %}'{{ jsq(pp.location) }}'{% if not loop.last %},{% endif %}{% endfor %}])">
-                  ⇄ Sposta tra posizioni
-                </button>
-              {% endif %}
-              <button class="mini btn2" type="button"
-                onclick="openAddPos('{{ g.store }}','{{ g.area }}','{{ jsq(g.category) }}','{{ jsq(g.name) }}','{{ jsq(g.unit) }}')">
-                + Posizione
-              </button>
-            </div>
+          <div class="inv-action-cell">
+            <button class="mini inv-icon-btn" type="button" title="Calcolatrice" onclick="openCalc({{ p.id }}, {{ g.total }}, '{{ jsq(g.unit or '') }}', '{{ p.store }}')">🧮</button>
+
+            <form method="post" action="/items/{{ p.id }}/set" class="inv-set-form">
+              <input type="hidden" name="next_url" value="" />
+              <input type="hidden" name="store" value="{{ p.store }}" />
+              <input name="qty" type="number" step="0.01" value="{{ "%.2f"|format(g.total) }}" inputmode="decimal" aria-label="Quantità" />
+              <button class="mini btn" type="submit" title="Imposta quantità">✓</button>
+            </form>
+
+            <details class="inv-edit-details">
+              <summary class="mini inv-icon-btn" title="Modifica">✏️</summary>
+              <div class="inv-popover inv-edit-popover">
+                <form method="post" action="/items/{{ p.id }}/edit" class="inv-edit-form">
+                  <input type="hidden" name="next_url" value="" />
+                  <input type="hidden" name="store" value="{{ p.store }}" />
+                  <input type="hidden" name="location" value="MAGAZZINO" />
+                  <label>Categoria<input name="category" value="{{ p.category }}" required /></label>
+                  <label>Nome<input name="name" value="{{ p.name }}" required /></label>
+                  <label>Unità<input name="unit" value="{{ g.unit or '' }}" /></label>
+                  <label>Minimo<input name="min_qty" type="number" step="0.01" value="{{ "%.2f"|format(g.min_total or 0) }}" inputmode="decimal" /></label>
+                  <button class="btn" type="submit">Salva modifica</button>
+                </form>
+              </div>
+            </details>
+
+            <button class="mini inv-icon-btn" type="button" title="Ordina" onclick="openOrderQty({{ p.id }}, {{ g.total }})">🛒</button>
+
+            <form method="post" action="/items/{{ p.id }}/delete" onsubmit="return confirm('Eliminare {{ jsq(g.name) }}?')" class="inv-delete-form">
+              <input type="hidden" name="next_url" value="" />
+              <input type="hidden" name="store" value="{{ p.store }}" />
+              <button class="mini inv-trash" type="submit" title="Elimina">🗑</button>
+            </form>
+          </div>
           {% endif %}
         </article>
+        {% endif %}
       {% endfor %}
       {% if not groups %}
         <div class="muted">Nessun prodotto trovato.</div>
       {% endif %}
-    </div>
-  </div>
-
-  <!-- Modal: SCAMBIA tra posizioni -->
-  <div id="transferModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:120;align-items:center;justify-content:center;">
-    <div class="card" style="max-width:420px;width:92%;">
-      <div class="row" style="justify-content:space-between;align-items:center;">
-        <strong>⇄ Scambia / Sposta</strong>
-        <button class="mini" type="button" onclick="closeTransfer()">✖</button>
-      </div>
-      <div class="muted" id="transferInfo" style="margin-top:6px;"></div>
-      <form method="post" action="/items/transfer" style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
-        <input type="hidden" name="next_url" value="" />
-        <input type="hidden" name="store" id="tStore" value="" />
-        <input type="hidden" name="category" id="tCat" value="" />
-        <input type="hidden" name="name" id="tName" value="" />
-        <div class="row" style="gap:8px;align-items:flex-end;">
-          <div style="flex:1;">
-            <div class="muted" style="font-size:12px;">Da</div>
-            <select class="mini" name="from_location" id="tFrom" required></select>
-          </div>
-
-          <div style="display:flex;align-items:center;">
-            <button type="button" class="mini" onclick="swapLocations()" style="height:36px;">⇄</button>
-          </div>
-
-          <div style="flex:1;">
-            <div class="muted" style="font-size:12px;">A</div>
-            <select class="mini" name="to_location" id="tTo" required></select>
-          </div>
-          
-        </div>
-        <div>
-          <div class="muted" style="font-size:12px;">Quantità</div>
-          <input class="mini" name="qty" type="number" step="0.01" inputmode="decimal" required />
-        </div>
-        <div class="row" style="justify-content:flex-end;">
-          <button class="btn" type="submit">Conferma</button>
-        </div>
-      </form>
-      <div class="muted" style="font-size:12px;">Puoi anche invertire Da/A per spostare al contrario.</div>
-    </div>
-  </div>
-
-  <!-- Modal: Aggiungi nuova posizione -->
-  <div id="addPosModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:121;align-items:center;justify-content:center;">
-    <div class="card" style="max-width:420px;width:92%;">
-      <div class="row" style="justify-content:space-between;align-items:center;">
-        <strong>➕ Aggiungi posizione</strong>
-        <button class="mini" type="button" onclick="closeAddPos()">✖</button>
-      </div>
-      <div class="muted" id="addPosInfo" style="margin-top:6px;"></div>
-      <form method="post" action="/items/add" style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
-        <input type="hidden" name="next_url" value="" />
-        <input type="hidden" name="category" id="aCat" value="" />
-        <input type="hidden" name="name" id="aName" value="" />
-        <input type="hidden" name="unit" id="aUnit" value="" />
-        <div>
-          <div class="muted" style="font-size:12px;">Nuova posizione</div>
-          <input class="mini" name="location" id="aLoc" placeholder="Es. SALA, CUCINA, MAGAZZINO…" required />
-        </div>
-        <div class="row" style="gap:8px;">
-          <div style="flex:1;">
-            <div class="muted" style="font-size:12px;">Quantità iniziale</div>
-            <input class="mini" name="qty" type="number" step="0.01" inputmode="decimal" value="0" />
-          </div>
-          <div style="flex:1;">
-            <div class="muted" style="font-size:12px;">Minimo</div>
-            <input class="mini" name="min_qty" type="number" step="0.01" inputmode="decimal" value="0" />
-          </div>
-        </div>
-        <div class="row" style="justify-content:flex-end;">
-          <button class="btn" type="submit">Salva</button>
-        </div>
-      </form>
-      <div class="muted" style="font-size:12px;">Dopo averla creata, puoi usare “SCAMBIA” per spostare quantità tra posizioni.</div>
     </div>
   </div>
 
@@ -360,15 +195,15 @@
   </div>
 
   <!-- Modal: Quantità ordine -->
-  <div id="orderModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:101;align-items:center;justify-content:center;">
-    <div class="card" style="max-width:360px;width:92%;">
+  <div id="orderModal" class="inv-modal" style="display:none;">
+    <div class="card inv-order-card">
       <div class="row" style="justify-content:space-between;align-items:center;">
         <strong>🛒 Ordina</strong>
         <button class="mini" type="button" onclick="closeOrderQty()">✖</button>
       </div>
       <div class="muted" id="orderInfo" style="margin-top:6px;"></div>
       <div class="row" style="gap:8px;margin-top:10px;align-items:center;">
-        <input id="orderQty" class="mini" type="number" step="0.01" inputmode="decimal" placeholder="Quantità da ordinare" style="flex:1;min-width:0;" />
+        <input id="orderQty" class="mini" type="number" step="0.01" inputmode="decimal" placeholder="Quantità" style="flex:1;min-width:0;" />
         <button class="mini btn2" type="button" onclick="orderQtySet(1)">+1</button>
         <button class="mini btn2" type="button" onclick="orderQtySet(5)">+5</button>
       </div>
@@ -400,13 +235,6 @@
       return Number.isFinite(n) ? n : NaN;
     }
 
-    function updateTotalForItem(itemId, qty){
-      const el = document.getElementById('total-' + itemId);
-      if(!el) return;
-      el.dataset.qty = String(qty ?? '');
-      if(window._updateTotalEl) window._updateTotalEl(el);
-    }
-
     function openCalc(id, currentQty, unitStr, storeCode) {
       _calcItemId = id;
       _calcCurrent = Number(currentQty) || 0;
@@ -416,7 +244,7 @@
       _calcSubmitting = false;
       const input = document.getElementById('calcDelta');
       input.value = '';
-      document.getElementById('calcInfo').textContent = `Quantità attuale: ${_calcCurrent.toFixed(2)}. Scegli scarico o aggiunta.`;
+      document.getElementById('calcInfo').textContent = `Quantità attuale: ${_calcCurrent.toFixed(2)}`;
       document.getElementById('calcResult').textContent = '';
       calcRefreshSignButtons();
       const m = document.getElementById('calcModal');
@@ -504,9 +332,13 @@
       document.getElementById('orderQty').value = '';
       document.getElementById('orderInfo').textContent = `Ti sono rimasti: ${_orderCurrent.toFixed(2)}. Quanto vuoi ordinare?`;
       document.getElementById('orderModal').style.display = 'flex';
-      setTimeout(()=>document.getElementById('orderQty').focus(), 50);
+      document.documentElement.classList.add('modal-open');
+      setTimeout(()=>document.getElementById('orderQty').focus({preventScroll:true}), 50);
     }
-    function closeOrderQty() { document.getElementById('orderModal').style.display = 'none'; }
+    function closeOrderQty() {
+      document.getElementById('orderModal').style.display = 'none';
+      document.documentElement.classList.remove('modal-open');
+    }
     function orderQtySet(add) {
       const el = document.getElementById('orderQty');
       const cur = Number(el.value || 0) || 0;
@@ -521,126 +353,57 @@
       document.getElementById('orderForm').querySelector('input[name=next_url]').value = window.location.pathname + window.location.search;
       document.getElementById('orderForm').submit();
     }
-
-    // ===== SCAMBIA / AGGIUNGI POSIZIONE =====
-    function openTransfer(store, area, category, name, locations){
-      const next = window.location.pathname + window.location.search;
-      const modal = document.getElementById('transferModal');
-      document.getElementById('transferInfo').textContent = `${name} • ${category}`;
-      document.getElementById('tStore').value = store || '';
-      document.getElementById('tCat').value = category || '';
-      document.getElementById('tName').value = name || '';
-
-      const fromSel = document.getElementById('tFrom');
-      const toSel = document.getElementById('tTo');
-      fromSel.innerHTML = '';
-      toSel.innerHTML = '';
-      const locs = Array.isArray(locations) ? locations : [];
-      locs.forEach((l)=>{
-        const opt1 = document.createElement('option');
-        opt1.value = l;
-        opt1.textContent = l;
-        fromSel.appendChild(opt1);
-        const opt2 = document.createElement('option');
-        opt2.value = l;
-        opt2.textContent = l;
-        toSel.appendChild(opt2);
-      });
-
-      if(locs.length >= 1) fromSel.value = locs[0];
-      if(locs.length >= 2) toSel.value = locs[1];
-      else if(locs.length >= 1) toSel.value = locs[0];
-
-      modal.querySelector('input[name=next_url]').value = next;
-      modal.style.display = 'flex';
-      setTimeout(()=>{
-        const q = modal.querySelector('input[name=qty]');
-        if(q) q.focus();
-      }, 50);
-    }
-    function swapLocations(){
-      const fromSel = document.getElementById('tFrom');
-      const toSel = document.getElementById('tTo');
-      const tmp = fromSel.value;
-      fromSel.value = toSel.value;
-      toSel.value = tmp;
-    }
-
-    function closeTransfer(){
-      document.getElementById('transferModal').style.display = 'none';
-    }
-
-    function openAddPos(store, area, category, name, unit){
-      const next = window.location.pathname + window.location.search;
-      const modal = document.getElementById('addPosModal');
-      document.getElementById('addPosInfo').textContent = `${name} • ${category}`;
-      document.getElementById('aCat').value = category || '';
-      document.getElementById('aName').value = name || '';
-      document.getElementById('aUnit').value = unit || '';
-      modal.querySelector('input[name=next_url]').value = next;
-      document.getElementById('aLoc').value = '';
-      modal.style.display = 'flex';
-      setTimeout(()=>document.getElementById('aLoc').focus(), 50);
-    }
-    function closeAddPos(){
-      document.getElementById('addPosModal').style.display = 'none';
-    }
   </script>
 
-
 <style>
+  .inv-top-card{margin-bottom:8px!important;padding:8px!important;}
+  .inv-filter-form{display:grid;grid-template-columns:auto auto minmax(150px,1fr) auto auto auto auto;gap:6px;align-items:center;}
+  .inv-filter-form input,.inv-filter-form select{min-width:0!important;}
+  .inv-low-filter{display:flex;gap:6px;align-items:center;white-space:nowrap;}
+  .inv-card{padding:8px!important;}
+  .inv-toolbar{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;}
+  .inv-heading h2{margin:0;font-size:20px;line-height:1.1;}
+  .inv-toolbar-actions{display:flex;gap:6px;align-items:center;}
+  .inv-add-details{position:relative;}
+  .inv-add-details > summary,.inv-edit-details > summary{list-style:none;cursor:pointer;}
+  .inv-add-details > summary::-webkit-details-marker,.inv-edit-details > summary::-webkit-details-marker{display:none;}
+  .inv-popover{position:absolute;right:0;top:calc(100% + 6px);z-index:2600;border:1px solid var(--line-soft);border-radius:14px;background:rgba(7,12,24,.98);box-shadow:var(--shadow);padding:10px;}
+  .inv-add-popover{width:min(92vw,560px);}
+  .inv-csv-popover{width:min(92vw,360px);display:flex;flex-direction:column;gap:8px;}
+  .inv-add-form{display:grid;grid-template-columns:1fr 1.4fr .7fr .7fr .7fr auto;gap:6px;align-items:center;}
+  .inv-csv-form{display:flex;gap:6px;align-items:center;}
+  .inv-csv-form input{min-width:0;}
 
-    .card > form[action="/inventario"] .row{align-items:center;}
-    @media(max-width:768px){
-      .card > form[action="/inventario"] .row{display:grid!important;grid-template-columns:1fr 1fr;gap:6px!important;}
-      .card > form[action="/inventario"] input[name="q"]{grid-column:1 / -1;min-width:0!important;width:100%;box-sizing:border-box;}
-      .card > form[action="/inventario"] select,
-      .card > form[action="/inventario"] button,
-      .card > form[action="/inventario"] .pill{width:100%;box-sizing:border-box;text-align:center;}
-      .card > form[action="/inventario"] label.pill{justify-content:center;}
-    }
-  .inv-list{margin-top:12px;display:grid;grid-template-columns:1fr;gap:8px;}
-  .inv-product-card{padding:10px 12px !important;border-radius:16px;}
-  .inv-product-card.is-low{border-color:rgba(248,113,113,.42)!important;background:linear-gradient(180deg, rgba(127,29,29,.16), rgba(15,23,42,.94))!important;}
-  .inv-mainline{display:grid;grid-template-columns:minmax(0,1fr) minmax(230px,320px);gap:10px;align-items:center;}
-  .inv-titleblock{min-width:0;display:flex;flex-direction:column;gap:5px;}
-  .inv-meta-row{display:flex;gap:5px;align-items:center;flex-wrap:wrap;}
-  .inv-cat,.inv-unit{font-size:12px!important;padding:4px 8px!important;}
-  .inv-low-pill{font-size:12px!important;color:#fecaca!important;border-color:rgba(248,113,113,.45)!important;background:rgba(239,68,68,.14)!important;}
-  .inv-product-name{font-size:17px!important;line-height:1.15;white-space:normal;overflow-wrap:anywhere;}
-  .inv-total-wrap{min-width:0;}
-  .inv-total-summary,.inv-total-single{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;align-items:center;width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:14px;background:rgba(15,23,42,.74);cursor:pointer;list-style:none;}
-  .inv-total-summary::-webkit-details-marker{display:none;}
-  .inv-total-label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
-  .inv-total-summary strong,.inv-total-single strong{font-size:18px!important;text-align:right;white-space:normal;}
-  .inv-total-hint{grid-column:1 / -1;color:var(--muted);font-size:12px;text-align:right;}
-  .inv-locations[open] .inv-total-summary{border-color:rgba(96,165,250,.56)!important;background:rgba(37,99,235,.12)!important;}
-  .inv-position-list{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
-  .inv-position-row,.inv-single-line{display:grid;grid-template-columns:minmax(110px,1fr) auto minmax(230px,auto);gap:8px;align-items:center;padding:7px 8px;border:1px solid rgba(148,163,184,.13);border-radius:14px;background:rgba(2,6,23,.20);}
-  .inv-single-line{margin-top:8px;grid-template-columns:minmax(130px,1fr) minmax(230px,auto);}
-  .inv-position-info{min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-  .inv-location{font-weight:750;overflow-wrap:anywhere;}
-  .inv-position-qty{font-size:18px;font-weight:850;}
-  .inv-missing{font-size:12px!important;padding:4px 7px!important;color:#fecaca!important;border-color:rgba(248,113,113,.42)!important;background:rgba(239,68,68,.14)!important;}
-  .inv-actions-compact{display:flex;align-items:center;justify-content:flex-end;gap:5px;flex-wrap:nowrap;}
-  .inv-actions-compact form{margin:0;}
-  .inv-set-form{gap:4px!important;flex-wrap:nowrap!important;}
-  .inv-set-form input{width:76px!important;text-align:center;}
+  .inv-list{display:flex;flex-direction:column;gap:4px;}
+  .inv-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(78px,118px) auto;gap:6px;align-items:center;padding:5px 6px!important;border:1px solid rgba(148,163,184,.16);border-radius:12px;background:rgba(15,23,42,.62);min-height:46px;}
+  .inv-row.is-low{border-color:rgba(248,113,113,.42)!important;background:linear-gradient(180deg, rgba(127,29,29,.16), rgba(15,23,42,.82))!important;}
+  .inv-name-cell{min-width:0;display:flex;flex-direction:column;gap:2px;}
+  .inv-line-1{display:flex;gap:4px;align-items:center;min-width:0;}
+  .inv-cat,.inv-unit,.inv-low-dot{display:inline-flex;align-items:center;max-width:100%;border:1px solid rgba(148,163,184,.22);border-radius:999px;padding:1px 6px;font-size:10px;line-height:1.25;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .inv-low-dot{color:#fecaca;border-color:rgba(248,113,113,.42);background:rgba(239,68,68,.12);}
+  .inv-name-cell strong{font-size:14px;line-height:1.12;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .inv-total-cell{min-width:0;text-align:right;display:flex;flex-direction:column;gap:0;line-height:1.05;}
+  .inv-total-cell span{font-size:9px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);}
+  .inv-total-cell strong{font-size:13px;white-space:normal;line-height:1.05;}
+  .inv-total-cell small{font-size:10px;color:var(--muted);}
+  .inv-missing{color:#fecaca!important;}
+  .inv-action-cell{display:flex;align-items:center;justify-content:flex-end;gap:3px;min-width:0;}
+  .inv-action-cell form{margin:0;}
+  .inv-icon-btn,.inv-trash{width:29px;height:29px;display:inline-flex;align-items:center;justify-content:center;padding:0!important;border-radius:9px!important;}
   .inv-trash{background:rgba(239,68,68,.10)!important;border-color:rgba(248,113,113,.34)!important;}
+  .inv-set-form{display:flex;align-items:center;gap:3px;}
+  .inv-set-form input{width:54px!important;height:29px!important;text-align:center;padding:3px!important;font-size:12px!important;}
+  .inv-set-form button{width:29px;height:29px;display:inline-flex;align-items:center;justify-content:center;padding:0!important;border-radius:9px!important;}
   .inv-edit-details{position:relative;}
-  .inv-edit-details > summary{list-style:none;cursor:pointer;}
-  .inv-edit-details > summary::-webkit-details-marker{display:none;}
-  .inv-edit-details[open] .inv-edit-panel{position:absolute;right:0;top:calc(100% + 6px);z-index:2500;min-width:320px;max-width:min(92vw,620px);padding:10px;border:1px solid var(--line-soft);border-radius:14px;background:rgba(7,12,24,.98);box-shadow:var(--shadow);}
-  .inv-edit-form{gap:6px!important;}
-  .inv-edit-form input[name="category"]{width:120px;}
-  .inv-edit-form input[name="name"]{width:170px;}
-  .inv-edit-form input[name="location"]{width:140px;}
-  .inv-edit-form input[name="unit"]{width:90px;}
-  .inv-edit-form input[name="min_qty"]{width:80px;}
-  .inv-footer-actions{display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap;margin-top:8px;}
+  .inv-edit-popover{width:min(92vw,360px);}
+  .inv-edit-form{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .inv-edit-form label{font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:3px;}
+  .inv-edit-form input{width:100%;box-sizing:border-box;}
+  .inv-edit-form button{grid-column:1 / -1;}
+
   .inv-modal{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:5000;align-items:center;justify-content:center;padding:14px;box-sizing:border-box;}
   .modal-open{overflow:hidden;}
-  .inv-calc-card{max-width:380px;width:min(94vw,380px);padding:14px!important;}
+  .inv-calc-card,.inv-order-card{max-width:380px;width:min(94vw,380px);padding:14px!important;}
   .inv-calc-signs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;}
   .inv-calc-signs .is-active{border-color:rgba(96,165,250,.75)!important;background:rgba(37,99,235,.22)!important;}
   .inv-calc-input{width:100%;box-sizing:border-box;text-align:center;font-size:28px!important;font-weight:850;margin-top:10px;padding:12px!important;}
@@ -648,36 +411,45 @@
   .inv-calc-grid button{min-height:44px;font-size:17px!important;font-weight:800;touch-action:manipulation;}
   .inv-calc-grid .btn{grid-column:span 2;}
 
-  @media (max-width: 768px) {
-    .card { padding:8px !important; }
-    .row { gap:6px !important; }
-    .muted { font-size:12px !important; }
-    input, select { font-size:14px !important; padding:7px !important; }
-    .btn, .btn2, .mini { padding:6px 8px !important; font-size:13px !important; }
-    .inv-list{gap:7px;margin-top:10px;}
-    .inv-product-card{padding:8px!important;border-radius:14px;}
-    .inv-mainline{grid-template-columns:1fr;gap:7px;}
-    .inv-product-name{font-size:15px!important;}
-    .inv-meta-row{gap:4px;}
-    .inv-cat,.inv-unit,.inv-low-pill{font-size:11px!important;padding:3px 7px!important;}
-    .inv-total-summary,.inv-total-single{padding:7px 8px;border-radius:12px;}
-    .inv-total-summary strong,.inv-total-single strong{font-size:16px!important;}
-    .inv-total-hint{font-size:11px;text-align:left;}
-    .inv-position-row{grid-template-columns:1fr auto;gap:6px;padding:7px;border-radius:12px;}
-    .inv-position-row .inv-actions-compact{grid-column:1 / -1;justify-content:space-between;overflow-x:auto;padding-top:2px;}
-    .inv-single-line{grid-template-columns:1fr;gap:6px;padding:7px;border-radius:12px;}
-    .inv-single-line .inv-actions-compact{justify-content:space-between;overflow-x:auto;}
-    .inv-position-qty{font-size:16px;}
-    .inv-set-form input{width:64px!important;}
-    .inv-edit-details[open] .inv-edit-panel{position:fixed;left:8px;right:8px;top:76px;max-height:70vh;overflow:auto;min-width:0;}
-    .inv-edit-form{display:grid!important;grid-template-columns:1fr 1fr;}
-    .inv-edit-form input{width:100%!important;box-sizing:border-box;}
-    .inv-edit-form button{grid-column:1 / -1;}
-    .inv-footer-actions{justify-content:flex-start;margin-top:6px;}
-    .inv-calc-card{width:100%;max-width:420px;}
+  @media(max-width:768px){
+    .card{padding:7px!important;}
+    input,select{font-size:13px!important;padding:6px!important;}
+    .btn,.btn2,.mini,.pill{font-size:12px!important;padding:5px 7px!important;}
+    .muted{font-size:11px!important;}
+    .inv-filter-form{grid-template-columns:1fr 1fr 1fr;gap:4px;}
+    .inv-area-pill,.inv-search{grid-column:span 2;}
+    .inv-search{width:100%;box-sizing:border-box;}
+    .inv-log-link{display:none;}
+    .inv-toolbar{align-items:flex-start;margin-bottom:6px;}
+    .inv-heading h2{font-size:16px;}
+    .inv-heading .muted{display:block;max-width:190px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .inv-toolbar-actions{gap:4px;}
+    .inv-popover{position:fixed;left:8px;right:8px;top:74px;width:auto!important;max-height:72vh;overflow:auto;}
+    .inv-add-form{grid-template-columns:1fr 1fr;}
+    .inv-add-form input[name="name"]{grid-column:1 / -1;}
+    .inv-add-form button{grid-column:1 / -1;}
+    .inv-list{gap:3px;}
+    .inv-row{grid-template-columns:minmax(0,1fr) 74px auto;gap:4px;padding:4px!important;border-radius:10px;min-height:42px;}
+    .inv-cat,.inv-unit,.inv-low-dot{font-size:9px;padding:1px 5px;max-width:78px;}
+    .inv-name-cell strong{font-size:13px;}
+    .inv-total-cell strong{font-size:12px;}
+    .inv-total-cell small{font-size:9px;}
+    .inv-action-cell{gap:2px;}
+    .inv-icon-btn,.inv-trash,.inv-set-form button{width:26px;height:26px;border-radius:8px!important;font-size:12px!important;}
+    .inv-set-form{gap:2px;}
+    .inv-set-form input{width:43px!important;height:26px!important;font-size:11px!important;padding:2px!important;}
+    .inv-calc-card,.inv-order-card{width:100%;max-width:420px;}
     .inv-calc-grid button{min-height:48px;font-size:18px!important;}
   }
-</style>
 
+  @media(max-width:390px){
+    .inv-row{grid-template-columns:minmax(0,1fr) 66px auto;}
+    .inv-set-form input{width:38px!important;}
+    .inv-icon-btn,.inv-trash,.inv-set-form button{width:24px;height:24px;font-size:11px!important;}
+    .inv-total-cell strong{font-size:11px;}
+    .inv-name-cell strong{font-size:12px;}
+    .inv-cat,.inv-unit,.inv-low-dot{display:none;}
+  }
+</style>
 
 {% endblock %}
