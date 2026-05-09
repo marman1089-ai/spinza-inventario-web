@@ -30,6 +30,10 @@
 {%- endmacro %}
 
 {% macro jsq(v) -%}{{ (v or '')|replace('\\', '\\\\')|replace("'", "\\'") }}{%- endmacro %}
+{% macro color_value(v) -%}
+  {%- set c = (v or '#64748b')|string -%}
+  {%- if c.startswith('#') and c|length == 7 -%}{{ c }}{%- else -%}#64748b{%- endif -%}
+{%- endmacro %}
 
   <div class="card inv-top-card">
     <form method="get" action="/inventario" class="inv-filter-form">
@@ -77,14 +81,16 @@
       </div>
 
       <div class="inv-toolbar-actions">
-        <details class="inv-add-details">
+        <details class="inv-add-details inv-product-modal-details">
           <summary class="pill">➕ Prodotto</summary>
-          <div class="inv-popover inv-add-popover">
+          <div class="inv-popover inv-modal-popover inv-add-popover">
             {% if can_bulk_edit %}
+            <div class="inv-modal-head"><strong>➕ Aggiungi prodotto</strong><button class="mini" type="button" onclick="closeInventoryDetails(this)">✖</button></div>
             <form method="post" action="/items/add" class="inv-add-form">
               <input type="hidden" name="next_url" value="" />
               <input type="hidden" name="location" value="MAGAZZINO" />
               <input name="category" placeholder="Categoria" required />
+              <label class="inv-color-field" title="Colore del gruppo"><span>Colore gruppo</span><input name="category_color" type="color" value="#64748b" /></label>
               <input name="name" placeholder="Prodotto" required />
               <input name="unit" placeholder="Unità" />
               <input name="qty" placeholder="Q.tà" type="number" step="0.1" inputmode="decimal" />
@@ -117,7 +123,7 @@
       {% for g in groups %}
         {% set p = g.primary %}
         {% if p %}
-        <article class="inv-row {% if g.any_low %}is-low{% endif %}">
+        <article class="inv-row {% if g.any_low %}is-low{% endif %}" style="--cat-color: {{ color_value(g.category_color) }};">
           <div class="inv-name-cell">
             <div class="inv-line-1">
               <span class="inv-cat">{{ g.category }}</span>
@@ -147,12 +153,14 @@
 
             <details class="inv-edit-details">
               <summary class="mini inv-icon-btn" title="Modifica">✏️</summary>
-              <div class="inv-popover inv-edit-popover">
+              <div class="inv-popover inv-modal-popover inv-edit-popover">
+                <div class="inv-modal-head"><strong>✏️ Modifica prodotto</strong><button class="mini" type="button" onclick="closeInventoryDetails(this)">✖</button></div>
                 <form method="post" action="/items/{{ p.id }}/edit" class="inv-edit-form">
                   <input type="hidden" name="next_url" value="" />
                   <input type="hidden" name="store" value="{{ p.store }}" />
                   <input type="hidden" name="location" value="MAGAZZINO" />
                   <label>Categoria<input name="category" value="{{ p.category }}" required /></label>
+                  <label>Colore gruppo<input name="category_color" type="color" value="{{ color_value(g.category_color) }}" /></label>
                   <label>Nome<input name="name" value="{{ p.name }}" required /></label>
                   <label>Unità<input name="unit" value="{{ g.unit or '' }}" /></label>
                   <label>Minimo<input name="min_qty" type="number" step="0.1" value="{{ fmt_input(g.min_total or 0) }}" inputmode="decimal" /></label>
@@ -352,59 +360,57 @@
 
 
 
-    function positionInventoryEditPopover(details) {
-      if (!details || !details.open) return;
-      const pop = details.querySelector('.inv-edit-popover, .inv-edit-panel');
-      const trigger = details.querySelector('summary');
-      if (!pop || !trigger) return;
-
-      pop.style.position = 'fixed';
-      pop.style.right = 'auto';
-      pop.style.visibility = 'hidden';
-      pop.style.maxWidth = 'calc(100vw - 16px)';
-      pop.style.boxSizing = 'border-box';
-
-      requestAnimationFrame(function(){
-        const margin = 8;
-        const r = trigger.getBoundingClientRect();
-        const pr = pop.getBoundingClientRect();
-        const vw = window.innerWidth || document.documentElement.clientWidth;
-        const vh = window.innerHeight || document.documentElement.clientHeight;
-        let left = Math.min(vw - pr.width - margin, Math.max(margin, r.right - pr.width));
-        let top = r.bottom + 8;
-        if (top + pr.height > vh - margin) top = r.top - pr.height - 8;
-        if (top < margin) top = margin;
-        pop.style.left = left + 'px';
-        pop.style.top = top + 'px';
-        pop.style.visibility = 'visible';
-      });
+    function closeInventoryDetails(el) {
+      const details = el && el.closest ? el.closest('details') : null;
+      if (details) details.removeAttribute('open');
+      refreshInventoryModalLock();
     }
 
-    function refreshOpenInventoryEditPopovers() {
-      document.querySelectorAll('.inv-edit-details[open]').forEach(positionInventoryEditPopover);
+    function refreshInventoryModalLock() {
+      const hasDetailsModal = !!document.querySelector('.inv-product-modal-details[open], .inv-edit-details[open]');
+      const calcOpen = document.getElementById('calcModal') && document.getElementById('calcModal').style.display !== 'none';
+      const orderOpen = document.getElementById('orderModal') && document.getElementById('orderModal').style.display !== 'none';
+      document.documentElement.classList.toggle('modal-open', hasDetailsModal || calcOpen || orderOpen);
+    }
+
+    function closeOtherInventoryDetails(current) {
+      document.querySelectorAll('.inv-product-modal-details[open], .inv-edit-details[open]').forEach(function(other){
+        if (other !== current) other.removeAttribute('open');
+      });
     }
 
     document.addEventListener('DOMContentLoaded', function(){
-      document.querySelectorAll('.inv-edit-details').forEach(function(details){
+      document.querySelectorAll('.inv-product-modal-details, .inv-edit-details').forEach(function(details){
         details.addEventListener('toggle', function(){
           if (details.open) {
-            document.querySelectorAll('.inv-edit-details[open]').forEach(function(other){
-              if (other !== details) other.removeAttribute('open');
-            });
-            positionInventoryEditPopover(details);
-            const first = details.querySelector('.inv-edit-popover input, .inv-edit-panel input');
+            closeOtherInventoryDetails(details);
+            refreshInventoryModalLock();
+            const first = details.querySelector('.inv-modal-popover input:not([type="hidden"]), .inv-modal-popover select, .inv-modal-popover textarea');
             if (first) setTimeout(function(){ first.focus({preventScroll:true}); }, 80);
+          } else {
+            setTimeout(refreshInventoryModalLock, 0);
           }
         });
       });
+
       document.addEventListener('click', function(ev){
-        if (ev.target && ev.target.closest && ev.target.closest('.inv-edit-details')) return;
-        document.querySelectorAll('.inv-edit-details[open]').forEach(function(details){
+        const openDetails = document.querySelector('.inv-product-modal-details[open], .inv-edit-details[open]');
+        if (!openDetails) return;
+        if (ev.target && ev.target.closest && ev.target.closest('.inv-modal-popover')) return;
+        if (ev.target && ev.target.closest && ev.target.closest('summary')) return;
+        openDetails.removeAttribute('open');
+        refreshInventoryModalLock();
+      });
+
+      document.addEventListener('keydown', function(ev){
+        if (ev.key !== 'Escape') return;
+        document.querySelectorAll('.inv-product-modal-details[open], .inv-edit-details[open]').forEach(function(details){
           details.removeAttribute('open');
         });
+        closeCalc();
+        closeOrderQty();
+        refreshInventoryModalLock();
       });
-      window.addEventListener('resize', refreshOpenInventoryEditPopovers);
-      window.addEventListener('scroll', refreshOpenInventoryEditPopovers, true);
     });
 
     let _orderItemId = null;
@@ -448,21 +454,28 @@
   .inv-heading h2{margin:0;font-size:20px;line-height:1.1;}
   .inv-toolbar-actions{display:flex;gap:6px;align-items:center;}
   .inv-add-details{position:relative;}
+  .inv-product-modal-details[open]::before,.inv-edit-details[open]::before{content:"";position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:6400;}
   .inv-add-details > summary,.inv-edit-details > summary{list-style:none;cursor:pointer;}
   .inv-add-details > summary::-webkit-details-marker,.inv-edit-details > summary::-webkit-details-marker{display:none;}
   .inv-popover{position:absolute;right:0;top:calc(100% + 6px);z-index:2600;border:1px solid var(--line-soft);border-radius:14px;background:rgba(7,12,24,.98);box-shadow:var(--shadow);padding:10px;}
-  .inv-add-popover{width:min(92vw,560px);}
+  .inv-modal-popover{position:fixed!important;left:50%!important;top:50%!important;right:auto!important;transform:translate(-50%,-50%)!important;z-index:6500!important;max-width:calc(100vw - 18px);max-height:calc(100dvh - 18px);overflow:auto;box-sizing:border-box;}
+  .inv-modal-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid rgba(148,163,184,.18);}
+  .inv-modal-head .mini{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;padding:0!important;}
+  .inv-add-popover{width:min(94vw,620px);} 
   .inv-csv-popover{width:min(92vw,360px);display:flex;flex-direction:column;gap:8px;}
-  .inv-add-form{display:grid;grid-template-columns:1fr 1.4fr .7fr .7fr .7fr auto;gap:6px;align-items:center;}
+  .inv-add-form{display:grid;grid-template-columns:1fr .8fr 1.4fr .7fr .7fr .7fr auto;gap:6px;align-items:center;}
+  .inv-color-field{display:flex!important;align-items:center;gap:6px;font-size:10px;color:var(--muted);white-space:nowrap;}
+  .inv-color-field input[type="color"],.inv-edit-form input[type="color"]{height:34px!important;padding:2px!important;cursor:pointer;}
   .inv-csv-form{display:flex;gap:6px;align-items:center;}
   .inv-csv-form input{min-width:0;}
 
   .inv-list{display:flex;flex-direction:column;gap:4px;}
-  .inv-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(78px,118px) auto;gap:6px;align-items:center;padding:5px 6px!important;border:1px solid rgba(148,163,184,.16);border-radius:12px;background:rgba(15,23,42,.62);min-height:46px;}
+  .inv-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(78px,118px) auto;gap:6px;align-items:center;padding:5px 6px!important;border:1px solid color-mix(in srgb, var(--cat-color) 35%, rgba(148,163,184,.16));border-left:5px solid var(--cat-color);border-radius:12px;background:linear-gradient(90deg, color-mix(in srgb, var(--cat-color) 14%, rgba(15,23,42,.74)), rgba(15,23,42,.62) 48%);min-height:46px;}
   .inv-row.is-low{border-color:rgba(248,113,113,.42)!important;background:linear-gradient(180deg, rgba(127,29,29,.16), rgba(15,23,42,.82))!important;}
   .inv-name-cell{min-width:0;display:flex;flex-direction:column;gap:2px;}
   .inv-line-1{display:flex;gap:4px;align-items:center;min-width:0;}
   .inv-cat,.inv-unit,.inv-low-dot{display:inline-flex;align-items:center;max-width:100%;border:1px solid rgba(148,163,184,.22);border-radius:999px;padding:1px 6px;font-size:10px;line-height:1.25;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .inv-cat{border-color:color-mix(in srgb, var(--cat-color) 55%, rgba(148,163,184,.22));background:color-mix(in srgb, var(--cat-color) 18%, transparent);color:#e5e7eb;}
   .inv-low-dot{color:#fecaca;border-color:rgba(248,113,113,.42);background:rgba(239,68,68,.12);}
   .inv-name-cell strong{font-size:14px;line-height:1.12;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .inv-total-cell{min-width:0;text-align:right;display:flex;flex-direction:column;gap:0;line-height:1.05;}
@@ -478,7 +491,7 @@
   .inv-set-form input{width:54px!important;height:29px!important;text-align:center;padding:3px!important;font-size:12px!important;}
   .inv-set-form button{width:29px;height:29px;display:inline-flex;align-items:center;justify-content:center;padding:0!important;border-radius:9px!important;}
   .inv-edit-details{position:relative;}
-  .inv-edit-popover{width:min(92vw,360px);}
+  .inv-edit-popover{width:min(94vw,390px);} 
   .inv-edit-form{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
   .inv-edit-form label{font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:3px;}
   .inv-edit-form input{width:100%;box-sizing:border-box;}
@@ -507,10 +520,12 @@
     .inv-heading h2{font-size:16px;}
     .inv-heading .muted{display:block;max-width:190px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .inv-toolbar-actions{gap:4px;}
-    .inv-popover{position:fixed;left:8px;right:8px;top:74px;width:auto!important;max-height:72vh;overflow:auto;}
+    .inv-popover:not(.inv-modal-popover){position:fixed;left:8px;right:8px;top:74px;width:auto!important;max-height:72vh;overflow:auto;}
+    .inv-modal-popover{width:calc(100vw - 18px)!important;max-height:calc(100dvh - 18px)!important;}
     .inv-add-form{grid-template-columns:1fr 1fr;}
     .inv-add-form input[name="name"]{grid-column:1 / -1;}
     .inv-add-form button{grid-column:1 / -1;}
+    .inv-color-field{font-size:10px!important;}
     .inv-list{gap:3px;}
     .inv-row{grid-template-columns:minmax(0,1fr) 74px auto;gap:4px;padding:4px!important;border-radius:10px;min-height:42px;}
     .inv-cat,.inv-unit,.inv-low-dot{font-size:9px;padding:1px 5px;max-width:78px;}
@@ -532,19 +547,6 @@
     .inv-total-cell strong{font-size:11px;}
     .inv-name-cell strong{font-size:12px;}
     .inv-cat,.inv-unit,.inv-low-dot{display:none;}
-  }
-
-
-  /* Popup modifica: resta vicino alla riga e non va più in alto pagina */
-  .inv-edit-details[open] .inv-edit-popover,
-  .inv-edit-details[open] .inv-edit-panel{
-    position:fixed;
-    right:auto;
-    z-index:6500;
-    width:min(360px, calc(100vw - 16px));
-    max-height:calc(100dvh - 16px);
-    overflow:auto;
-    box-sizing:border-box;
   }
 
   /* Calcolatrice sempre intera nello schermo, sia desktop che telefono */
@@ -572,6 +574,21 @@
     .inv-calc-grid button{min-height:34px;font-size:15px!important;}
   }
 
+  /* Finestre inventario sempre centrate */
+  .inv-product-modal-details[open] .inv-add-popover,
+  .inv-edit-details[open] .inv-edit-popover{
+    position:fixed!important;
+    left:50%!important;
+    top:50%!important;
+    right:auto!important;
+    transform:translate(-50%,-50%)!important;
+    z-index:6500!important;
+    width:min(94vw, 620px);
+    max-height:calc(100dvh - 18px);
+    overflow:auto;
+  }
+  .inv-edit-details[open] .inv-edit-popover{width:min(94vw,390px);}
+  .inv-product-modal-details[open]::before,.inv-edit-details[open]::before{content:"";position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:6400;}
 </style>
 
 {% endblock %}

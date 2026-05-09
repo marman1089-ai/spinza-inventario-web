@@ -83,6 +83,21 @@ def _today_str() -> str:
     return date.today().isoformat()
 
 
+def _clean_category_color(value: str | None) -> str:
+    """Colore leggero del gruppo categoria, salvato come HEX sicuro."""
+    c = (value or "").strip()
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", c):
+        return c.lower()
+    return "#64748b"
+
+def _default_category_color(category: str) -> str:
+    palette = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#8b5cf6", "#ec4899", "#94a3b8"]
+    key = (category or "").strip().lower()
+    if not key:
+        return "#64748b"
+    return palette[sum(ord(ch) for ch in key) % len(palette)]
+
+
 # =========================
 # UNIT PARSING (display totals)
 # =========================
@@ -5227,11 +5242,18 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
         # ordina posizioni
         lst_sorted = sorted(lst, key=lambda x: (str(x.get("location") or "").lower(), int(x.get("id") or 0)))
         unit = ""
+        category_color = ""
         # prendi unit non vuota se esiste
         for rr in lst_sorted:
             if (rr.get("unit") or "").strip():
                 unit = (rr.get("unit") or "").strip()
                 break
+        for rr in lst_sorted:
+            if (rr.get("category_color") or "").strip():
+                category_color = _clean_category_color(rr.get("category_color"))
+                break
+        if not category_color:
+            category_color = _default_category_color(cat_k)
         positions = []
         total = 0.0
         min_total = 0.0
@@ -5251,6 +5273,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
                 "store": rr.get("store"),
                 "category": rr.get("category"),
                 "name": rr.get("name"),
+                "category_color": _clean_category_color(rr.get("category_color") or category_color),
                 "area": rr.get("area") or area_k,
                 "location": (rr.get("location") or "").strip() or "MAGAZZINO",
                 "unit": unit,
@@ -5268,6 +5291,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
             "area": area_k,
             "category": cat_k,
             "name": name_k,
+            "category_color": category_color,
             "unit": unit,
             "positions": positions,
             "primary": positions[0] if positions else None,
@@ -5306,7 +5330,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
 
 def _collapse_product_rows_for_single_position(cur, *, row, effective_store, new_qty=None,
                                                new_category=None, new_name=None,
-                                               new_unit=None, new_min_qty=None):
+                                               new_unit=None, new_min_qty=None, new_category_color=None):
     """Compatta eventuali vecchie posizioni multiple in una sola riga prodotto.
 
     La nuova UI non usa più posizioni: ogni prodotto resta unico con location MAGAZZINO.
@@ -5335,6 +5359,7 @@ def _collapse_product_rows_for_single_position(cur, *, row, effective_store, new
     final_name = (new_name if new_name is not None else old_name).strip()
     final_unit = (new_unit if new_unit is not None else (row.get("unit") or "")).strip()
     final_min = float(total_min if new_min_qty is None else new_min_qty)
+    final_category_color = _clean_category_color(new_category_color if new_category_color is not None else (row.get("category_color") or _default_category_color(final_category)))
 
     # Prima elimina le altre posizioni: evita conflitti con l'indice unico su MAGAZZINO.
     cur.execute(
@@ -5343,15 +5368,23 @@ def _collapse_product_rows_for_single_position(cur, *, row, effective_store, new
     )
     cur.execute(
         f"""UPDATE products
-            SET category={ph}, name={ph}, location={ph}, unit={ph}, qty={ph}, min_qty={ph}, missing_qty={ph}, updated_at={now}
+            SET category={ph}, name={ph}, location={ph}, unit={ph}, qty={ph}, min_qty={ph}, missing_qty={ph}, category_color={ph}, updated_at={now}
             WHERE id={ph} AND store={ph}""",
-        (final_category, final_name, "MAGAZZINO", final_unit, final_qty, final_min, total_missing, base_id, effective_store),
+        (final_category, final_name, "MAGAZZINO", final_unit, final_qty, final_min, total_missing, final_category_color, base_id, effective_store),
     )
+    try:
+        cur.execute(
+            f"UPDATE products SET category_color={ph} WHERE store={ph} AND area={ph} AND category={ph}",
+            (final_category_color, effective_store, area, final_category),
+        )
+    except Exception:
+        pass
     return {
         "qty": final_qty,
         "min_qty": final_min,
         "category": final_category,
         "name": final_name,
+        "category_color": final_category_color,
         "unit": final_unit,
     }
 
@@ -5558,6 +5591,7 @@ def item_add(
     name: str = Form(...),
     location: str = Form("MAGAZZINO"),
     unit: str = Form(""),
+    category_color: str = Form(""),
     qty: float = Form(0),
     min_qty: float = Form(0),
     next_url: str = Form("/inventario"),
@@ -5585,16 +5619,24 @@ def item_add(
     location = (location or "MAGAZZINO").strip()
 
     unit = (unit or "").strip()
+    category_color = _clean_category_color(category_color or _default_category_color(category))
 
     with connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            f"""INSERT INTO products(store, category, name, area, location, unit, qty, min_qty, updated_at)
-                VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
+            f"""INSERT INTO products(store, category, name, area, location, unit, qty, min_qty, category_color, updated_at)
+                VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
                 ON CONFLICT(store, area, category, name, location)
-                DO UPDATE SET unit=excluded.unit, qty=excluded.qty, min_qty=excluded.min_qty, updated_at={now}""",
-            (active_store, category, name, area, location, unit, float(qty), float(min_qty)),
+                DO UPDATE SET unit=excluded.unit, qty=excluded.qty, min_qty=excluded.min_qty, category_color=excluded.category_color, updated_at={now}""",
+            (active_store, category, name, area, location, unit, float(qty), float(min_qty), category_color),
         )
+        try:
+            cur.execute(
+                f"UPDATE products SET category_color={ph} WHERE store={ph} AND area={ph} AND category={ph}",
+                (category_color, active_store, area, category),
+            )
+        except Exception:
+            pass
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
             (active_store, user["username"], "ADD", category, name, float(qty)),
@@ -5611,6 +5653,7 @@ def item_edit(
     name: str = Form(...),
     location: str = Form("MAGAZZINO"),
     unit: str = Form(""),
+    category_color: str = Form(""),
     min_qty: float = Form(0),
     next_url: str = Form("/inventario"),
 ):
@@ -5633,6 +5676,7 @@ def item_edit(
     location = (location or "MAGAZZINO").strip()
 
     unit = (unit or "").strip()
+    category_color = _clean_category_color(category_color or _default_category_color(category))
 
     ph = _ph()
     now = _now()
@@ -5654,6 +5698,7 @@ def item_edit(
             new_name=name,
             new_unit=unit,
             new_min_qty=float(min_qty),
+            new_category_color=category_color,
         )
         cur.execute(
             f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",

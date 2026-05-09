@@ -167,6 +167,7 @@ def init_db():
             id {id_col},
             store TEXT NOT NULL,
             category TEXT NOT NULL,
+            category_color TEXT NOT NULL DEFAULT '#64748b',
             name TEXT NOT NULL,
             area TEXT NOT NULL DEFAULT 'prodotti',
             unit TEXT NOT NULL DEFAULT '',
@@ -192,6 +193,7 @@ def init_db():
         if using_postgres():
             # Postgres: evita errore (e transazione abortita) se la colonna esiste già
             _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS area TEXT NOT NULL DEFAULT 'prodotti'")
+            _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS category_color TEXT NOT NULL DEFAULT '#64748b'")
             _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT ''")
             _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT 'MAGAZZINO'")
             _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS missing_order_date TEXT")
@@ -201,6 +203,10 @@ def init_db():
             # SQLite: IF NOT EXISTS non è garantito su versioni vecchie, quindi try/except
             try:
                 cur.execute("ALTER TABLE products ADD COLUMN area TEXT NOT NULL DEFAULT 'prodotti'")
+            except Exception:
+                pass
+            try:
+                cur.execute("ALTER TABLE products ADD COLUMN category_color TEXT NOT NULL DEFAULT '#64748b'")
             except Exception:
                 pass
             try:
