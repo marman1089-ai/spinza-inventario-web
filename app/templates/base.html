@@ -330,11 +330,10 @@
     <button class="menu-btn" type="button" onclick="openMobileMenu()">☰ Menu</button>
 
     <nav class="top-menu" aria-label="Menu">
-      <a href="/workspace" class="pill" style="text-decoration:none;color:var(--text)">🏠 Home</a>
       <details class="nav-dd" id="navGestionale">
         <summary class="pill" style="text-decoration:none;color:var(--text)">📊 Gestionale</summary>
         <div class="nav-dd-panel">
-          <a href="/gestionale">📊 Home gestionale</a>
+          <a href="/gestionale">📊 Dashboard gestionale</a>
           {% if user.role == 'admin' %}
             <a href="/gestionale/incassi">💶 Incassi</a>
             <a href="/gestionale/uscite">💸 Uscite</a>
@@ -348,7 +347,6 @@
       <details class="nav-dd" id="navInventario">
         <summary class="pill" style="text-decoration:none;color:var(--text)">📦 Inventario</summary>
         <div class="nav-dd-panel">
-          <a href="/inventario-home">📦 Home inventario</a>
           <a href="/select-area?area=bibite">🥤 Bibite</a>
           <a href="/select-area?area=prodotti">🍽️ Prodotti</a>
           <a href="/ordini">🚚 Ordini da fare</a>
@@ -390,12 +388,10 @@
       <button class="btn2" type="button" onclick="closeMobileMenu()" style="border-radius:999px">Chiudi ✕</button>
     </div>
     <div class="menu-body">
-      <div class="section">Home</div>
-      <a href="/workspace" onclick="closeMobileMenu()">🏠 Home</a>
 
       <div class="section">Gestionale</div>
       <div class="sub">
-        <a href="/gestionale" onclick="closeMobileMenu()">📊 Home gestionale</a>
+        <a href="/gestionale" onclick="closeMobileMenu()">📊 Dashboard gestionale</a>
         {% if user.role == 'admin' %}
           <a href="/gestionale/incassi" onclick="closeMobileMenu()">💶 Incassi</a>
           <a href="/gestionale/uscite" onclick="closeMobileMenu()">💸 Uscite</a>
@@ -408,7 +404,6 @@
 
       <div class="section">Inventario</div>
       <div class="sub">
-        <a href="/inventario-home" onclick="closeMobileMenu()">📦 Home inventario</a>
         <a href="/select-area?area=bibite" onclick="closeMobileMenu()">🥤 Bibite</a>
         <a href="/select-area?area=prodotti" onclick="closeMobileMenu()">🍽️ Prodotti</a>
         <a href="/ordini" onclick="closeMobileMenu()">🚚 Ordini da fare</a>
@@ -551,9 +546,10 @@
 
     function formatNumber(n){
       if(!isFinite(n)) return '';
-      // massimo 3 decimali, senza zeri finali
-      const s = (Math.round(n * 1000) / 1000).toString();
-      return s;
+      // massimo 1 decimale, senza zeri finali, con virgola
+      const rounded = Math.round(n * 10) / 10;
+      if (Math.abs(rounded - Math.round(rounded)) < 0.0000001) return String(Math.round(rounded));
+      return rounded.toFixed(1).replace('.', ',');
     }
 
     function computeTotalText(qty, unitStr){

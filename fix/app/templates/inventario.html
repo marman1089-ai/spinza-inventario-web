@@ -1,13 +1,31 @@
 {% extends "base.html" %}
 {% set title = "Inventario" %}
 {% block content %}
+{% macro fmt_num(v) -%}
+  {%- set s = "%.1f"|format((v or 0)|float) -%}
+  {%- if s.endswith('.0') -%}
+    {{- s[:-2] -}}
+  {%- else -%}
+    {{- s|replace('.', ',') -}}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro fmt_input(v) -%}
+  {%- set s = "%.1f"|format((v or 0)|float) -%}
+  {%- if s.endswith('.0') -%}
+    {{- s[:-2] -}}
+  {%- else -%}
+    {{- s -}}
+  {%- endif -%}
+{%- endmacro %}
+
 {% macro render_total(g) -%}
   {%- if g.disp and g.disp.conv_val is not none and g.disp.show_pieces -%}
-    {{ "%.0f"|format(g.disp.pieces) }} pz · {{ "%.2f"|format(g.disp.conv_val) }} {{ g.disp.conv_unit }}
+    {{ fmt_num(g.disp.pieces) }} pz · {{ fmt_num(g.disp.conv_val) }} {{ g.disp.conv_unit }}
   {%- elif g.unit and g.disp and g.disp.conv_val is not none and (g.disp.conv_unit in ['kg','l']) -%}
-    {{ "%.2f"|format(g.disp.conv_val) }} {{ g.disp.conv_unit }}
+    {{ fmt_num(g.disp.conv_val) }} {{ g.disp.conv_unit }}
   {%- else -%}
-    {{ "%.2f"|format(g.total) }}{% if g.unit %} {{ g.unit }}{% endif %}
+    {{ fmt_num(g.total) }}{% if g.unit %} {{ g.unit }}{% endif %}
   {%- endif -%}
 {%- endmacro %}
 
@@ -79,8 +97,8 @@
               <input name="name" placeholder="Nome prodotto" required />
               <input name="location" placeholder="Posizione (es. Frigo 1, Magazzino A…)" />
               <input name="unit" placeholder="Unità (es. 1kg, 120g, 1L)" />
-              <input name="qty" placeholder="Q.tà" type="number" step="0.01" />
-              <input name="min_qty" placeholder="Minimo" type="number" step="0.01" />
+              <input name="qty" placeholder="Q.tà" type="number" step="0.1" />
+              <input name="min_qty" placeholder="Minimo" type="number" step="0.1" />
               <button class="btn" type="submit">Salva</button>
             </div>
           </form>
@@ -134,11 +152,11 @@
                       <div class="inv-position-row {% if p.low %}is-low-row{% endif %}">
                         <div class="inv-position-info">
                           <span class="inv-location">📍 {{ p.location }}</span>
-                          <span class="muted">Min {{ "%.2f"|format(p.min_qty) }}</span>
+                          <span class="muted">Min {{ fmt_num(p.min_qty) }}</span>
                         </div>
-                        <div class="inv-position-qty {% if p.low %}low{% endif %}">{{ "%.2f"|format(p.qty) }}</div>
+                        <div class="inv-position-qty {% if p.low %}low{% endif %}">{{ fmt_num(p.qty) }}</div>
                         {% if p.missing_qty and p.missing_qty > 0 %}
-                          <div class="pill inv-missing">⚠️ Mancante {{ "%.2f"|format(p.missing_qty) }}</div>
+                          <div class="pill inv-missing">⚠️ Mancante {{ fmt_num(p.missing_qty) }}</div>
                         {% endif %}
                         {% if can_edit %}
                           <div class="inv-actions-compact">
@@ -153,7 +171,7 @@
                                   <input class="mini" name="name" value="{{ p.name }}" placeholder="Nome" required />
                                   <input class="mini" name="location" value="{{ p.location }}" placeholder="Posizione" required />
                                   <input class="mini" name="unit" value="{{ p.unit or '' }}" placeholder="Unità" />
-                                  <input class="mini" name="min_qty" type="number" step="0.01" value="{{ p.min_qty }}" placeholder="Min" />
+                                  <input class="mini" name="min_qty" type="number" step="0.1" value="{{ p.min_qty }}" placeholder="Min" />
                                   <button class="mini btn" type="submit">Salva</button>
                                 </form>
                               </div>
@@ -161,7 +179,7 @@
                             <form method="post" action="/items/{{ p.id }}/set" class="row inv-set-form">
                               <input type="hidden" name="next_url" value="" />
                               <input type="hidden" name="store" value="{{ p.store }}" />
-                              <input class="mini" name="qty" type="number" step="0.01" value="{{ p.qty }}" inputmode="decimal" aria-label="Quantità" />
+                              <input class="mini" name="qty" type="number" step="0.1" value="{{ p.qty }}" inputmode="decimal" aria-label="Quantità" />
                               <button class="mini btn" type="submit">Set</button>
                             </form>
                             <form method="post" action="/items/{{ p.id }}/delete" onsubmit="return confirm('Eliminare {{ jsq(p.name) }} ({{ jsq(p.location) }})?')">
@@ -190,9 +208,9 @@
             {% set p = g.positions[0] %}
             <div class="inv-single-line {% if p.low %}is-low-row{% endif %}">
               <div class="inv-position-info">
-                <span class="inv-location">{{ "%.2f"|format(p.qty) }}</span>
-                <span class="muted">Min {{ "%.2f"|format(p.min_qty) }}</span>
-                {% if p.missing_qty and p.missing_qty > 0 %}<span class="pill inv-missing">⚠️ Mancante {{ "%.2f"|format(p.missing_qty) }}</span>{% endif %}
+                <span class="inv-location">{{ fmt_num(p.qty) }}</span>
+                <span class="muted">Min {{ fmt_num(p.min_qty) }}</span>
+                {% if p.missing_qty and p.missing_qty > 0 %}<span class="pill inv-missing">⚠️ Mancante {{ fmt_num(p.missing_qty) }}</span>{% endif %}
               </div>
               {% if can_edit %}
                 <div class="inv-actions-compact">
@@ -207,7 +225,7 @@
                         <input class="mini" name="name" value="{{ p.name }}" placeholder="Nome" required />
                         <input class="mini" name="location" value="{{ p.location }}" placeholder="Posizione" required />
                         <input class="mini" name="unit" value="{{ p.unit or '' }}" placeholder="Unità" />
-                        <input class="mini" name="min_qty" type="number" step="0.01" value="{{ p.min_qty }}" placeholder="Min" />
+                        <input class="mini" name="min_qty" type="number" step="0.1" value="{{ p.min_qty }}" placeholder="Min" />
                         <button class="mini btn" type="submit">Salva</button>
                       </form>
                     </div>
@@ -215,7 +233,7 @@
                   <form method="post" action="/items/{{ p.id }}/set" class="row inv-set-form">
                     <input type="hidden" name="next_url" value="" />
                     <input type="hidden" name="store" value="{{ p.store }}" />
-                    <input class="mini" name="qty" type="number" step="0.01" value="{{ p.qty }}" inputmode="decimal" aria-label="Quantità" />
+                    <input class="mini" name="qty" type="number" step="0.1" value="{{ p.qty }}" inputmode="decimal" aria-label="Quantità" />
                     <button class="mini btn" type="submit">Set</button>
                   </form>
                   <form method="post" action="/items/{{ p.id }}/delete" onsubmit="return confirm('Eliminare {{ jsq(p.name) }} ({{ jsq(p.location) }})?')">
@@ -281,7 +299,7 @@
         </div>
         <div>
           <div class="muted" style="font-size:12px;">Quantità</div>
-          <input class="mini" name="qty" type="number" step="0.01" inputmode="decimal" required />
+          <input class="mini" name="qty" type="number" step="0.1" inputmode="decimal" required />
         </div>
         <div class="row" style="justify-content:flex-end;">
           <button class="btn" type="submit">Conferma</button>
@@ -311,11 +329,11 @@
         <div class="row" style="gap:8px;">
           <div style="flex:1;">
             <div class="muted" style="font-size:12px;">Quantità iniziale</div>
-            <input class="mini" name="qty" type="number" step="0.01" inputmode="decimal" value="0" />
+            <input class="mini" name="qty" type="number" step="0.1" inputmode="decimal" value="0" />
           </div>
           <div style="flex:1;">
             <div class="muted" style="font-size:12px;">Minimo</div>
-            <input class="mini" name="min_qty" type="number" step="0.01" inputmode="decimal" value="0" />
+            <input class="mini" name="min_qty" type="number" step="0.1" inputmode="decimal" value="0" />
           </div>
         </div>
         <div class="row" style="justify-content:flex-end;">
@@ -368,7 +386,7 @@
       </div>
       <div class="muted" id="orderInfo" style="margin-top:6px;"></div>
       <div class="row" style="gap:8px;margin-top:10px;align-items:center;">
-        <input id="orderQty" class="mini" type="number" step="0.01" inputmode="decimal" placeholder="Quantità da ordinare" style="flex:1;min-width:0;" />
+        <input id="orderQty" class="mini" type="number" step="0.1" inputmode="decimal" placeholder="Quantità da ordinare" style="flex:1;min-width:0;" />
         <button class="mini btn2" type="button" onclick="orderQtySet(1)">+1</button>
         <button class="mini btn2" type="button" onclick="orderQtySet(5)">+5</button>
       </div>
@@ -400,6 +418,14 @@
       return Number.isFinite(n) ? n : NaN;
     }
 
+    function formatQty(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return '0';
+      const rounded = Math.round(n * 10) / 10;
+      if (Math.abs(rounded - Math.round(rounded)) < 0.0000001) return String(Math.round(rounded));
+      return rounded.toFixed(1).replace('.', ',');
+    }
+
     function updateTotalForItem(itemId, qty){
       const el = document.getElementById('total-' + itemId);
       if(!el) return;
@@ -416,7 +442,7 @@
       _calcSubmitting = false;
       const input = document.getElementById('calcDelta');
       input.value = '';
-      document.getElementById('calcInfo').textContent = `Quantità attuale: ${_calcCurrent.toFixed(2)}. Scegli scarico o aggiunta.`;
+      document.getElementById('calcInfo').textContent = `Quantità attuale: ${formatQty(_calcCurrent)}. Scegli scarico o aggiunta.`;
       document.getElementById('calcResult').textContent = '';
       calcRefreshSignButtons();
       const m = document.getElementById('calcModal');
@@ -471,7 +497,7 @@
       const res = Math.max(0, _calcCurrent + delta);
       const signChar = _calcSign === 1 ? '+' : '−';
       const totalText = (window.computeTotalText ? window.computeTotalText(res, _calcUnit) : '');
-      document.getElementById('calcResult').textContent = `Risultato: ${_calcCurrent.toFixed(2)} ${signChar} ${Math.abs(delta).toFixed(2)} = ${res.toFixed(2)}${totalText ? (' • ' + totalText) : ''}`;
+      document.getElementById('calcResult').textContent = `Risultato: ${formatQty(_calcCurrent)} ${signChar} ${formatQty(Math.abs(delta))} = ${formatQty(res)}${totalText ? (' • ' + totalText) : ''}`;
     }
     function calcSubmit() {
       if (_calcSubmitting) return;
@@ -496,25 +522,82 @@
       f.submit();
     }
 
+
+
+    function positionInventoryEditPopover(details) {
+      if (!details || !details.open) return;
+      const pop = details.querySelector('.inv-edit-popover, .inv-edit-panel');
+      const trigger = details.querySelector('summary');
+      if (!pop || !trigger) return;
+
+      pop.style.position = 'fixed';
+      pop.style.right = 'auto';
+      pop.style.visibility = 'hidden';
+      pop.style.maxWidth = 'calc(100vw - 16px)';
+      pop.style.boxSizing = 'border-box';
+
+      requestAnimationFrame(function(){
+        const margin = 8;
+        const r = trigger.getBoundingClientRect();
+        const pr = pop.getBoundingClientRect();
+        const vw = window.innerWidth || document.documentElement.clientWidth;
+        const vh = window.innerHeight || document.documentElement.clientHeight;
+        let left = Math.min(vw - pr.width - margin, Math.max(margin, r.right - pr.width));
+        let top = r.bottom + 8;
+        if (top + pr.height > vh - margin) top = r.top - pr.height - 8;
+        if (top < margin) top = margin;
+        pop.style.left = left + 'px';
+        pop.style.top = top + 'px';
+        pop.style.visibility = 'visible';
+      });
+    }
+
+    function refreshOpenInventoryEditPopovers() {
+      document.querySelectorAll('.inv-edit-details[open]').forEach(positionInventoryEditPopover);
+    }
+
+    document.addEventListener('DOMContentLoaded', function(){
+      document.querySelectorAll('.inv-edit-details').forEach(function(details){
+        details.addEventListener('toggle', function(){
+          if (details.open) {
+            document.querySelectorAll('.inv-edit-details[open]').forEach(function(other){
+              if (other !== details) other.removeAttribute('open');
+            });
+            positionInventoryEditPopover(details);
+            const first = details.querySelector('.inv-edit-popover input, .inv-edit-panel input');
+            if (first) setTimeout(function(){ first.focus({preventScroll:true}); }, 80);
+          }
+        });
+      });
+      document.addEventListener('click', function(ev){
+        if (ev.target && ev.target.closest && ev.target.closest('.inv-edit-details')) return;
+        document.querySelectorAll('.inv-edit-details[open]').forEach(function(details){
+          details.removeAttribute('open');
+        });
+      });
+      window.addEventListener('resize', refreshOpenInventoryEditPopovers);
+      window.addEventListener('scroll', refreshOpenInventoryEditPopovers, true);
+    });
+
     let _orderItemId = null;
     let _orderCurrent = 0;
     function openOrderQty(id, currentQty) {
       _orderItemId = id;
       _orderCurrent = Number(currentQty) || 0;
       document.getElementById('orderQty').value = '';
-      document.getElementById('orderInfo').textContent = `Ti sono rimasti: ${_orderCurrent.toFixed(2)}. Quanto vuoi ordinare?`;
+      document.getElementById('orderInfo').textContent = `Ti sono rimasti: ${formatQty(_orderCurrent)}. Quanto vuoi ordinare?`;
       document.getElementById('orderModal').style.display = 'flex';
       setTimeout(()=>document.getElementById('orderQty').focus(), 50);
     }
     function closeOrderQty() { document.getElementById('orderModal').style.display = 'none'; }
     function orderQtySet(add) {
       const el = document.getElementById('orderQty');
-      const cur = Number(el.value || 0) || 0;
+      const cur = parseCalcNumber(el.value || 0) || 0;
       el.value = String(cur + add);
     }
     function orderQtySubmit() {
       const el = document.getElementById('orderQty');
-      const n = Number(el.value);
+      const n = parseCalcNumber(el.value);
       if (!Number.isFinite(n) || n <= 0) { closeOrderQty(); return; }
       document.getElementById('orderItemId').value = String(_orderItemId);
       document.getElementById('orderItemQty').value = String(n);
@@ -677,6 +760,45 @@
     .inv-calc-card{width:100%;max-width:420px;}
     .inv-calc-grid button{min-height:48px;font-size:18px!important;}
   }
+
+
+  /* Popup modifica: resta vicino alla riga e non va più in alto pagina */
+  .inv-edit-details[open] .inv-edit-popover,
+  .inv-edit-details[open] .inv-edit-panel{
+    position:fixed;
+    right:auto;
+    z-index:6500;
+    width:min(360px, calc(100vw - 16px));
+    max-height:calc(100dvh - 16px);
+    overflow:auto;
+    box-sizing:border-box;
+  }
+
+  /* Calcolatrice sempre intera nello schermo, sia desktop che telefono */
+  .inv-modal{overflow:auto;align-items:center;justify-content:center;}
+  .inv-calc-card,.inv-order-card{
+    max-height:calc(100dvh - 28px);
+    overflow:auto;
+    box-sizing:border-box;
+  }
+  .inv-calc-card .row{flex-wrap:nowrap;}
+
+  @media(max-width:768px){
+    .inv-modal{padding:8px;}
+    .inv-calc-card,.inv-order-card{max-width:360px;width:100%;padding:10px!important;}
+    .inv-calc-signs{gap:6px;margin-top:8px;}
+    .inv-calc-input{font-size:22px!important;padding:8px!important;margin-top:8px;}
+    .inv-calc-grid{gap:6px;margin-top:8px;}
+    .inv-calc-grid button{min-height:38px;font-size:16px!important;}
+  }
+
+  @media(max-height:620px){
+    .inv-calc-card{padding:9px!important;}
+    .inv-calc-input{font-size:20px!important;padding:7px!important;margin-top:7px;}
+    .inv-calc-signs,.inv-calc-grid{gap:5px;margin-top:7px;}
+    .inv-calc-grid button{min-height:34px;font-size:15px!important;}
+  }
+
 </style>
 
 

@@ -1,13 +1,31 @@
 {% extends "base.html" %}
 {% set title = "Inventario" %}
 {% block content %}
+{% macro fmt_num(v) -%}
+  {%- set s = "%.1f"|format((v or 0)|float) -%}
+  {%- if s.endswith('.0') -%}
+    {{- s[:-2] -}}
+  {%- else -%}
+    {{- s|replace('.', ',') -}}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro fmt_input(v) -%}
+  {%- set s = "%.1f"|format((v or 0)|float) -%}
+  {%- if s.endswith('.0') -%}
+    {{- s[:-2] -}}
+  {%- else -%}
+    {{- s -}}
+  {%- endif -%}
+{%- endmacro %}
+
 {% macro render_total(g) -%}
   {%- if g.disp and g.disp.conv_val is not none and g.disp.show_pieces -%}
-    {{ "%.0f"|format(g.disp.pieces) }} pz · {{ "%.2f"|format(g.disp.conv_val) }} {{ g.disp.conv_unit }}
+    {{ fmt_num(g.disp.pieces) }} pz · {{ fmt_num(g.disp.conv_val) }} {{ g.disp.conv_unit }}
   {%- elif g.unit and g.disp and g.disp.conv_val is not none and (g.disp.conv_unit in ['kg','l']) -%}
-    {{ "%.2f"|format(g.disp.conv_val) }} {{ g.disp.conv_unit }}
+    {{ fmt_num(g.disp.conv_val) }} {{ g.disp.conv_unit }}
   {%- else -%}
-    {{ "%.2f"|format(g.total) }}{% if g.unit %} {{ g.unit }}{% endif %}
+    {{ fmt_num(g.total) }}{% if g.unit %} {{ g.unit }}{% endif %}
   {%- endif -%}
 {%- endmacro %}
 
@@ -69,8 +87,8 @@
               <input name="category" placeholder="Categoria" required />
               <input name="name" placeholder="Prodotto" required />
               <input name="unit" placeholder="Unità" />
-              <input name="qty" placeholder="Q.tà" type="number" step="0.01" inputmode="decimal" />
-              <input name="min_qty" placeholder="Min" type="number" step="0.01" inputmode="decimal" />
+              <input name="qty" placeholder="Q.tà" type="number" step="0.1" inputmode="decimal" />
+              <input name="min_qty" placeholder="Min" type="number" step="0.1" inputmode="decimal" />
               <button class="btn" type="submit">Salva</button>
             </form>
             {% else %}
@@ -112,8 +130,8 @@
           <div class="inv-total-cell">
             <span>Totale</span>
             <strong>{{ render_total(g) }}</strong>
-            <small>Min {{ "%.2f"|format(g.min_total or 0) }}</small>
-            {% if g.missing_total and g.missing_total > 0 %}<small class="inv-missing">⚠ {{ "%.2f"|format(g.missing_total) }}</small>{% endif %}
+            <small>Min {{ fmt_num(g.min_total or 0) }}</small>
+            {% if g.missing_total and g.missing_total > 0 %}<small class="inv-missing">⚠ {{ fmt_num(g.missing_total) }}</small>{% endif %}
           </div>
 
           {% if can_edit %}
@@ -123,7 +141,7 @@
             <form method="post" action="/items/{{ p.id }}/set" class="inv-set-form">
               <input type="hidden" name="next_url" value="" />
               <input type="hidden" name="store" value="{{ p.store }}" />
-              <input name="qty" type="number" step="0.01" value="{{ "%.2f"|format(g.total) }}" inputmode="decimal" aria-label="Quantità" />
+              <input name="qty" type="number" step="0.1" value="{{ fmt_input(g.total) }}" inputmode="decimal" aria-label="Quantità" />
               <button class="mini btn" type="submit" title="Imposta quantità">✓</button>
             </form>
 
@@ -137,7 +155,7 @@
                   <label>Categoria<input name="category" value="{{ p.category }}" required /></label>
                   <label>Nome<input name="name" value="{{ p.name }}" required /></label>
                   <label>Unità<input name="unit" value="{{ g.unit or '' }}" /></label>
-                  <label>Minimo<input name="min_qty" type="number" step="0.01" value="{{ "%.2f"|format(g.min_total or 0) }}" inputmode="decimal" /></label>
+                  <label>Minimo<input name="min_qty" type="number" step="0.1" value="{{ fmt_input(g.min_total or 0) }}" inputmode="decimal" /></label>
                   <button class="btn" type="submit">Salva modifica</button>
                 </form>
               </div>
@@ -203,7 +221,7 @@
       </div>
       <div class="muted" id="orderInfo" style="margin-top:6px;"></div>
       <div class="row" style="gap:8px;margin-top:10px;align-items:center;">
-        <input id="orderQty" class="mini" type="number" step="0.01" inputmode="decimal" placeholder="Quantità" style="flex:1;min-width:0;" />
+        <input id="orderQty" class="mini" type="number" step="0.1" inputmode="decimal" placeholder="Quantità" style="flex:1;min-width:0;" />
         <button class="mini btn2" type="button" onclick="orderQtySet(1)">+1</button>
         <button class="mini btn2" type="button" onclick="orderQtySet(5)">+5</button>
       </div>
@@ -235,6 +253,14 @@
       return Number.isFinite(n) ? n : NaN;
     }
 
+    function formatQty(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return '0';
+      const rounded = Math.round(n * 10) / 10;
+      if (Math.abs(rounded - Math.round(rounded)) < 0.0000001) return String(Math.round(rounded));
+      return rounded.toFixed(1).replace('.', ',');
+    }
+
     function openCalc(id, currentQty, unitStr, storeCode) {
       _calcItemId = id;
       _calcCurrent = Number(currentQty) || 0;
@@ -244,7 +270,7 @@
       _calcSubmitting = false;
       const input = document.getElementById('calcDelta');
       input.value = '';
-      document.getElementById('calcInfo').textContent = `Quantità attuale: ${_calcCurrent.toFixed(2)}`;
+      document.getElementById('calcInfo').textContent = `Quantità attuale: ${formatQty(_calcCurrent)}`;
       document.getElementById('calcResult').textContent = '';
       calcRefreshSignButtons();
       const m = document.getElementById('calcModal');
@@ -299,7 +325,7 @@
       const res = Math.max(0, _calcCurrent + delta);
       const signChar = _calcSign === 1 ? '+' : '−';
       const totalText = (window.computeTotalText ? window.computeTotalText(res, _calcUnit) : '');
-      document.getElementById('calcResult').textContent = `Risultato: ${_calcCurrent.toFixed(2)} ${signChar} ${Math.abs(delta).toFixed(2)} = ${res.toFixed(2)}${totalText ? (' • ' + totalText) : ''}`;
+      document.getElementById('calcResult').textContent = `Risultato: ${formatQty(_calcCurrent)} ${signChar} ${formatQty(Math.abs(delta))} = ${formatQty(res)}${totalText ? (' • ' + totalText) : ''}`;
     }
     function calcSubmit() {
       if (_calcSubmitting) return;
@@ -324,13 +350,70 @@
       f.submit();
     }
 
+
+
+    function positionInventoryEditPopover(details) {
+      if (!details || !details.open) return;
+      const pop = details.querySelector('.inv-edit-popover, .inv-edit-panel');
+      const trigger = details.querySelector('summary');
+      if (!pop || !trigger) return;
+
+      pop.style.position = 'fixed';
+      pop.style.right = 'auto';
+      pop.style.visibility = 'hidden';
+      pop.style.maxWidth = 'calc(100vw - 16px)';
+      pop.style.boxSizing = 'border-box';
+
+      requestAnimationFrame(function(){
+        const margin = 8;
+        const r = trigger.getBoundingClientRect();
+        const pr = pop.getBoundingClientRect();
+        const vw = window.innerWidth || document.documentElement.clientWidth;
+        const vh = window.innerHeight || document.documentElement.clientHeight;
+        let left = Math.min(vw - pr.width - margin, Math.max(margin, r.right - pr.width));
+        let top = r.bottom + 8;
+        if (top + pr.height > vh - margin) top = r.top - pr.height - 8;
+        if (top < margin) top = margin;
+        pop.style.left = left + 'px';
+        pop.style.top = top + 'px';
+        pop.style.visibility = 'visible';
+      });
+    }
+
+    function refreshOpenInventoryEditPopovers() {
+      document.querySelectorAll('.inv-edit-details[open]').forEach(positionInventoryEditPopover);
+    }
+
+    document.addEventListener('DOMContentLoaded', function(){
+      document.querySelectorAll('.inv-edit-details').forEach(function(details){
+        details.addEventListener('toggle', function(){
+          if (details.open) {
+            document.querySelectorAll('.inv-edit-details[open]').forEach(function(other){
+              if (other !== details) other.removeAttribute('open');
+            });
+            positionInventoryEditPopover(details);
+            const first = details.querySelector('.inv-edit-popover input, .inv-edit-panel input');
+            if (first) setTimeout(function(){ first.focus({preventScroll:true}); }, 80);
+          }
+        });
+      });
+      document.addEventListener('click', function(ev){
+        if (ev.target && ev.target.closest && ev.target.closest('.inv-edit-details')) return;
+        document.querySelectorAll('.inv-edit-details[open]').forEach(function(details){
+          details.removeAttribute('open');
+        });
+      });
+      window.addEventListener('resize', refreshOpenInventoryEditPopovers);
+      window.addEventListener('scroll', refreshOpenInventoryEditPopovers, true);
+    });
+
     let _orderItemId = null;
     let _orderCurrent = 0;
     function openOrderQty(id, currentQty) {
       _orderItemId = id;
       _orderCurrent = Number(currentQty) || 0;
       document.getElementById('orderQty').value = '';
-      document.getElementById('orderInfo').textContent = `Ti sono rimasti: ${_orderCurrent.toFixed(2)}. Quanto vuoi ordinare?`;
+      document.getElementById('orderInfo').textContent = `Ti sono rimasti: ${formatQty(_orderCurrent)}. Quanto vuoi ordinare?`;
       document.getElementById('orderModal').style.display = 'flex';
       document.documentElement.classList.add('modal-open');
       setTimeout(()=>document.getElementById('orderQty').focus({preventScroll:true}), 50);
@@ -341,12 +424,12 @@
     }
     function orderQtySet(add) {
       const el = document.getElementById('orderQty');
-      const cur = Number(el.value || 0) || 0;
+      const cur = parseCalcNumber(el.value || 0) || 0;
       el.value = String(cur + add);
     }
     function orderQtySubmit() {
       const el = document.getElementById('orderQty');
-      const n = Number(el.value);
+      const n = parseCalcNumber(el.value);
       if (!Number.isFinite(n) || n <= 0) { closeOrderQty(); return; }
       document.getElementById('orderItemId').value = String(_orderItemId);
       document.getElementById('orderItemQty').value = String(n);
@@ -450,6 +533,45 @@
     .inv-name-cell strong{font-size:12px;}
     .inv-cat,.inv-unit,.inv-low-dot{display:none;}
   }
+
+
+  /* Popup modifica: resta vicino alla riga e non va più in alto pagina */
+  .inv-edit-details[open] .inv-edit-popover,
+  .inv-edit-details[open] .inv-edit-panel{
+    position:fixed;
+    right:auto;
+    z-index:6500;
+    width:min(360px, calc(100vw - 16px));
+    max-height:calc(100dvh - 16px);
+    overflow:auto;
+    box-sizing:border-box;
+  }
+
+  /* Calcolatrice sempre intera nello schermo, sia desktop che telefono */
+  .inv-modal{overflow:auto;align-items:center;justify-content:center;}
+  .inv-calc-card,.inv-order-card{
+    max-height:calc(100dvh - 28px);
+    overflow:auto;
+    box-sizing:border-box;
+  }
+  .inv-calc-card .row{flex-wrap:nowrap;}
+
+  @media(max-width:768px){
+    .inv-modal{padding:8px;}
+    .inv-calc-card,.inv-order-card{max-width:360px;width:100%;padding:10px!important;}
+    .inv-calc-signs{gap:6px;margin-top:8px;}
+    .inv-calc-input{font-size:22px!important;padding:8px!important;margin-top:8px;}
+    .inv-calc-grid{gap:6px;margin-top:8px;}
+    .inv-calc-grid button{min-height:38px;font-size:16px!important;}
+  }
+
+  @media(max-height:620px){
+    .inv-calc-card{padding:9px!important;}
+    .inv-calc-input{font-size:20px!important;padding:7px!important;margin-top:7px;}
+    .inv-calc-signs,.inv-calc-grid{gap:5px;margin-top:7px;}
+    .inv-calc-grid button{min-height:34px;font-size:15px!important;}
+  }
+
 </style>
 
 {% endblock %}

@@ -373,7 +373,7 @@ def _startup():
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     if require_login(request):
-        return RedirectResponse("/workspace", status_code=HTTP_303_SEE_OTHER)
+        return RedirectResponse("/select-area", status_code=HTTP_303_SEE_OTHER)
     return RedirectResponse("/select-store", status_code=HTTP_303_SEE_OTHER)
 
 @app.get("/select-store", response_class=HTMLResponse)
@@ -434,7 +434,7 @@ def login_post(request: Request, username: str = Form(...), password: str = Form
 
     # reset area ad ogni login; l'inventario ora ha una home separata
     request.session.pop("selected_area", None)
-    return RedirectResponse("/workspace", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse("/select-area", status_code=HTTP_303_SEE_OTHER)
 
 
 ## NOTE:
@@ -1809,10 +1809,7 @@ def workspace_home(request: Request):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-
-    brand = _current_store_scope(request, user)
-    active_store = request.session.get("active_store") if is_admin(request) else None
-    return render("workspace.html", user=user, brand=brand, active_store=active_store)
+    return RedirectResponse("/select-area", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/gestionale", response_class=HTMLResponse)
@@ -2778,10 +2775,7 @@ def inventario_home(request: Request):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-
-    brand = _current_store_scope(request, user)
-    active_store = request.session.get("active_store") if is_admin(request) else None
-    return render("inventario_home.html", user=user, areas=AREAS, brand=brand, active_store=active_store)
+    return RedirectResponse("/select-area", status_code=HTTP_303_SEE_OTHER)
 
 @app.get("/register", response_class=HTMLResponse)
 def register_get(request: Request):

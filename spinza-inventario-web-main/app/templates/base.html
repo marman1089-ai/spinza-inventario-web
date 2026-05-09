@@ -591,9 +591,10 @@
 
     function formatNumber(n){
       if(!isFinite(n)) return '';
-      // massimo 3 decimali, senza zeri finali
-      const s = (Math.round(n * 1000) / 1000).toString();
-      return s;
+      // massimo 1 decimale, senza zeri finali, con virgola
+      const rounded = Math.round(n * 10) / 10;
+      if (Math.abs(rounded - Math.round(rounded)) < 0.0000001) return String(Math.round(rounded));
+      return rounded.toFixed(1).replace('.', ',');
     }
 
     function computeTotalText(qty, unitStr){
