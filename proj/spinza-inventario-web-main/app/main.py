@@ -2298,6 +2298,7 @@ def admin_add_user(
     username: str = Form(...),
     password: str = Form(...),
     confirm_password: str = Form(...),
+    role: str = Form("staff"),
 ):
     user = require_login(request)
     if not user:
@@ -2305,7 +2306,11 @@ def admin_add_user(
     if not is_admin(request):
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
-    username = username.strip()
+    username = (username or "").strip()
+    role = (role or "staff").strip().lower()
+    if role not in ("staff", "admin"):
+        role = "staff"
+
     if not username:
         return RedirectResponse("/admin", status_code=HTTP_303_SEE_OTHER)
     if password != confirm_password:
@@ -2313,8 +2318,12 @@ def admin_add_user(
     if len(password) < 4:
         return _admin_users_render_error(request, user, "Password troppo corta.")
 
+    # Gli account staff sono legati all'inventario selezionato.
+    # Gli account admin invece entrano dal login admin e hanno accesso completo.
     store = (request.session.get("admin_store") or "spinza")
     if store not in STORES:
+        store = "spinza"
+    if role == "admin":
         store = "spinza"
 
     salt, h = make_password(password)
@@ -2322,21 +2331,33 @@ def admin_add_user(
 
     with connect() as conn:
         cur = conn.cursor()
-        exists = cur.execute(
-            f"SELECT 1 FROM users WHERE username={ph} AND store={ph}",
-            (username, store),
-        ).fetchone()
-        if exists:
-            users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
-            return _render_admin(request, user=user, users=users, error="Username già esistente.")
+
+        if role == "admin":
+            exists = cur.execute(
+                f"SELECT 1 FROM users WHERE username={ph}",
+                (username,),
+            ).fetchone()
+            if exists:
+                users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
+                return _render_admin(request, user=user, users=users, error="Username già esistente. Per gli admin usa uno username unico.")
+        else:
+            exists = cur.execute(
+                f"SELECT 1 FROM users WHERE username={ph} AND store={ph}",
+                (username, store),
+            ).fetchone()
+            if exists:
+                users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
+                return _render_admin(request, user=user, users=users, error="Username già esistente in questo inventario.")
 
         cur.execute(
-            f"INSERT INTO users(store, username, role, pw_salt, pw_hash, legacy_sha256) VALUES({ph},{ph},'staff',{ph},{ph},NULL)",
-            (store, username, salt, h),
+            f"INSERT INTO users(store, username, role, pw_salt, pw_hash, legacy_sha256) VALUES({ph},{ph},{ph},{ph},{ph},NULL)",
+            (store, username, role, salt, h),
         )
         users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
 
-    return _render_admin(request, user=user, users=users, msg=f"Utente '{username}' creato per {STORES.get(store, store)}.")
+    if role == "admin":
+        return _render_admin(request, user=user, users=users, msg=f"Account admin '{username}' creato. Può entrare da /admin-login.")
+    return _render_admin(request, user=user, users=users, msg=f"Dipendente '{username}' creato per {STORES.get(store, store)}.")
 
 @app.post("/admin/users/{user_id}/username", response_class=HTMLResponse)
 def admin_change_username(
