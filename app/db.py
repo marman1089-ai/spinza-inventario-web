@@ -351,6 +351,20 @@ def init_db():
         )
         """)
 
+        # NEGOZI ARCHIVIATI: negozi storici non più attivi, usati solo per contabilità storica
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS archived_stores (
+            id {id_col},
+            store_key TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            opened_at {date_col},
+            closed_at {date_col},
+            notes TEXT NOT NULL DEFAULT '',
+            created_by TEXT NOT NULL DEFAULT 'system',
+            ts {ts_default}
+        )
+        """)
+
         _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS sales_report_periods (
             id {id_col},

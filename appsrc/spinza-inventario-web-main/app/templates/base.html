@@ -130,69 +130,6 @@
 
   </style>
 
-<style>
-
-
-
-
-<style>
-
-
-
-
-<style>
-
-/* ===== MOBILE STRUCTURAL COMPACT MODE ONLY ===== */
-@media (max-width: 768px) {
-
-  .card {
-    padding:2px !important;
-    margin-bottom:3px !important;
-  }
-
-  .card strong {
-    font-size:12px !important;
-  }
-
-  .card > div {
-    margin-bottom:1px !important;
-  }
-
-  .btn, .btn2 {
-    padding:2px 6px !important;
-    font-size:11px !important;
-    height:22px !important;
-  }
-
-  .mini {
-    padding:2px 4px !important;
-    font-size:10px !important;
-    height:20px !important;
-  }
-
-  input, select {
-    padding:2px !important;
-    font-size:11px !important;
-    height:22px !important;
-  }
-
-  .muted {
-    font-size:10px !important;
-    margin:1px 0 !important;
-  }
-
-  .row {
-    gap:2px !important;
-  }
-
-  .card .card {
-    padding:2px !important;
-    margin-bottom:2px !important;
-  }
-
-}
-
-</style>
 
 
 <style>
@@ -358,8 +295,17 @@
     .card, [class*="card"], [class*="box"], [class*="panel"]{border-radius:18px !important}
   }
 </style>
+
+  <link rel="preload" href="/static/css/pro-ui-refresh.css?v=20260501b" as="style">
+  <link rel="stylesheet" href="/static/css/pro-ui-refresh.css?v=20260501b">
 </head>
-<body>
+<body class="brand-{{ _brand or 'ALL' }}">
+<div id="pageProgress" aria-hidden="true"></div>
+<div id="pageLoaderToast" aria-live="polite" aria-atomic="true">
+  <span class="loader-dot" aria-hidden="true"></span>
+  <span id="pageLoaderText">Caricamento...</span>
+</div>
+
 <header>
   <div class="brand-block">
     <div class="brand-line">
@@ -392,6 +338,8 @@
             <a href="/gestionale/incassi">💶 Incassi</a>
             <a href="/gestionale/uscite">💸 Uscite</a>
             <a href="/gestionale/report-vendite">📈 Report vendite</a>
+            <a href="/gestionale/archiviati">🗂️ Negozi archiviati</a>
+            <a href="/gestionale/panoramica-totale">🌍 Panoramica totale</a>
           {% endif %}
           <a href="/fatture">🧾 Fatture</a>
           <a href="/chiusure">📸 Chiusure</a>
@@ -450,6 +398,8 @@
           <a href="/gestionale/incassi" onclick="closeMobileMenu()">💶 Incassi</a>
           <a href="/gestionale/uscite" onclick="closeMobileMenu()">💸 Uscite</a>
           <a href="/gestionale/report-vendite" onclick="closeMobileMenu()">📈 Report vendite</a>
+          <a href="/gestionale/archiviati" onclick="closeMobileMenu()">🗂️ Negozi archiviati</a>
+          <a href="/gestionale/panoramica-totale" onclick="closeMobileMenu()">🌍 Panoramica totale</a>
         {% endif %}
         <a href="/fatture" onclick="closeMobileMenu()">🧾 Fatture</a>
         <a href="/chiusure" onclick="closeMobileMenu()">📸 Chiusure</a>
@@ -634,6 +584,8 @@
     });
   })();
 </script>
+
+<script defer src="/static/js/pro-ui-refresh.js?v=20260501b"></script>
 </body>
 
 </html>

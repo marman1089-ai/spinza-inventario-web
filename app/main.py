@@ -507,7 +507,16 @@ def _fetch_one_int(cur, sql: str, params: tuple):
 
 
 def _store_label(store: str) -> str:
-    return STORES.get(store, store)
+    key = str(store or '').strip()
+    if key in STORES:
+        return STORES.get(key, key)
+    try:
+        archived = _archived_stores_map()
+        if key in archived:
+            return archived[key].get('name') or key
+    except Exception:
+        pass
+    return key
 
 
 def _dict_rows(cur, sql: str, params: tuple = ()):
@@ -540,6 +549,64 @@ def _cash_scope_where(store: str):
     if store == 'ALL':
         return '1=1', ()
     return f'store={ph}', (store,)
+
+
+ARCHIVED_STORE_PREFIX = 'archived_'
+
+
+def _archived_store_slug(name: str) -> str:
+    base = _normalize_signature(name or 'negozio').replace(' ', '_')
+    base = re.sub(r'[^a-z0-9_]+', '', base).strip('_') or 'negozio'
+    base = base[:36]
+    suffix = datetime.now().strftime('%Y%m%d%H%M%S%f')
+    return f'{ARCHIVED_STORE_PREFIX}{base}_{suffix}'
+
+
+def _archived_stores_map(cur=None) -> dict:
+    """Mappa store_key -> info negozio archiviato. Non lancia mai errori se la tabella non esiste ancora."""
+    def _load(cursor):
+        rows = _dict_rows(cursor, "SELECT id, store_key, name, opened_at, closed_at, notes FROM archived_stores ORDER BY name ASC", ())
+        out = {}
+        for r in rows:
+            key = str(r.get('store_key') or '').strip()
+            if key:
+                out[key] = r
+        return out
+    if cur is not None:
+        return _load(cur)
+    try:
+        with connect() as conn:
+            return _load(conn.cursor())
+    except Exception:
+        return {}
+
+
+def _all_management_stores(cur=None, include_archived: bool = True) -> dict:
+    stores = dict(STORES)
+    if include_archived:
+        for key, info in _archived_stores_map(cur).items():
+            stores[key] = info.get('name') or key
+    return stores
+
+
+def _is_known_management_store(store_key: str, cur=None, include_archived: bool = True) -> bool:
+    key = str(store_key or '').strip()
+    if key in STORES:
+        return True
+    if include_archived:
+        return key in _archived_stores_map(cur)
+    return False
+
+
+def _is_archived_store_key(store_key: str, cur=None) -> bool:
+    key = str(store_key or '').strip()
+    return key.startswith(ARCHIVED_STORE_PREFIX) and key in _archived_stores_map(cur)
+
+
+def _store_kind(store_key: str, archived_map: dict | None = None) -> str:
+    key = str(store_key or '').strip()
+    archived_map = archived_map if archived_map is not None else _archived_stores_map()
+    return 'archiviato' if key in archived_map or key.startswith(ARCHIVED_STORE_PREFIX) else 'attivo'
 
 
 def _weekly_dates(days: int = 7):
@@ -1201,8 +1268,8 @@ def _expense_category_options():
 def _import_expense_override_key(block, expense_idx, fallback_store: str = 'spinza'):
     """Chiave stabile per collegare una spesa del preview alla categoria scelta prima del salvataggio."""
     store_key = str((block or {}).get('store') or fallback_store or 'spinza').strip()
-    if store_key not in STORES:
-        store_key = fallback_store if fallback_store in STORES else 'spinza'
+    if not _is_known_management_store(store_key):
+        store_key = fallback_store if _is_known_management_store(fallback_store) else 'spinza'
     flow_date = str((block or {}).get('date') or '').strip()
     try:
         idx = int(expense_idx or 0)
@@ -1224,8 +1291,8 @@ def _build_import_preview(blocks, raw_text: str, fallback_store: str, include_ex
     for block in blocks or []:
         ds = str(block.get('date') or '').strip()
         store_key = str(block.get('store') or fallback_store or 'spinza').strip()
-        if store_key not in STORES:
-            store_key = fallback_store if fallback_store in STORES else 'spinza'
+        if not _is_known_management_store(store_key):
+            store_key = fallback_store if _is_known_management_store(fallback_store) else 'spinza'
         incomes = block.get('incomes') or []
         expenses = block.get('expenses') or []
         inc_total = round(sum(float(x.get('amount') or 0) for x in incomes), 2)
@@ -1260,7 +1327,7 @@ def _build_import_preview(blocks, raw_text: str, fallback_store: str, include_ex
                 'key': _import_expense_override_key(block, exp_idx, fallback_store),
                 'date': ds,
                 'store': store_key,
-                'store_label': STORES.get(store_key, store_key),
+                'store_label': _store_label(store_key),
                 'name': supplier[:80],
                 'raw': raw_line[:180],
                 'amount': amount,
@@ -1277,7 +1344,7 @@ def _build_import_preview(blocks, raw_text: str, fallback_store: str, include_ex
         preview_rows.append({
             'date': ds,
             'store': store_key,
-            'store_label': STORES.get(store_key, store_key),
+            'store_label': _store_label(store_key),
             'income_total': inc_total,
             'expense_total': exp_total,
             'income_count': len(incomes),
@@ -1295,7 +1362,7 @@ def _build_import_preview(blocks, raw_text: str, fallback_store: str, include_ex
             missing = [f'{mk}-{day:02d}' for day in range(1, last_day + 1) if day not in days_present]
             missing_groups.append({
                 'store': store_key,
-                'store_label': STORES.get(store_key, store_key),
+                'store_label': _store_label(store_key),
                 'month_key': mk,
                 'month_label': _month_label(mk),
                 'present_count': len(days_present),
@@ -4105,6 +4172,455 @@ def _cash_entries_page_context(request: Request, user: dict, flow_date: str = ''
         import_preview=import_preview,
     )
 
+
+
+
+def _archived_store_detail_context(request: Request, user: dict, store_key: str, imported_entries: int = 0, imported_expenses: int = 0, import_error: str = '', import_preview=None):
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        archived_map = _archived_stores_map(cur)
+        store_info = archived_map.get(store_key)
+        if not store_info:
+            return None
+        entries = _dict_rows(cur, f"SELECT id, flow_date, payment_method, amount, notes, created_by, ts FROM cash_entries WHERE store={ph} ORDER BY flow_date DESC, id DESC", (store_key,))
+        expenses = _dict_rows(cur, f"SELECT id, flow_date, category, supplier, payment_method, amount, notes, created_by, ts FROM cash_expenses WHERE store={ph} ORDER BY flow_date DESC, id DESC", (store_key,))
+        available_payment_methods = _load_cash_payment_methods(cur)
+        categories = _expense_category_options()
+        by_year = {}
+        for row in entries:
+            year = str(row.get('flow_date') or '')[:4] or 'Senza anno'
+            item = by_year.setdefault(year, {'year': year, 'income': 0.0, 'expense': 0.0, 'net': 0.0, 'entries_count': 0, 'expenses_count': 0})
+            item['income'] += float(row.get('amount') or 0)
+            item['entries_count'] += 1
+        for row in expenses:
+            year = str(row.get('flow_date') or '')[:4] or 'Senza anno'
+            item = by_year.setdefault(year, {'year': year, 'income': 0.0, 'expense': 0.0, 'net': 0.0, 'entries_count': 0, 'expenses_count': 0})
+            item['expense'] += float(row.get('amount') or 0)
+            item['expenses_count'] += 1
+        for item in by_year.values():
+            item['net'] = item['income'] - item['expense']
+        totals = {
+            'income': round(sum(float(x.get('amount') or 0) for x in entries), 2),
+            'expense': round(sum(float(x.get('amount') or 0) for x in expenses), 2),
+            'entries_count': len(entries),
+            'expenses_count': len(expenses),
+        }
+        totals['net'] = round(totals['income'] - totals['expense'], 2)
+    return dict(
+        user=user,
+        active_store=request.session.get('active_store') if is_admin(request) else None,
+        store_key=store_key,
+        store=store_info,
+        entries=entries,
+        expenses=expenses,
+        totals=totals,
+        by_year=sorted(by_year.values(), key=lambda x: x.get('year') or '', reverse=True),
+        available_payment_methods=available_payment_methods,
+        categories=categories,
+        today=date.today().isoformat(),
+        imported_entries=imported_entries,
+        imported_expenses=imported_expenses,
+        import_error=import_error,
+        import_preview=import_preview,
+    )
+
+
+@app.get("/gestionale/archiviati", response_class=HTMLResponse)
+def archived_stores_page(request: Request, created: int = 0, error: str = ''):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        archived_rows = list(_archived_stores_map(cur).values())
+        for row in archived_rows:
+            key = row.get('store_key') or ''
+            income = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_entries WHERE store={ph}", (key,))
+            expense = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_expenses WHERE store={ph}", (key,))
+            row['income_total'] = income
+            row['expense_total'] = expense
+            row['net_total'] = income - expense
+            row['entries_count'] = _fetch_one_int(cur, f"SELECT COUNT(*) FROM cash_entries WHERE store={ph}", (key,))
+            row['expenses_count'] = _fetch_one_int(cur, f"SELECT COUNT(*) FROM cash_expenses WHERE store={ph}", (key,))
+    return render(
+        "archived_stores.html",
+        user=user,
+        active_store=request.session.get('active_store') if is_admin(request) else None,
+        stores=STORES,
+        archived_stores=archived_rows,
+        created=created,
+        error=unquote_plus(error or ''),
+    )
+
+
+@app.post("/gestionale/archiviati")
+async def archived_store_create(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+    form = await request.form()
+    name = str(form.get('name') or '').strip()
+    opened_at = str(form.get('opened_at') or '').strip() or None
+    closed_at = str(form.get('closed_at') or '').strip() or None
+    notes = str(form.get('notes') or '').strip()
+    if not name:
+        return RedirectResponse('/gestionale/archiviati?error=' + quote_plus('Scrivi il nome del negozio archiviato.'), status_code=HTTP_303_SEE_OTHER)
+    store_key = _archived_store_slug(name)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"INSERT INTO archived_stores(store_key, name, opened_at, closed_at, notes, created_by) VALUES({ph},{ph},{ph},{ph},{ph},{ph})",
+            (store_key, name, opened_at, closed_at, notes, user.get('username') or 'system'),
+        )
+    return RedirectResponse(f'/gestionale/archiviati/{store_key}?created=1', status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get("/gestionale/archiviati/{store_key}", response_class=HTMLResponse)
+def archived_store_detail(request: Request, store_key: str, created: int = 0, imported_entries: int = 0, imported_expenses: int = 0, import_error: str = ''):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+    ctx = _archived_store_detail_context(request, user, store_key, imported_entries=imported_entries, imported_expenses=imported_expenses, import_error=unquote_plus(import_error or ''))
+    if not ctx:
+        return RedirectResponse('/gestionale/archiviati?error=' + quote_plus('Negozio archiviato non trovato.'), status_code=HTTP_303_SEE_OTHER)
+    ctx['created'] = created
+    return render("archived_store_detail.html", **ctx)
+
+
+@app.post("/gestionale/archiviati/{store_key}/incasso")
+async def archived_store_add_income(request: Request, store_key: str):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+    with connect() as conn:
+        cur = conn.cursor()
+        if not _is_archived_store_key(store_key, cur):
+            return RedirectResponse('/gestionale/archiviati?error=' + quote_plus('Negozio archiviato non trovato.'), status_code=HTTP_303_SEE_OTHER)
+        form = await request.form()
+        flow_date = str(form.get('flow_date') or '').strip() or date.today().isoformat()
+        notes = str(form.get('notes') or '').strip()
+        method_amounts = []
+        base_names = list(form.getlist('method_name'))
+        base_amounts = list(form.getlist('amount_value'))
+        for idx, method_name in enumerate(base_names):
+            clean_method = str(method_name or '').strip()
+            amount = _safe_amount(base_amounts[idx] if idx < len(base_amounts) else 0, 0.0)
+            if clean_method and amount > 0:
+                method_amounts.append((clean_method, amount))
+        extra_names = list(form.getlist('custom_method_name'))
+        extra_amounts = list(form.getlist('custom_method_amount'))
+        for idx, name in enumerate(extra_names):
+            clean_method = str(name or '').strip()
+            amount = _safe_amount(extra_amounts[idx] if idx < len(extra_amounts) else 0, 0.0)
+            if clean_method and amount > 0:
+                method_amounts.append((clean_method, amount))
+        for payment_method, amount in method_amounts:
+            _ensure_payment_method(cur, payment_method, user['username'])
+            _insert_cash_entry_compat(cur, store_key, flow_date, payment_method, amount, notes, user['username'])
+            _log(cur, store=store_key, username=user['username'], action='CREATE', category='CASSA ARCHIVIATA', name=f"Incasso storico {flow_date} - {payment_method}", delta=float(amount or 0))
+    return RedirectResponse(f'/gestionale/archiviati/{store_key}', status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/gestionale/archiviati/{store_key}/uscita")
+async def archived_store_add_expense(request: Request, store_key: str):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+    form = await request.form()
+    flow_date = str(form.get('flow_date') or '').strip() or date.today().isoformat()
+    category = str(form.get('category') or '').strip()
+    supplier = str(form.get('supplier') or '').strip()
+    payment_method = str(form.get('payment_method') or '').strip()
+    amount_value = _safe_amount(form.get('amount'), 0.0)
+    notes = str(form.get('notes') or '').strip()
+    if amount_value <= 0:
+        return RedirectResponse(f'/gestionale/archiviati/{store_key}', status_code=HTTP_303_SEE_OTHER)
+    category_clean = category or _auto_expense_category('import txt', supplier, notes) or 'Spese secondarie'
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        if not _is_archived_store_key(store_key, cur):
+            return RedirectResponse('/gestionale/archiviati?error=' + quote_plus('Negozio archiviato non trovato.'), status_code=HTTP_303_SEE_OTHER)
+        cur.execute(
+            f"INSERT INTO cash_expenses(store, flow_date, category, supplier, payment_method, amount, notes, created_by) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (store_key, flow_date, category_clean, supplier, payment_method, amount_value, notes, user['username']),
+        )
+        _log(cur, store=store_key, username=user['username'], action='CREATE', category='USCITE ARCHIVIATE', name=f"Uscita storica {flow_date} - {category_clean}", delta=-amount_value)
+    return RedirectResponse(f'/gestionale/archiviati/{store_key}', status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/gestionale/archiviati/{store_key}/import-txt")
+async def archived_store_import_txt(request: Request, store_key: str):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse('/gestionale', status_code=HTTP_303_SEE_OTHER)
+    with connect() as conn:
+        cur = conn.cursor()
+        if not _is_archived_store_key(store_key, cur):
+            return RedirectResponse('/gestionale/archiviati?error=' + quote_plus('Negozio archiviato non trovato.'), status_code=HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    upload = form.get('import_file') or form.get('upload_file')
+    pasted_text = str(form.get('import_text') or '').strip()
+    include_expenses = _is_truthy(form.get('import_expenses'))
+    replace_existing_dates = _is_truthy(form.get('replace_existing_dates'))
+    confirm_import = _is_truthy(form.get('confirm_import'))
+    expense_category_overrides = {}
+    if confirm_import:
+        posted_expense_keys = list(form.getlist('expense_key'))
+        posted_expense_categories = list(form.getlist('expense_category'))
+        allowed_categories = {_normalize_signature(x): x for x in _expense_category_options()}
+        for idx, key in enumerate(posted_expense_keys):
+            key = str(key or '').strip()
+            category = str(posted_expense_categories[idx] if idx < len(posted_expense_categories) else '').strip()
+            if not key or not category:
+                continue
+            expense_category_overrides[key] = allowed_categories.get(_normalize_signature(category), category[:80])
+
+    text_parts = []
+    if getattr(upload, 'filename', ''):
+        try:
+            raw_bytes = await upload.read()
+            uploaded_text = _decode_uploaded_text(raw_bytes)
+            if uploaded_text.strip():
+                text_parts.append(uploaded_text)
+        except Exception as e:
+            msg = quote_plus(f'File non leggibile: {e}')
+            return RedirectResponse(f'/gestionale/archiviati/{store_key}?import_error={msg}', status_code=HTTP_303_SEE_OTHER)
+    if pasted_text.strip():
+        text_parts.append(pasted_text)
+    raw_text = '\n'.join(text_parts)
+    if not raw_text.strip():
+        msg = quote_plus('Carica un file TXT/CSV oppure incolla il testo da importare.')
+        return RedirectResponse(f'/gestionale/archiviati/{store_key}?import_error={msg}', status_code=HTTP_303_SEE_OTHER)
+
+    try:
+        blocks = _parse_import_txt_blocks(raw_text, store_key)
+        # In un negozio archiviato il testo importato deve finire sempre in quel negozio,
+        # anche se dentro le note compare Spinza/Reburger o Camaldoli.
+        for block in blocks:
+            block['store'] = store_key
+    except Exception as e:
+        msg = quote_plus(f'Errore durante la lettura del testo: {e}')
+        return RedirectResponse(f'/gestionale/archiviati/{store_key}?import_error={msg}', status_code=HTTP_303_SEE_OTHER)
+
+    if not blocks:
+        msg = quote_plus('Non ho trovato giornate valide nel testo. Controlla che ci siano date e righe tipo Pos 249€ o Cash 55€.')
+        return RedirectResponse(f'/gestionale/archiviati/{store_key}?import_error={msg}', status_code=HTTP_303_SEE_OTHER)
+
+    if not confirm_import:
+        preview = _build_import_preview(blocks, raw_text, store_key, include_expenses, replace_existing_dates)
+        ctx = _archived_store_detail_context(request, user, store_key, import_preview=preview)
+        if not ctx:
+            return RedirectResponse('/gestionale/archiviati', status_code=HTTP_303_SEE_OTHER)
+        return render("archived_store_detail.html", **ctx)
+
+    imported_entries = 0
+    imported_expenses = 0
+    try:
+        ph = _ph()
+        with connect() as conn:
+            cur = conn.cursor()
+            if replace_existing_dates:
+                unique_days = sorted({str(b.get('date') or '') for b in blocks if b.get('date')})
+                for flow_date in unique_days:
+                    cur.execute(f"DELETE FROM cash_entries WHERE store={ph} AND flow_date={ph}", (store_key, flow_date))
+                    if include_expenses:
+                        cur.execute(f"DELETE FROM cash_expenses WHERE store={ph} AND flow_date={ph}", (store_key, flow_date))
+            for block in blocks:
+                flow_date = str(block.get('date') or '').strip()
+                if not flow_date:
+                    continue
+                block_notes = _join_unique_notes(block.get('notes') or [])
+                for income in block.get('incomes') or []:
+                    payment_method = str(income.get('payment_method') or '').strip().lower()
+                    amount = _safe_amount(income.get('amount'), 0.0)
+                    if not payment_method or amount <= 0:
+                        continue
+                    raw_line = str(income.get('raw') or '').strip()
+                    entry_notes = _join_unique_notes([block_notes, raw_line if ('(' in raw_line or ' x ' in raw_line.lower()) else ''])
+                    _ensure_payment_method(cur, payment_method, user['username'])
+                    _insert_cash_entry_compat(cur, store_key, flow_date, payment_method, amount, entry_notes, user['username'])
+                    _log(cur, store=store_key, username=user['username'], action='CREATE', category='CASSA ARCHIVIATA', name=f"Import storico {flow_date} - {payment_method}", delta=float(amount or 0))
+                    imported_entries += 1
+                if include_expenses:
+                    for expense_idx, expense in enumerate(block.get('expenses') or []):
+                        amount = _safe_amount(expense.get('amount'), 0.0)
+                        if amount <= 0:
+                            continue
+                        raw_line = str(expense.get('raw') or '').strip()
+                        supplier = str(expense.get('name') or raw_line or 'Import TXT').strip()[:120]
+                        override_key = _import_expense_override_key(block, expense_idx, store_key)
+                        selected_category = expense_category_overrides.get(override_key)
+                        auto_category = selected_category or _auto_expense_category('import txt', supplier, raw_line)
+                        expense_notes = _join_unique_notes([raw_line, block_notes])
+                        _insert_cash_expense_compat(cur, store_key, flow_date, auto_category, supplier, '', amount, expense_notes, user['username'])
+                        _log(cur, store=store_key, username=user['username'], action='CREATE', category='USCITE ARCHIVIATE', name=f"Import storico {flow_date} - {supplier}", delta=-amount)
+                        imported_expenses += 1
+    except Exception as e:
+        msg = quote_plus(f'Import fallito: {e}')
+        return RedirectResponse(f'/gestionale/archiviati/{store_key}?import_error={msg}', status_code=HTTP_303_SEE_OTHER)
+
+    if imported_entries == 0 and imported_expenses == 0:
+        msg = quote_plus('Testo letto, ma non ho trovato importi validi da salvare.')
+        return RedirectResponse(f'/gestionale/archiviati/{store_key}?import_error={msg}', status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse(f'/gestionale/archiviati/{store_key}?imported_entries={imported_entries}&imported_expenses={imported_expenses}', status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/gestionale/archiviati/{store_key}/incassi/{entry_id}/delete")
+def archived_store_delete_income(request: Request, store_key: str, entry_id: int):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse('/gestionale', status_code=HTTP_303_SEE_OTHER)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        if _is_archived_store_key(store_key, cur):
+            cur.execute(f"DELETE FROM cash_entries WHERE id={ph} AND store={ph}", (entry_id, store_key))
+    return RedirectResponse(f'/gestionale/archiviati/{store_key}', status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/gestionale/archiviati/{store_key}/uscite/{expense_id}/delete")
+def archived_store_delete_expense(request: Request, store_key: str, expense_id: int):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse('/gestionale', status_code=HTTP_303_SEE_OTHER)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        if _is_archived_store_key(store_key, cur):
+            cur.execute(f"DELETE FROM cash_expenses WHERE id={ph} AND store={ph}", (expense_id, store_key))
+    return RedirectResponse(f'/gestionale/archiviati/{store_key}', status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get("/gestionale/panoramica-totale", response_class=HTMLResponse)
+def total_overview_page(request: Request, year: str = 'ALL', store: str = 'ALL'):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+    ph = _ph()
+    year_expr = "SUBSTR(CAST(flow_date AS TEXT),1,4)"
+    with connect() as conn:
+        cur = conn.cursor()
+        archived_map = _archived_stores_map(cur)
+        store_labels = _all_management_stores(cur, include_archived=True)
+        valid_store_keys = set(store_labels.keys())
+        selected_store = store if store in valid_store_keys else 'ALL'
+        year_rows = []
+        for table_name in ('cash_entries', 'cash_expenses'):
+            year_rows += _dict_rows(cur, f"SELECT DISTINCT {year_expr} AS year FROM {table_name} WHERE flow_date IS NOT NULL", ())
+        years = sorted({str(r.get('year') or '').strip() for r in year_rows if str(r.get('year') or '').strip()}, reverse=True)
+        selected_year = year if year in years else 'ALL'
+
+        def _where_for(prefix_params=False):
+            clauses = []
+            params = []
+            if selected_store != 'ALL':
+                clauses.append(f"store={ph}")
+                params.append(selected_store)
+            if selected_year != 'ALL':
+                clauses.append(f"{year_expr}={ph}")
+                params.append(selected_year)
+            return ('WHERE ' + ' AND '.join(clauses)) if clauses else '', tuple(params)
+
+        where_sql, params = _where_for()
+        total_income = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_entries {where_sql}", params)
+        total_expense = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_expenses {where_sql}", params)
+        totals = {
+            'income': total_income,
+            'expense': total_expense,
+            'net': total_income - total_expense,
+            'entries_count': _fetch_one_int(cur, f"SELECT COUNT(*) FROM cash_entries {where_sql}", params),
+            'expenses_count': _fetch_one_int(cur, f"SELECT COUNT(*) FROM cash_expenses {where_sql}", params),
+        }
+
+        income_by_year = _dict_rows(cur, f"SELECT {year_expr} AS year, COALESCE(SUM(amount),0) AS income FROM cash_entries {where_sql} GROUP BY {year_expr}", params)
+        expense_by_year = _dict_rows(cur, f"SELECT {year_expr} AS year, COALESCE(SUM(amount),0) AS expense FROM cash_expenses {where_sql} GROUP BY {year_expr}", params)
+        year_map = {}
+        for r in income_by_year:
+            y = str(r.get('year') or 'Senza anno')
+            year_map.setdefault(y, {'year': y, 'income': 0.0, 'expense': 0.0, 'net': 0.0})['income'] += float(r.get('income') or 0)
+        for r in expense_by_year:
+            y = str(r.get('year') or 'Senza anno')
+            year_map.setdefault(y, {'year': y, 'income': 0.0, 'expense': 0.0, 'net': 0.0})['expense'] += float(r.get('expense') or 0)
+        for r in year_map.values():
+            r['net'] = r['income'] - r['expense']
+        by_year = sorted(year_map.values(), key=lambda x: x.get('year') or '', reverse=True)
+
+        income_by_store = _dict_rows(cur, f"SELECT store, COALESCE(SUM(amount),0) AS income, COUNT(*) AS entries_count FROM cash_entries {where_sql} GROUP BY store", params)
+        expense_by_store = _dict_rows(cur, f"SELECT store, COALESCE(SUM(amount),0) AS expense, COUNT(*) AS expenses_count FROM cash_expenses {where_sql} GROUP BY store", params)
+        store_map = {}
+        for r in income_by_store:
+            key = str(r.get('store') or '')
+            item = store_map.setdefault(key, {'store': key, 'label': store_labels.get(key) or _store_label(key), 'kind': _store_kind(key, archived_map), 'income': 0.0, 'expense': 0.0, 'net': 0.0, 'entries_count': 0, 'expenses_count': 0})
+            item['income'] += float(r.get('income') or 0)
+            item['entries_count'] += int(r.get('entries_count') or 0)
+        for r in expense_by_store:
+            key = str(r.get('store') or '')
+            item = store_map.setdefault(key, {'store': key, 'label': store_labels.get(key) or _store_label(key), 'kind': _store_kind(key, archived_map), 'income': 0.0, 'expense': 0.0, 'net': 0.0, 'entries_count': 0, 'expenses_count': 0})
+            item['expense'] += float(r.get('expense') or 0)
+            item['expenses_count'] += int(r.get('expenses_count') or 0)
+        for item in store_map.values():
+            item['net'] = item['income'] - item['expense']
+            item['years'] = set()
+        # Anni presenti per negozio, senza filtri di importo.
+        for table_name in ('cash_entries', 'cash_expenses'):
+            rows = _dict_rows(cur, f"SELECT store, {year_expr} AS year FROM {table_name} {where_sql} GROUP BY store, {year_expr}", params)
+            for r in rows:
+                key = str(r.get('store') or '')
+                if key in store_map and r.get('year'):
+                    store_map[key].setdefault('years', set()).add(str(r.get('year')))
+        by_store = sorted(store_map.values(), key=lambda x: (0 if x.get('kind') == 'attivo' else 1, x.get('label') or ''))
+        for item in by_store:
+            item['years_text'] = ', '.join(sorted(item.get('years') or [], reverse=True)) or '—'
+
+        active_income = sum(x['income'] for x in by_store if x.get('kind') == 'attivo')
+        active_expense = sum(x['expense'] for x in by_store if x.get('kind') == 'attivo')
+        archived_income = sum(x['income'] for x in by_store if x.get('kind') == 'archiviato')
+        archived_expense = sum(x['expense'] for x in by_store if x.get('kind') == 'archiviato')
+        split_totals = {
+            'active_income': active_income,
+            'active_expense': active_expense,
+            'active_net': active_income - active_expense,
+            'archived_income': archived_income,
+            'archived_expense': archived_expense,
+            'archived_net': archived_income - archived_expense,
+        }
+
+    return render(
+        "total_overview.html",
+        user=user,
+        active_store=request.session.get('active_store') if is_admin(request) else None,
+        totals=totals,
+        split_totals=split_totals,
+        by_year=by_year,
+        by_store=by_store,
+        years=years,
+        store_options=store_labels,
+        selected_year=selected_year,
+        selected_store=selected_store,
+    )
 
 @app.get("/gestionale/incassi", response_class=HTMLResponse)
 def cash_entries_page(request: Request, flow_date: str = '', payment_method: str = 'ALL', period_type: str = 'month', anchor_date: str = '', month_key: str = '', nav: str = '', imported_entries: int = 0, imported_expenses: int = 0, import_error: str = ''):
