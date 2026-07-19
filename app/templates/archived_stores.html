@@ -47,9 +47,16 @@
     <input name="name" maxlength="120" placeholder="Nome negozio, es. Le Cure vecchio" required style="min-width:260px;flex:1;">
     <input type="date" name="opened_at" title="Data apertura facoltativa">
     <input type="date" name="closed_at" title="Data chiusura facoltativa">
+    <label class="tiny" style="display:grid;gap:5px;min-width:135px;">IVA %
+      <input type="number" name="vat_percent" min="0" max="100" step="0.01" value="22" inputmode="decimal" required>
+    </label>
+    <label class="tiny" style="display:grid;gap:5px;min-width:175px;">Quota proprietario %
+      <input type="number" name="owner_percent" min="0" max="100" step="0.01" value="20" inputmode="decimal" required>
+    </label>
     <input name="notes" maxlength="500" placeholder="Note facoltative" style="min-width:220px;flex:1;">
     <button class="btn" type="submit">Crea negozio</button>
   </form>
+  <div class="muted" style="margin-top:10px;">La quota del proprietario viene calcolata sull'incasso dopo lo scorporo dell'IVA.</div>
 </div>
 
 <div class="card" style="margin-top:14px;">
@@ -81,9 +88,17 @@
       {% if not row.opened_at and not row.closed_at %}Date non impostate{% endif %}
     </div>
     {% if row.notes %}<div class="tiny" style="margin-top:8px;">{{ row.notes }}</div>{% endif %}
+    <div class="row" style="margin-top:10px;gap:7px;">
+      <span class="pill">IVA {{ '%g'|format(row.vat_percent or 0) }}%</span>
+      <span class="pill">Proprietario {{ '%g'|format(row.owner_percent or 0) }}%</span>
+    </div>
     <div class="kpi-grid" style="grid-template-columns:1fr;gap:8px;margin-top:12px;">
       <div class="kpi"><div class="muted">Entrate</div><div class="big" data-count-up="{{ row.income_total or 0 }}" data-count-prefix="€ ">€ {{ '%.2f'|format(row.income_total or 0) }}</div></div>
-      <div class="kpi"><div class="muted">Uscite</div><div class="big" data-count-up="{{ row.expense_total or 0 }}" data-count-prefix="€ ">€ {{ '%.2f'|format(row.expense_total or 0) }}</div></div>
+      <div class="kpi">
+        <div class="muted">Uscite complessive</div>
+        <div class="big" data-count-up="{{ row.expense_total or 0 }}" data-count-prefix="€ ">€ {{ '%.2f'|format(row.expense_total or 0) }}</div>
+        <div class="tiny">Manuali € {{ '%.2f'|format(row.manual_expense or 0) }} · IVA € {{ '%.2f'|format(row.vat_amount or 0) }} · Proprietario € {{ '%.2f'|format(row.owner_amount or 0) }}</div>
+      </div>
       <div class="kpi"><div class="muted">Bilancio</div><div class="big" data-count-up="{{ row.net_total or 0 }}" data-count-prefix="€ ">€ {{ '%.2f'|format(row.net_total or 0) }}</div></div>
     </div>
     <div class="arch-actions">

@@ -565,11 +565,13 @@ def _archived_store_slug(name: str) -> str:
 def _archived_stores_map(cur=None) -> dict:
     """Mappa store_key -> info negozio archiviato. Non lancia mai errori se la tabella non esiste ancora."""
     def _load(cursor):
-        rows = _dict_rows(cursor, "SELECT id, store_key, name, opened_at, closed_at, notes FROM archived_stores ORDER BY name ASC", ())
+        rows = _dict_rows(cursor, "SELECT id, store_key, name, opened_at, closed_at, vat_percent, owner_percent, notes FROM archived_stores ORDER BY name ASC", ())
         out = {}
         for r in rows:
             key = str(r.get('store_key') or '').strip()
             if key:
+                r['vat_percent'] = max(0.0, min(100.0, float(r.get('vat_percent') or 0)))
+                r['owner_percent'] = max(0.0, min(100.0, float(r.get('owner_percent') or 0)))
                 out[key] = r
         return out
     if cur is not None:
@@ -579,6 +581,47 @@ def _archived_stores_map(cur=None) -> dict:
             return _load(conn.cursor())
     except Exception:
         return {}
+
+
+def _percent_value(value, default: float = 0.0) -> float:
+    """Converte una percentuale da form in un valore sicuro tra 0 e 100."""
+    try:
+        raw = str(value if value is not None else '').strip().replace(',', '.')
+        parsed = float(raw) if raw else float(default)
+    except (TypeError, ValueError):
+        parsed = float(default)
+    return round(max(0.0, min(100.0, parsed)), 4)
+
+
+def _archived_financials(gross_income: float, manual_expense: float, vat_percent: float, owner_percent: float) -> dict:
+    """Calcola IVA scorporata e quota proprietario sul ricavo al netto IVA.
+
+    Gli incassi salvati sono considerati lordi. L'IVA viene scorporata con
+    lordo / (1 + IVA%), poi la quota proprietario viene applicata sul netto IVA.
+    IVA e quota proprietario vengono conteggiate come costi automatici nel
+    bilancio, senza creare righe fittizie nella tabella delle uscite.
+    """
+    gross = float(gross_income or 0)
+    manual = float(manual_expense or 0)
+    vat = _percent_value(vat_percent)
+    owner = _percent_value(owner_percent)
+    net_before_owner = gross / (1.0 + vat / 100.0) if vat > 0 else gross
+    vat_amount = gross - net_before_owner
+    owner_amount = net_before_owner * owner / 100.0
+    automatic_expense = vat_amount + owner_amount
+    total_expense = manual + automatic_expense
+    return {
+        'gross_income': round(gross, 2),
+        'net_vat_income': round(net_before_owner, 2),
+        'vat_percent': vat,
+        'vat_amount': round(vat_amount, 2),
+        'owner_percent': owner,
+        'owner_amount': round(owner_amount, 2),
+        'manual_expense': round(manual, 2),
+        'automatic_expense': round(automatic_expense, 2),
+        'expense_total': round(total_expense, 2),
+        'net': round(gross - total_expense, 2),
+    }
 
 
 def _all_management_stores(cur=None, include_archived: bool = True) -> dict:
@@ -4200,6 +4243,7 @@ def _archived_store_detail_context(request: Request, user: dict, store_key: str,
                 'month_key': month_key,
                 'label': f'{month}/{year}',
                 'income': 0.0,
+                'manual_expense': 0.0,
                 'expense': 0.0,
                 'net': 0.0,
                 'entries_count': 0,
@@ -4208,7 +4252,7 @@ def _archived_store_detail_context(request: Request, user: dict, store_key: str,
 
         for row in entries:
             year = str(row.get('flow_date') or '')[:4] or 'Senza anno'
-            item = by_year.setdefault(year, {'year': year, 'income': 0.0, 'expense': 0.0, 'net': 0.0, 'entries_count': 0, 'expenses_count': 0})
+            item = by_year.setdefault(year, {'year': year, 'income': 0.0, 'manual_expense': 0.0, 'expense': 0.0, 'net': 0.0, 'entries_count': 0, 'expenses_count': 0})
             amount = float(row.get('amount') or 0)
             item['income'] += amount
             item['entries_count'] += 1
@@ -4218,27 +4262,46 @@ def _archived_store_detail_context(request: Request, user: dict, store_key: str,
                 month_item['entries_count'] += 1
         for row in expenses:
             year = str(row.get('flow_date') or '')[:4] or 'Senza anno'
-            item = by_year.setdefault(year, {'year': year, 'income': 0.0, 'expense': 0.0, 'net': 0.0, 'entries_count': 0, 'expenses_count': 0})
+            item = by_year.setdefault(year, {'year': year, 'income': 0.0, 'manual_expense': 0.0, 'expense': 0.0, 'net': 0.0, 'entries_count': 0, 'expenses_count': 0})
             amount = float(row.get('amount') or 0)
-            item['expense'] += amount
+            item['manual_expense'] += amount
             item['expenses_count'] += 1
             month_item = _month_bucket(row.get('flow_date'))
             if month_item is not None:
-                month_item['expense'] += amount
+                month_item['manual_expense'] += amount
                 month_item['expenses_count'] += 1
         for item in by_year.values():
-            item['net'] = item['income'] - item['expense']
+            calculated = _archived_financials(
+                item['income'],
+                item['manual_expense'],
+                store_info.get('vat_percent'),
+                store_info.get('owner_percent'),
+            )
+            item.update(calculated)
+            item['income'] = calculated['gross_income']
+            item['expense'] = calculated['expense_total']
         for item in by_month.values():
-            item['income'] = round(item['income'], 2)
-            item['expense'] = round(item['expense'], 2)
-            item['net'] = round(item['income'] - item['expense'], 2)
-        totals = {
-            'income': round(sum(float(x.get('amount') or 0) for x in entries), 2),
-            'expense': round(sum(float(x.get('amount') or 0) for x in expenses), 2),
+            calculated = _archived_financials(
+                item['income'],
+                item['manual_expense'],
+                store_info.get('vat_percent'),
+                store_info.get('owner_percent'),
+            )
+            item.update(calculated)
+            item['income'] = calculated['gross_income']
+            item['expense'] = calculated['expense_total']
+        totals = _archived_financials(
+            sum(float(x.get('amount') or 0) for x in entries),
+            sum(float(x.get('amount') or 0) for x in expenses),
+            store_info.get('vat_percent'),
+            store_info.get('owner_percent'),
+        )
+        totals.update({
+            'income': totals['gross_income'],
+            'expense': totals['expense_total'],
             'entries_count': len(entries),
             'expenses_count': len(expenses),
-        }
-        totals['net'] = round(totals['income'] - totals['expense'], 2)
+        })
     return dict(
         user=user,
         active_store=request.session.get('active_store') if is_admin(request) else None,
@@ -4273,10 +4336,12 @@ def archived_stores_page(request: Request, created: int = 0, deleted: int = 0, d
         for row in archived_rows:
             key = row.get('store_key') or ''
             income = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_entries WHERE store={ph}", (key,))
-            expense = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_expenses WHERE store={ph}", (key,))
-            row['income_total'] = income
-            row['expense_total'] = expense
-            row['net_total'] = income - expense
+            manual_expense = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_expenses WHERE store={ph}", (key,))
+            calculated = _archived_financials(income, manual_expense, row.get('vat_percent'), row.get('owner_percent'))
+            row.update(calculated)
+            row['income_total'] = calculated['gross_income']
+            row['expense_total'] = calculated['expense_total']
+            row['net_total'] = calculated['net']
             row['entries_count'] = _fetch_one_int(cur, f"SELECT COUNT(*) FROM cash_entries WHERE store={ph}", (key,))
             row['expenses_count'] = _fetch_one_int(cur, f"SELECT COUNT(*) FROM cash_expenses WHERE store={ph}", (key,))
     return render(
@@ -4304,6 +4369,8 @@ async def archived_store_create(request: Request):
     opened_at = str(form.get('opened_at') or '').strip() or None
     closed_at = str(form.get('closed_at') or '').strip() or None
     notes = str(form.get('notes') or '').strip()
+    vat_percent = _percent_value(form.get('vat_percent'), 22.0)
+    owner_percent = _percent_value(form.get('owner_percent'), 20.0)
     if not name:
         return RedirectResponse('/gestionale/archiviati?error=' + quote_plus('Scrivi il nome del negozio archiviato.'), status_code=HTTP_303_SEE_OTHER)
     if opened_at and closed_at and closed_at < opened_at:
@@ -4319,14 +4386,14 @@ async def archived_store_create(request: Request):
         if duplicate:
             return RedirectResponse('/gestionale/archiviati?error=' + quote_plus('Esiste già un negozio archiviato con questo nome. Aprilo oppure usa un nome diverso.'), status_code=HTTP_303_SEE_OTHER)
         cur.execute(
-            f"INSERT INTO archived_stores(store_key, name, opened_at, closed_at, notes, created_by) VALUES({ph},{ph},{ph},{ph},{ph},{ph})",
-            (store_key, name, opened_at, closed_at, notes, user.get('username') or 'system'),
+            f"INSERT INTO archived_stores(store_key, name, opened_at, closed_at, vat_percent, owner_percent, notes, created_by) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (store_key, name, opened_at, closed_at, vat_percent, owner_percent, notes, user.get('username') or 'system'),
         )
     return RedirectResponse(f'/gestionale/archiviati/{store_key}?created=1', status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/gestionale/archiviati/{store_key}", response_class=HTMLResponse)
-def archived_store_detail(request: Request, store_key: str, created: int = 0, deleted_month: str = '', deleted_entries: int = 0, deleted_expenses: int = 0, imported_entries: int = 0, imported_expenses: int = 0, import_error: str = ''):
+def archived_store_detail(request: Request, store_key: str, created: int = 0, settings_saved: int = 0, deleted_month: str = '', deleted_entries: int = 0, deleted_expenses: int = 0, imported_entries: int = 0, imported_expenses: int = 0, import_error: str = ''):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -4336,10 +4403,45 @@ def archived_store_detail(request: Request, store_key: str, created: int = 0, de
     if not ctx:
         return RedirectResponse('/gestionale/archiviati?error=' + quote_plus('Negozio archiviato non trovato.'), status_code=HTTP_303_SEE_OTHER)
     ctx['created'] = created
+    ctx['settings_saved'] = settings_saved
     ctx['deleted_month'] = deleted_month if re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', deleted_month or '') else ''
     ctx['deleted_entries'] = max(0, int(deleted_entries or 0))
     ctx['deleted_expenses'] = max(0, int(deleted_expenses or 0))
     return render("archived_store_detail.html", **ctx)
+
+
+@app.post("/gestionale/archiviati/{store_key}/percentuali")
+async def archived_store_update_percentages(request: Request, store_key: str):
+    """Aggiorna IVA e quota proprietario del singolo negozio archiviato."""
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+
+    form = await request.form()
+    vat_percent = _percent_value(form.get('vat_percent'))
+    owner_percent = _percent_value(form.get('owner_percent'))
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        store_info = _archived_stores_map(cur).get(store_key)
+        if not store_info:
+            return RedirectResponse('/gestionale/archiviati?error=' + quote_plus('Negozio archiviato non trovato.'), status_code=HTTP_303_SEE_OTHER)
+        cur.execute(
+            f"UPDATE archived_stores SET vat_percent={ph}, owner_percent={ph} WHERE store_key={ph}",
+            (vat_percent, owner_percent, store_key),
+        )
+        _log(
+            cur,
+            store=store_key,
+            username=user.get('username') or 'system',
+            action='UPDATE',
+            category='PERCENTUALI ARCHIVIATO',
+            name=f"IVA {vat_percent:g}% · Proprietario {owner_percent:g}%",
+            delta=0,
+        )
+    return RedirectResponse(f'/gestionale/archiviati/{store_key}?settings_saved=1', status_code=HTTP_303_SEE_OTHER)
 
 
 @app.post("/gestionale/archiviati/{store_key}/delete")
@@ -4688,68 +4790,137 @@ def total_overview_page(request: Request, year: str = 'ALL', store: str = 'ALL')
             return ('WHERE ' + ' AND '.join(clauses)) if clauses else '', tuple(params)
 
         where_sql, params = _where_for()
-        total_income = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_entries {where_sql}", params)
-        total_expense = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_expenses {where_sql}", params)
-        totals = {
-            'income': total_income,
-            'expense': total_expense,
-            'net': total_income - total_expense,
-            'entries_count': _fetch_one_int(cur, f"SELECT COUNT(*) FROM cash_entries {where_sql}", params),
-            'expenses_count': _fetch_one_int(cur, f"SELECT COUNT(*) FROM cash_expenses {where_sql}", params),
-        }
 
-        income_by_year = _dict_rows(cur, f"SELECT {year_expr} AS year, COALESCE(SUM(amount),0) AS income FROM cash_entries {where_sql} GROUP BY {year_expr}", params)
-        expense_by_year = _dict_rows(cur, f"SELECT {year_expr} AS year, COALESCE(SUM(amount),0) AS expense FROM cash_expenses {where_sql} GROUP BY {year_expr}", params)
+        # Costruiamo una griglia anno/negozio. Per i negozi archiviati le
+        # spese comprendono automaticamente IVA scorporata e quota proprietario.
+        income_cells = _dict_rows(
+            cur,
+            f"SELECT store, {year_expr} AS year, COALESCE(SUM(amount),0) AS income, COUNT(*) AS entries_count FROM cash_entries {where_sql} GROUP BY store, {year_expr}",
+            params,
+        )
+        expense_cells = _dict_rows(
+            cur,
+            f"SELECT store, {year_expr} AS year, COALESCE(SUM(amount),0) AS manual_expense, COUNT(*) AS expenses_count FROM cash_expenses {where_sql} GROUP BY store, {year_expr}",
+            params,
+        )
+        cell_map = {}
+        for r in income_cells:
+            key = (str(r.get('store') or ''), str(r.get('year') or 'Senza anno'))
+            cell = cell_map.setdefault(key, {
+                'store': key[0], 'year': key[1], 'income': 0.0, 'manual_expense': 0.0,
+                'entries_count': 0, 'expenses_count': 0,
+            })
+            cell['income'] += float(r.get('income') or 0)
+            cell['entries_count'] += int(r.get('entries_count') or 0)
+        for r in expense_cells:
+            key = (str(r.get('store') or ''), str(r.get('year') or 'Senza anno'))
+            cell = cell_map.setdefault(key, {
+                'store': key[0], 'year': key[1], 'income': 0.0, 'manual_expense': 0.0,
+                'entries_count': 0, 'expenses_count': 0,
+            })
+            cell['manual_expense'] += float(r.get('manual_expense') or 0)
+            cell['expenses_count'] += int(r.get('expenses_count') or 0)
+
+        for cell in cell_map.values():
+            archived_info = archived_map.get(cell['store'])
+            if archived_info:
+                calculated = _archived_financials(
+                    cell['income'],
+                    cell['manual_expense'],
+                    archived_info.get('vat_percent'),
+                    archived_info.get('owner_percent'),
+                )
+            else:
+                calculated = {
+                    'gross_income': round(cell['income'], 2),
+                    'net_vat_income': round(cell['income'], 2),
+                    'vat_amount': 0.0,
+                    'owner_amount': 0.0,
+                    'manual_expense': round(cell['manual_expense'], 2),
+                    'automatic_expense': 0.0,
+                    'expense_total': round(cell['manual_expense'], 2),
+                    'net': round(cell['income'] - cell['manual_expense'], 2),
+                }
+            cell.update(calculated)
+            cell['income'] = calculated['gross_income']
+            cell['expense'] = calculated['expense_total']
+
+        totals = {
+            'income': round(sum(x['income'] for x in cell_map.values()), 2),
+            'manual_expense': round(sum(x['manual_expense'] for x in cell_map.values()), 2),
+            'vat_amount': round(sum(x.get('vat_amount', 0) for x in cell_map.values()), 2),
+            'owner_amount': round(sum(x.get('owner_amount', 0) for x in cell_map.values()), 2),
+            'automatic_expense': round(sum(x.get('automatic_expense', 0) for x in cell_map.values()), 2),
+            'expense': round(sum(x['expense'] for x in cell_map.values()), 2),
+            'entries_count': sum(x['entries_count'] for x in cell_map.values()),
+            'expenses_count': sum(x['expenses_count'] for x in cell_map.values()),
+        }
+        totals['net'] = round(totals['income'] - totals['expense'], 2)
+
         year_map = {}
-        for r in income_by_year:
-            y = str(r.get('year') or 'Senza anno')
-            year_map.setdefault(y, {'year': y, 'income': 0.0, 'expense': 0.0, 'net': 0.0})['income'] += float(r.get('income') or 0)
-        for r in expense_by_year:
-            y = str(r.get('year') or 'Senza anno')
-            year_map.setdefault(y, {'year': y, 'income': 0.0, 'expense': 0.0, 'net': 0.0})['expense'] += float(r.get('expense') or 0)
-        for r in year_map.values():
-            r['net'] = r['income'] - r['expense']
+        store_map = {}
+        for cell in cell_map.values():
+            year_item = year_map.setdefault(cell['year'], {
+                'year': cell['year'], 'income': 0.0, 'manual_expense': 0.0,
+                'vat_amount': 0.0, 'owner_amount': 0.0, 'expense': 0.0, 'net': 0.0,
+            })
+            for field in ('income', 'manual_expense', 'vat_amount', 'owner_amount', 'expense'):
+                year_item[field] += float(cell.get(field) or 0)
+
+            store_key = cell['store']
+            store_item = store_map.setdefault(store_key, {
+                'store': store_key,
+                'label': store_labels.get(store_key) or _store_label(store_key),
+                'kind': _store_kind(store_key, archived_map),
+                'income': 0.0, 'manual_expense': 0.0, 'vat_amount': 0.0,
+                'owner_amount': 0.0, 'expense': 0.0, 'net': 0.0,
+                'entries_count': 0, 'expenses_count': 0, 'years': set(),
+            })
+            for field in ('income', 'manual_expense', 'vat_amount', 'owner_amount', 'expense'):
+                store_item[field] += float(cell.get(field) or 0)
+            store_item['entries_count'] += int(cell.get('entries_count') or 0)
+            store_item['expenses_count'] += int(cell.get('expenses_count') or 0)
+            if cell.get('year'):
+                store_item['years'].add(str(cell['year']))
+
+        for item in year_map.values():
+            item['income'] = round(item['income'], 2)
+            item['manual_expense'] = round(item['manual_expense'], 2)
+            item['vat_amount'] = round(item['vat_amount'], 2)
+            item['owner_amount'] = round(item['owner_amount'], 2)
+            item['expense'] = round(item['expense'], 2)
+            item['net'] = round(item['income'] - item['expense'], 2)
         by_year = sorted(year_map.values(), key=lambda x: x.get('year') or '', reverse=True)
 
-        income_by_store = _dict_rows(cur, f"SELECT store, COALESCE(SUM(amount),0) AS income, COUNT(*) AS entries_count FROM cash_entries {where_sql} GROUP BY store", params)
-        expense_by_store = _dict_rows(cur, f"SELECT store, COALESCE(SUM(amount),0) AS expense, COUNT(*) AS expenses_count FROM cash_expenses {where_sql} GROUP BY store", params)
-        store_map = {}
-        for r in income_by_store:
-            key = str(r.get('store') or '')
-            item = store_map.setdefault(key, {'store': key, 'label': store_labels.get(key) or _store_label(key), 'kind': _store_kind(key, archived_map), 'income': 0.0, 'expense': 0.0, 'net': 0.0, 'entries_count': 0, 'expenses_count': 0})
-            item['income'] += float(r.get('income') or 0)
-            item['entries_count'] += int(r.get('entries_count') or 0)
-        for r in expense_by_store:
-            key = str(r.get('store') or '')
-            item = store_map.setdefault(key, {'store': key, 'label': store_labels.get(key) or _store_label(key), 'kind': _store_kind(key, archived_map), 'income': 0.0, 'expense': 0.0, 'net': 0.0, 'entries_count': 0, 'expenses_count': 0})
-            item['expense'] += float(r.get('expense') or 0)
-            item['expenses_count'] += int(r.get('expenses_count') or 0)
-        for item in store_map.values():
-            item['net'] = item['income'] - item['expense']
-            item['years'] = set()
-        # Anni presenti per negozio, senza filtri di importo.
-        for table_name in ('cash_entries', 'cash_expenses'):
-            rows = _dict_rows(cur, f"SELECT store, {year_expr} AS year FROM {table_name} {where_sql} GROUP BY store, {year_expr}", params)
-            for r in rows:
-                key = str(r.get('store') or '')
-                if key in store_map and r.get('year'):
-                    store_map[key].setdefault('years', set()).add(str(r.get('year')))
         by_store = sorted(store_map.values(), key=lambda x: (0 if x.get('kind') == 'attivo' else 1, x.get('label') or ''))
         for item in by_store:
+            item['income'] = round(item['income'], 2)
+            item['manual_expense'] = round(item['manual_expense'], 2)
+            item['vat_amount'] = round(item['vat_amount'], 2)
+            item['owner_amount'] = round(item['owner_amount'], 2)
+            item['expense'] = round(item['expense'], 2)
+            item['net'] = round(item['income'] - item['expense'], 2)
             item['years_text'] = ', '.join(sorted(item.get('years') or [], reverse=True)) or '—'
+            archived_info = archived_map.get(item['store']) or {}
+            item['vat_percent'] = float(archived_info.get('vat_percent') or 0)
+            item['owner_percent'] = float(archived_info.get('owner_percent') or 0)
 
         active_income = sum(x['income'] for x in by_store if x.get('kind') == 'attivo')
         active_expense = sum(x['expense'] for x in by_store if x.get('kind') == 'attivo')
         archived_income = sum(x['income'] for x in by_store if x.get('kind') == 'archiviato')
         archived_expense = sum(x['expense'] for x in by_store if x.get('kind') == 'archiviato')
         split_totals = {
-            'active_income': active_income,
-            'active_expense': active_expense,
-            'active_net': active_income - active_expense,
-            'archived_income': archived_income,
-            'archived_expense': archived_expense,
-            'archived_net': archived_income - archived_expense,
+            'active_income': round(active_income, 2),
+            'active_expense': round(active_expense, 2),
+            'active_net': round(active_income - active_expense, 2),
+            'archived_income': round(archived_income, 2),
+            'archived_manual_expense': round(sum(x['manual_expense'] for x in by_store if x.get('kind') == 'archiviato'), 2),
+            'archived_vat_amount': round(sum(x['vat_amount'] for x in by_store if x.get('kind') == 'archiviato'), 2),
+            'archived_owner_amount': round(sum(x['owner_amount'] for x in by_store if x.get('kind') == 'archiviato'), 2),
+            'archived_expense': round(archived_expense, 2),
+            'archived_net': round(archived_income - archived_expense, 2),
         }
+
 
     return render(
         "total_overview.html",

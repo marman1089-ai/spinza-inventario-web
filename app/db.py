@@ -372,11 +372,31 @@ def init_db():
             name TEXT NOT NULL,
             opened_at {date_col},
             closed_at {date_col},
+            vat_percent {qty_col} NOT NULL DEFAULT 0,
+            owner_percent {qty_col} NOT NULL DEFAULT 0,
             notes TEXT NOT NULL DEFAULT '',
             created_by TEXT NOT NULL DEFAULT 'system',
             ts {ts_default}
         )
         """)
+
+        # Compatibilità con i database esistenti: le percentuali sono salvate
+        # sul singolo negozio archiviato e non modificano i negozi attivi.
+        if pg:
+            archived_store_alters = [
+                "ALTER TABLE archived_stores ADD COLUMN IF NOT EXISTS vat_percent DOUBLE PRECISION NOT NULL DEFAULT 0",
+                "ALTER TABLE archived_stores ADD COLUMN IF NOT EXISTS owner_percent DOUBLE PRECISION NOT NULL DEFAULT 0",
+            ]
+        else:
+            archived_store_alters = [
+                "ALTER TABLE archived_stores ADD COLUMN vat_percent REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE archived_stores ADD COLUMN owner_percent REAL NOT NULL DEFAULT 0",
+            ]
+        for stmt in archived_store_alters:
+            try:
+                _safe_exec(cur, stmt)
+            except Exception:
+                pass
 
         _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS sales_report_periods (

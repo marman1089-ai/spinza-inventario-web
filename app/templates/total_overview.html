@@ -24,7 +24,7 @@
   </div>
   <div class="kpi-grid" style="margin-top:18px;">
     <div class="kpi"><div class="muted">Guadagni / entrate totali</div><div class="mega">€ {{ '%.2f'|format(totals.income or 0) }}</div></div>
-    <div class="kpi"><div class="muted">Spese totali</div><div class="mega">€ {{ '%.2f'|format(totals.expense or 0) }}</div></div>
+    <div class="kpi"><div class="muted">Spese totali</div><div class="mega">€ {{ '%.2f'|format(totals.expense or 0) }}</div><div class="tiny">Manuali € {{ '%.2f'|format(totals.manual_expense or 0) }} · IVA archiviati € {{ '%.2f'|format(totals.vat_amount or 0) }} · Proprietari € {{ '%.2f'|format(totals.owner_amount or 0) }}</div></div>
     <div class="kpi"><div class="muted">Bilanciamento di sempre</div><div class="mega">€ {{ '%.2f'|format(totals.net or 0) }}</div><div class="muted">Entrate - uscite</div></div>
   </div>
 </div>
@@ -58,7 +58,7 @@
     <h3 style="margin-top:0;">Negozi archiviati</h3>
     <div class="kpi-grid" style="grid-template-columns:1fr;gap:10px;">
       <div class="kpi"><div class="muted">Entrate archiviate</div><div class="big">€ {{ '%.2f'|format(split_totals.archived_income or 0) }}</div></div>
-      <div class="kpi"><div class="muted">Spese archiviate</div><div class="big">€ {{ '%.2f'|format(split_totals.archived_expense or 0) }}</div></div>
+      <div class="kpi"><div class="muted">Spese archiviate complessive</div><div class="big">€ {{ '%.2f'|format(split_totals.archived_expense or 0) }}</div><div class="tiny">Manuali € {{ '%.2f'|format(split_totals.archived_manual_expense or 0) }} · IVA € {{ '%.2f'|format(split_totals.archived_vat_amount or 0) }} · Proprietario € {{ '%.2f'|format(split_totals.archived_owner_amount or 0) }}</div></div>
       <div class="kpi"><div class="muted">Bilancio archiviato</div><div class="big">€ {{ '%.2f'|format(split_totals.archived_net or 0) }}</div></div>
     </div>
   </div>
@@ -68,11 +68,11 @@
   <h3 style="margin-top:0;">Diviso per anno</h3>
   <div style="overflow-x:auto;">
     <table>
-      <thead><tr><th>Anno</th><th>Guadagni / entrate</th><th>Spese</th><th>Bilancio</th></tr></thead>
+      <thead><tr><th>Anno</th><th>Entrate lorde</th><th>Spese manuali</th><th>IVA archiviati</th><th>Quote proprietari</th><th>Spese totali</th><th>Bilancio</th></tr></thead>
       <tbody>
         {% for row in by_year %}
-        <tr><td><strong>{{ row.year }}</strong></td><td>€ {{ '%.2f'|format(row.income or 0) }}</td><td>€ {{ '%.2f'|format(row.expense or 0) }}</td><td><strong>€ {{ '%.2f'|format(row.net or 0) }}</strong></td></tr>
-        {% else %}<tr><td colspan="4" class="muted">Ancora nessun dato.</td></tr>{% endfor %}
+        <tr><td><strong>{{ row.year }}</strong></td><td>€ {{ '%.2f'|format(row.income or 0) }}</td><td>€ {{ '%.2f'|format(row.manual_expense or 0) }}</td><td>€ {{ '%.2f'|format(row.vat_amount or 0) }}</td><td>€ {{ '%.2f'|format(row.owner_amount or 0) }}</td><td>€ {{ '%.2f'|format(row.expense or 0) }}</td><td><strong>€ {{ '%.2f'|format(row.net or 0) }}</strong></td></tr>
+        {% else %}<tr><td colspan="7" class="muted">Ancora nessun dato.</td></tr>{% endfor %}
       </tbody>
     </table>
   </div>
@@ -82,19 +82,23 @@
   <h3 style="margin-top:0;">Diviso per posto</h3>
   <div style="overflow-x:auto;">
     <table>
-      <thead><tr><th>Posto</th><th>Tipo</th><th>Entrate</th><th>Spese</th><th>Bilancio</th><th>Anni presenti</th><th>Righe</th></tr></thead>
+      <thead><tr><th>Posto</th><th>Tipo</th><th>Percentuali</th><th>Entrate</th><th>Spese manuali</th><th>IVA</th><th>Quota proprietario</th><th>Spese totali</th><th>Bilancio</th><th>Anni presenti</th><th>Righe</th></tr></thead>
       <tbody>
         {% for row in by_store %}
         <tr>
           <td><strong>{{ row.label }}</strong></td>
           <td><span class="pill">{{ row.kind }}</span></td>
+          <td>{% if row.kind == 'archiviato' %}<span class="pill">IVA {{ '%g'|format(row.vat_percent or 0) }}%</span> <span class="pill">Prop. {{ '%g'|format(row.owner_percent or 0) }}%</span>{% else %}<span class="muted">—</span>{% endif %}</td>
           <td>€ {{ '%.2f'|format(row.income or 0) }}</td>
+          <td>€ {{ '%.2f'|format(row.manual_expense or 0) }}</td>
+          <td>€ {{ '%.2f'|format(row.vat_amount or 0) }}</td>
+          <td>€ {{ '%.2f'|format(row.owner_amount or 0) }}</td>
           <td>€ {{ '%.2f'|format(row.expense or 0) }}</td>
           <td><strong>€ {{ '%.2f'|format(row.net or 0) }}</strong></td>
           <td>{{ row.years_text }}</td>
           <td>{{ row.entries_count }} entrate · {{ row.expenses_count }} uscite</td>
         </tr>
-        {% else %}<tr><td colspan="7" class="muted">Ancora nessun dato.</td></tr>{% endfor %}
+        {% else %}<tr><td colspan="11" class="muted">Ancora nessun dato.</td></tr>{% endfor %}
       </tbody>
     </table>
   </div>
