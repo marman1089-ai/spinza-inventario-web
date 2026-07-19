@@ -296,8 +296,8 @@
   }
 </style>
 
-  <link rel="preload" href="/static/css/pro-ui-refresh.css?v=20260501b" as="style">
-  <link rel="stylesheet" href="/static/css/pro-ui-refresh.css?v=20260501b">
+  <link rel="preload" href="/static/css/pro-ui-refresh.css?v=20260719a" as="style">
+  <link rel="stylesheet" href="/static/css/pro-ui-refresh.css?v=20260719a">
 </head>
 <body class="brand-{{ _brand or 'ALL' }}">
 <div id="pageProgress" aria-hidden="true"></div>
@@ -518,6 +518,11 @@
 
       // Se il form ha un campo next_url, lo valorizzo con la pagina corrente (solo path + query)
       const form = ev.target;
+      // Le conferme animate emettono un primo submit solo per chiedere conferma.
+      // Non memorizzare lo scroll finché l'utente non ha realmente accettato.
+      if(form && form.dataset && form.dataset.confirm && form.dataset.uiConfirmed !== '1'){
+        return;
+      }
       if(form && form.querySelector){
         const inp = form.querySelector('input[name="next_url"]');
         if(inp){
@@ -585,7 +590,7 @@
   })();
 </script>
 
-<script defer src="/static/js/pro-ui-refresh.js?v=20260501b"></script>
+<script defer src="/static/js/pro-ui-refresh.js?v=20260719a"></script>
 </body>
 
 </html>

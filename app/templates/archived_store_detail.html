@@ -9,10 +9,19 @@
   .entry-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
   .method-card{border:1px solid var(--line-soft);border-radius:14px;padding:12px;background:var(--panel-2)}
   .custom-row{display:grid;grid-template-columns:1.2fr .8fr;gap:10px;margin-top:10px}
-  .ok-box,.err-box{padding:12px 14px;border-radius:14px;margin-top:14px}
+  .ok-box,.err-box{padding:12px 14px;border-radius:14px;margin-top:14px;animation:noticeIn .3s ease both}
   .ok-box{background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.34);color:var(--accent-emerald-2)}
   .err-box{background:rgba(239,68,68,.12);border:1px solid rgba(248,113,113,.34);color:var(--accent-red-2)}
-  @media(max-width:900px){.kpi-grid,.split-grid,.entry-grid,.custom-row{grid-template-columns:1fr}}
+  .month-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  .month-card{position:relative;overflow:hidden;border:1px solid var(--line-soft);border-radius:16px;padding:14px;background:var(--panel-2);transition:transform .22s ease,border-color .22s ease}
+  .month-card:hover{transform:translateY(-3px);border-color:rgba(96,165,250,.46)}
+  .month-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  .month-values{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}
+  .month-value{padding:9px;border-radius:12px;background:rgba(15,23,42,.58);border:1px solid rgba(148,163,184,.12)}
+  .danger-btn{background:rgba(239,68,68,.10)!important;border-color:rgba(248,113,113,.38)!important;color:#fecaca!important}
+  .danger-btn:hover{background:rgba(239,68,68,.20)!important;border-color:rgba(248,113,113,.68)!important}
+  @keyframes noticeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+  @media(max-width:900px){.kpi-grid,.split-grid,.entry-grid,.custom-row,.month-grid{grid-template-columns:1fr}.month-values{grid-template-columns:1fr 1fr 1fr}}
 </style>
 
 <div class="card">
@@ -35,13 +44,14 @@
 </div>
 
 {% if created %}<div class="ok-box">Negozio archiviato creato. Ora puoi inserire entrate, uscite o incollare le note.</div>{% endif %}
-{% if import_error %}<div class="err-box">{{ import_error }}</div>{% endif %}
-{% if imported_entries or imported_expenses %}<div class="ok-box">Import completato: <strong>{{ imported_entries }}</strong> entrate{% if imported_expenses %} e <strong>{{ imported_expenses }}</strong> uscite{% endif %} salvate.</div>{% endif %}
+{% if import_error %}<div class="err-box" role="alert">{{ import_error }}</div>{% endif %}
+{% if deleted_month %}<div class="ok-box" role="status">Mese <strong>{{ deleted_month[5:7] }}/{{ deleted_month[:4] }}</strong> eliminato: {{ deleted_entries }} entrate e {{ deleted_expenses }} uscite rimosse. Gli altri mesi non sono stati modificati.</div>{% endif %}
+{% if imported_entries or imported_expenses %}<div class="ok-box" role="status">Import completato: <strong>{{ imported_entries }}</strong> entrate{% if imported_expenses %} e <strong>{{ imported_expenses }}</strong> uscite{% endif %} salvate.</div>{% endif %}
 
 <div class="kpi-grid" style="margin-top:14px;">
-  <div class="kpi"><div class="muted">Entrate di sempre</div><div class="big">€ {{ '%.2f'|format(totals.income or 0) }}</div></div>
-  <div class="kpi"><div class="muted">Uscite di sempre</div><div class="big">€ {{ '%.2f'|format(totals.expense or 0) }}</div></div>
-  <div class="kpi"><div class="muted">Bilancio storico</div><div class="big">€ {{ '%.2f'|format(totals.net or 0) }}</div></div>
+  <div class="kpi"><div class="muted">Entrate di sempre</div><div class="big" data-count-up="{{ totals.income or 0 }}" data-count-prefix="€ ">€ {{ '%.2f'|format(totals.income or 0) }}</div></div>
+  <div class="kpi"><div class="muted">Uscite di sempre</div><div class="big" data-count-up="{{ totals.expense or 0 }}" data-count-prefix="€ ">€ {{ '%.2f'|format(totals.expense or 0) }}</div></div>
+  <div class="kpi"><div class="muted">Bilancio storico</div><div class="big" data-count-up="{{ totals.net or 0 }}" data-count-prefix="€ ">€ {{ '%.2f'|format(totals.net or 0) }}</div></div>
   <div class="kpi"><div class="muted">Righe salvate</div><div class="big">{{ totals.entries_count + totals.expenses_count }}</div><div class="muted">{{ totals.entries_count }} entrate · {{ totals.expenses_count }} uscite</div></div>
 </div>
 
@@ -58,6 +68,44 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <div>
+      <h3 style="margin:0 0 4px 0;">Gestione mesi</h3>
+      <div class="muted">Puoi eliminare un mese sbagliato senza cancellare il negozio o gli altri periodi.</div>
+    </div>
+    <span class="pill">{{ by_month|length }} mesi</span>
+  </div>
+  <div class="month-grid">
+    {% for row in by_month %}
+    <article class="month-card">
+      <div class="month-card-head">
+        <div>
+          <div class="muted">Mese</div>
+          <h3 style="margin:2px 0 0 0;">{{ row.label }}</h3>
+        </div>
+        <span class="pill">{{ row.entries_count + row.expenses_count }} righe</span>
+      </div>
+      <div class="month-values">
+        <div class="month-value"><div class="tiny">Entrate</div><strong>€ {{ '%.2f'|format(row.income or 0) }}</strong></div>
+        <div class="month-value"><div class="tiny">Uscite</div><strong>€ {{ '%.2f'|format(row.expense or 0) }}</strong></div>
+        <div class="month-value"><div class="tiny">Bilancio</div><strong>€ {{ '%.2f'|format(row.net or 0) }}</strong></div>
+      </div>
+      <form method="post" action="/gestionale/archiviati/{{ store_key }}/mesi/{{ row.month_key }}/delete"
+            style="margin-top:12px;"
+            data-confirm="Eliminare tutti i dati di {{ row.label }}? Verranno rimosse {{ row.entries_count }} entrate e {{ row.expenses_count }} uscite. Gli altri mesi resteranno intatti."
+            data-confirm-title="Elimina il mese {{ row.label }}"
+            data-confirm-action="Elimina questo mese"
+            data-confirm-danger="true">
+        <button class="btn2 danger-btn" type="submit" style="width:100%;">🗑️ Elimina solo {{ row.label }}</button>
+      </form>
+    </article>
+    {% else %}
+    <div class="muted">Non ci sono ancora mesi salvati.</div>
+    {% endfor %}
   </div>
 </div>
 
@@ -193,7 +241,7 @@
         <thead><tr><th>Data</th><th>Metodo</th><th>Importo</th><th>Note</th><th></th></tr></thead>
         <tbody>
           {% for row in entries %}
-          <tr><td>{{ row.flow_date }}</td><td style="text-transform:capitalize;">{{ row.payment_method }}</td><td><strong>€ {{ '%.2f'|format(row.amount or 0) }}</strong></td><td>{{ row.notes }}</td><td><form method="post" action="/gestionale/archiviati/{{ store_key }}/incassi/{{ row.id }}/delete" onsubmit="return confirm('Eliminare questa entrata?');"><button class="btn2" type="submit">Elimina</button></form></td></tr>
+          <tr><td>{{ row.flow_date }}</td><td style="text-transform:capitalize;">{{ row.payment_method }}</td><td><strong>€ {{ '%.2f'|format(row.amount or 0) }}</strong></td><td>{{ row.notes }}</td><td><form method="post" action="/gestionale/archiviati/{{ store_key }}/incassi/{{ row.id }}/delete" data-confirm="Eliminare questa entrata di € {{ '%.2f'|format(row.amount or 0) }}?" data-confirm-title="Elimina entrata" data-confirm-action="Elimina" data-confirm-danger="true"><button class="btn2 danger-btn" type="submit">Elimina</button></form></td></tr>
           {% else %}<tr><td colspan="5" class="muted">Ancora nessuna entrata.</td></tr>{% endfor %}
         </tbody>
       </table>
@@ -206,7 +254,7 @@
         <thead><tr><th>Data</th><th>Categoria</th><th>Fornitore</th><th>Importo</th><th></th></tr></thead>
         <tbody>
           {% for row in expenses %}
-          <tr><td>{{ row.flow_date }}</td><td>{{ row.category }}</td><td>{{ row.supplier }}</td><td><strong>€ {{ '%.2f'|format(row.amount or 0) }}</strong></td><td><form method="post" action="/gestionale/archiviati/{{ store_key }}/uscite/{{ row.id }}/delete" onsubmit="return confirm('Eliminare questa uscita?');"><button class="btn2" type="submit">Elimina</button></form></td></tr>
+          <tr><td>{{ row.flow_date }}</td><td>{{ row.category }}</td><td>{{ row.supplier }}</td><td><strong>€ {{ '%.2f'|format(row.amount or 0) }}</strong></td><td><form method="post" action="/gestionale/archiviati/{{ store_key }}/uscite/{{ row.id }}/delete" data-confirm="Eliminare questa uscita di € {{ '%.2f'|format(row.amount or 0) }}?" data-confirm-title="Elimina uscita" data-confirm-action="Elimina" data-confirm-danger="true"><button class="btn2 danger-btn" type="submit">Elimina</button></form></td></tr>
           {% else %}<tr><td colspan="5" class="muted">Ancora nessuna uscita.</td></tr>{% endfor %}
         </tbody>
       </table>

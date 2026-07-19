@@ -5,9 +5,14 @@ from contextlib import contextmanager
 import sqlite3
 from pathlib import Path
 
-# Postgres (Supabase)
-import psycopg
-from psycopg.rows import dict_row
+# Postgres (Supabase). Import opzionale: in locale SQLite deve avviarsi anche
+# quando il driver PostgreSQL non è installato.
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except ImportError:  # pragma: no cover - dipende dall'ambiente di deploy
+    psycopg = None
+    dict_row = None
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -44,6 +49,11 @@ def connect():
 
     # --- POSTGRES ---
     if url:
+        if psycopg is None:
+            raise RuntimeError(
+                "DATABASE_URL è impostato, ma il driver psycopg non è installato. "
+                "Installa le dipendenze da requirements.txt."
+            )
         # Se Render ti dà "postgres://", psycopg preferisce "postgresql://"
         if url.startswith("postgres://"):
             url = "postgresql://" + url[len("postgres://") :]
@@ -106,9 +116,12 @@ def init_db():
                     db.rollback()
                 except Exception:
                     pass
-            # Log the *real* failing statement to Render logs (very useful)
-            print("[DB INIT] ERRORE SQL:", repr(e))
-            print("[DB INIT] SQL FALLITA:\n", sql)
+            # Su SQLite le migrazioni compatibili provano volutamente alcune
+            # colonne già presenti. Non sporcare i log con falsi errori.
+            expected_duplicate = (not pg and "duplicate column name" in str(e).lower())
+            if not expected_duplicate:
+                print("[DB INIT] ERRORE SQL:", repr(e))
+                print("[DB INIT] SQL FALLITA:\n", sql)
             raise
 
     with connect() as db:

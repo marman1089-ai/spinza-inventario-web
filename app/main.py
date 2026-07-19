@@ -4188,18 +4188,50 @@ def _archived_store_detail_context(request: Request, user: dict, store_key: str,
         available_payment_methods = _load_cash_payment_methods(cur)
         categories = _expense_category_options()
         by_year = {}
+        by_month = {}
+
+        def _month_bucket(flow_date_value):
+            raw = str(flow_date_value or '').strip()
+            month_key = raw[:7] if re.fullmatch(r'\d{4}-\d{2}.*', raw) else ''
+            if not re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', month_key):
+                return None
+            year, month = month_key.split('-', 1)
+            return by_month.setdefault(month_key, {
+                'month_key': month_key,
+                'label': f'{month}/{year}',
+                'income': 0.0,
+                'expense': 0.0,
+                'net': 0.0,
+                'entries_count': 0,
+                'expenses_count': 0,
+            })
+
         for row in entries:
             year = str(row.get('flow_date') or '')[:4] or 'Senza anno'
             item = by_year.setdefault(year, {'year': year, 'income': 0.0, 'expense': 0.0, 'net': 0.0, 'entries_count': 0, 'expenses_count': 0})
-            item['income'] += float(row.get('amount') or 0)
+            amount = float(row.get('amount') or 0)
+            item['income'] += amount
             item['entries_count'] += 1
+            month_item = _month_bucket(row.get('flow_date'))
+            if month_item is not None:
+                month_item['income'] += amount
+                month_item['entries_count'] += 1
         for row in expenses:
             year = str(row.get('flow_date') or '')[:4] or 'Senza anno'
             item = by_year.setdefault(year, {'year': year, 'income': 0.0, 'expense': 0.0, 'net': 0.0, 'entries_count': 0, 'expenses_count': 0})
-            item['expense'] += float(row.get('amount') or 0)
+            amount = float(row.get('amount') or 0)
+            item['expense'] += amount
             item['expenses_count'] += 1
+            month_item = _month_bucket(row.get('flow_date'))
+            if month_item is not None:
+                month_item['expense'] += amount
+                month_item['expenses_count'] += 1
         for item in by_year.values():
             item['net'] = item['income'] - item['expense']
+        for item in by_month.values():
+            item['income'] = round(item['income'], 2)
+            item['expense'] = round(item['expense'], 2)
+            item['net'] = round(item['income'] - item['expense'], 2)
         totals = {
             'income': round(sum(float(x.get('amount') or 0) for x in entries), 2),
             'expense': round(sum(float(x.get('amount') or 0) for x in expenses), 2),
@@ -4216,6 +4248,7 @@ def _archived_store_detail_context(request: Request, user: dict, store_key: str,
         expenses=expenses,
         totals=totals,
         by_year=sorted(by_year.values(), key=lambda x: x.get('year') or '', reverse=True),
+        by_month=sorted(by_month.values(), key=lambda x: x.get('month_key') or '', reverse=True),
         available_payment_methods=available_payment_methods,
         categories=categories,
         today=date.today().isoformat(),
@@ -4227,7 +4260,7 @@ def _archived_store_detail_context(request: Request, user: dict, store_key: str,
 
 
 @app.get("/gestionale/archiviati", response_class=HTMLResponse)
-def archived_stores_page(request: Request, created: int = 0, error: str = ''):
+def archived_stores_page(request: Request, created: int = 0, deleted: int = 0, deleted_name: str = '', error: str = ''):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -4253,6 +4286,8 @@ def archived_stores_page(request: Request, created: int = 0, error: str = ''):
         stores=STORES,
         archived_stores=archived_rows,
         created=created,
+        deleted=deleted,
+        deleted_name=unquote_plus(deleted_name or ''),
         error=unquote_plus(error or ''),
     )
 
@@ -4271,10 +4306,18 @@ async def archived_store_create(request: Request):
     notes = str(form.get('notes') or '').strip()
     if not name:
         return RedirectResponse('/gestionale/archiviati?error=' + quote_plus('Scrivi il nome del negozio archiviato.'), status_code=HTTP_303_SEE_OTHER)
+    if opened_at and closed_at and closed_at < opened_at:
+        return RedirectResponse('/gestionale/archiviati?error=' + quote_plus('La data di chiusura non può essere precedente alla data di apertura.'), status_code=HTTP_303_SEE_OTHER)
     store_key = _archived_store_slug(name)
     ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
+        duplicate = cur.execute(
+            f"SELECT store_key FROM archived_stores WHERE LOWER(TRIM(name))=LOWER(TRIM({ph})) LIMIT 1",
+            (name,),
+        ).fetchone()
+        if duplicate:
+            return RedirectResponse('/gestionale/archiviati?error=' + quote_plus('Esiste già un negozio archiviato con questo nome. Aprilo oppure usa un nome diverso.'), status_code=HTTP_303_SEE_OTHER)
         cur.execute(
             f"INSERT INTO archived_stores(store_key, name, opened_at, closed_at, notes, created_by) VALUES({ph},{ph},{ph},{ph},{ph},{ph})",
             (store_key, name, opened_at, closed_at, notes, user.get('username') or 'system'),
@@ -4283,7 +4326,7 @@ async def archived_store_create(request: Request):
 
 
 @app.get("/gestionale/archiviati/{store_key}", response_class=HTMLResponse)
-def archived_store_detail(request: Request, store_key: str, created: int = 0, imported_entries: int = 0, imported_expenses: int = 0, import_error: str = ''):
+def archived_store_detail(request: Request, store_key: str, created: int = 0, deleted_month: str = '', deleted_entries: int = 0, deleted_expenses: int = 0, imported_entries: int = 0, imported_expenses: int = 0, import_error: str = ''):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -4293,7 +4336,107 @@ def archived_store_detail(request: Request, store_key: str, created: int = 0, im
     if not ctx:
         return RedirectResponse('/gestionale/archiviati?error=' + quote_plus('Negozio archiviato non trovato.'), status_code=HTTP_303_SEE_OTHER)
     ctx['created'] = created
+    ctx['deleted_month'] = deleted_month if re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', deleted_month or '') else ''
+    ctx['deleted_entries'] = max(0, int(deleted_entries or 0))
+    ctx['deleted_expenses'] = max(0, int(deleted_expenses or 0))
     return render("archived_store_detail.html", **ctx)
+
+
+@app.post("/gestionale/archiviati/{store_key}/delete")
+def archived_store_delete(request: Request, store_key: str):
+    """Elimina un negozio archiviato e i soli movimenti contabili collegati."""
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        store_info = _archived_stores_map(cur).get(store_key)
+        if not store_info:
+            return RedirectResponse('/gestionale/archiviati?error=' + quote_plus('Negozio archiviato non trovato.'), status_code=HTTP_303_SEE_OTHER)
+        store_name = str(store_info.get('name') or store_key)
+        entries_count = _fetch_one_int(cur, f"SELECT COUNT(*) FROM cash_entries WHERE store={ph}", (store_key,))
+        expenses_count = _fetch_one_int(cur, f"SELECT COUNT(*) FROM cash_expenses WHERE store={ph}", (store_key,))
+        _log(
+            cur,
+            store=store_key,
+            username=user.get('username') or 'system',
+            action='DELETE',
+            category='NEGOZIO ARCHIVIATO',
+            name=f"Eliminato {store_name} ({entries_count} entrate, {expenses_count} uscite)",
+            delta=0,
+        )
+        cur.execute(f"DELETE FROM cash_entries WHERE store={ph}", (store_key,))
+        cur.execute(f"DELETE FROM cash_expenses WHERE store={ph}", (store_key,))
+        cur.execute(f"DELETE FROM archived_stores WHERE store_key={ph}", (store_key,))
+
+    return RedirectResponse(
+        '/gestionale/archiviati?deleted=1&deleted_name=' + quote_plus(store_name),
+        status_code=HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/gestionale/archiviati/{store_key}/mesi/{month_key}/delete")
+def archived_store_delete_month(request: Request, store_key: str, month_key: str):
+    """Elimina entrate e uscite di un solo mese, lasciando intatto tutto il resto."""
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+    if not re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', month_key or ''):
+        return RedirectResponse(
+            f'/gestionale/archiviati/{store_key}?import_error=' + quote_plus('Mese non valido.'),
+            status_code=HTTP_303_SEE_OTHER,
+        )
+
+    ph = _ph()
+    month_pattern = month_key + '-%'
+    with connect() as conn:
+        cur = conn.cursor()
+        store_info = _archived_stores_map(cur).get(store_key)
+        if not store_info:
+            return RedirectResponse('/gestionale/archiviati?error=' + quote_plus('Negozio archiviato non trovato.'), status_code=HTTP_303_SEE_OTHER)
+        entries_count = _fetch_one_int(
+            cur,
+            f"SELECT COUNT(*) FROM cash_entries WHERE store={ph} AND flow_date LIKE {ph}",
+            (store_key, month_pattern),
+        )
+        expenses_count = _fetch_one_int(
+            cur,
+            f"SELECT COUNT(*) FROM cash_expenses WHERE store={ph} AND flow_date LIKE {ph}",
+            (store_key, month_pattern),
+        )
+        if not entries_count and not expenses_count:
+            return RedirectResponse(
+                f'/gestionale/archiviati/{store_key}?import_error=' + quote_plus('Non ci sono dati da eliminare per il mese selezionato.'),
+                status_code=HTTP_303_SEE_OTHER,
+            )
+        cur.execute(
+            f"DELETE FROM cash_entries WHERE store={ph} AND flow_date LIKE {ph}",
+            (store_key, month_pattern),
+        )
+        cur.execute(
+            f"DELETE FROM cash_expenses WHERE store={ph} AND flow_date LIKE {ph}",
+            (store_key, month_pattern),
+        )
+        _log(
+            cur,
+            store=store_key,
+            username=user.get('username') or 'system',
+            action='DELETE',
+            category='MESE ARCHIVIATO',
+            name=f"Eliminato mese {month_key} ({entries_count} entrate, {expenses_count} uscite)",
+            delta=0,
+        )
+
+    return RedirectResponse(
+        f'/gestionale/archiviati/{store_key}?deleted_month={month_key}&deleted_entries={entries_count}&deleted_expenses={expenses_count}',
+        status_code=HTTP_303_SEE_OTHER,
+    )
 
 
 @app.post("/gestionale/archiviati/{store_key}/incasso")

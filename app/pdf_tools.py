@@ -2,7 +2,10 @@ import io
 from typing import Tuple
 
 from PIL import Image
-import img2pdf
+try:
+    import img2pdf
+except ImportError:  # l'app resta avviabile; serve solo per convertire immagini
+    img2pdf = None
 from pypdf import PdfReader, PdfWriter
 
 # Impostazioni consigliate per fatture/chiusure:
@@ -12,6 +15,8 @@ DEFAULT_MAX_SIDE = 1400
 DEFAULT_JPEG_QUALITY = 55
 
 def _image_bytes_to_pdf(image_bytes: bytes, max_side: int, jpeg_quality: int) -> bytes:
+    if img2pdf is None:
+        raise RuntimeError('Conversione immagini non disponibile: installa img2pdf da requirements.txt.')
     img = Image.open(io.BytesIO(image_bytes))
     img.load()
 
