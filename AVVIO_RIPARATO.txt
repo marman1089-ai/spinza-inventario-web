@@ -1,0 +1,16 @@
+SITO RIPARATO
+
+Avvio locale (Windows):
+1. Apri il Prompt dei comandi dentro questa cartella.
+2. Esegui: py -3.11 -m venv .venv
+3. Esegui: .venv\Scripts\activate
+4. Esegui: pip install -r requirements.txt
+5. Esegui: python run.py
+6. Apri http://127.0.0.1:8000
+
+Render:
+- Collega questa cartella/repository.
+- Build command: pip install -r requirements.txt
+- Start command: python run.py
+- La versione Python è fissata a 3.11.9.
+- Se usi Supabase/PostgreSQL, imposta DATABASE_URL.

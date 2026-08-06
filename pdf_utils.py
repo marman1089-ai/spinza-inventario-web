@@ -1,8 +1,9 @@
 import io
 from PIL import Image
+
 try:
-    import img2pdf
-except ImportError:  # l'app resta avviabile; serve solo per convertire immagini
+    import img2pdf  # type: ignore
+except ImportError:
     img2pdf = None
 
 def image_to_compressed_pdf(image_bytes: bytes, max_side: int = 1600, jpeg_quality: int = 70) -> bytes:
@@ -11,8 +12,6 @@ def image_to_compressed_pdf(image_bytes: bytes, max_side: int = 1600, jpeg_quali
     ridimensionando e comprimendo prima l'immagine.
     Ritorna i bytes del PDF.
     """
-    if img2pdf is None:
-        raise RuntimeError('Conversione immagini non disponibile: installa img2pdf da requirements.txt.')
     img = Image.open(io.BytesIO(image_bytes))
 
     if img.mode != "RGB":

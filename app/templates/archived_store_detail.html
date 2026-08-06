@@ -9,27 +9,10 @@
   .entry-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
   .method-card{border:1px solid var(--line-soft);border-radius:14px;padding:12px;background:var(--panel-2)}
   .custom-row{display:grid;grid-template-columns:1.2fr .8fr;gap:10px;margin-top:10px}
-  .ok-box,.err-box{padding:12px 14px;border-radius:14px;margin-top:14px;animation:noticeIn .3s ease both}
+  .ok-box,.err-box{padding:12px 14px;border-radius:14px;margin-top:14px}
   .ok-box{background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.34);color:var(--accent-emerald-2)}
   .err-box{background:rgba(239,68,68,.12);border:1px solid rgba(248,113,113,.34);color:var(--accent-red-2)}
-  .month-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-  .month-card{position:relative;overflow:hidden;border:1px solid var(--line-soft);border-radius:16px;padding:14px;background:var(--panel-2);transition:transform .22s ease,border-color .22s ease}
-  .month-card:hover{transform:translateY(-3px);border-color:rgba(96,165,250,.46)}
-  .month-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
-  .month-values{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}
-  .month-value{padding:9px;border-radius:12px;background:rgba(15,23,42,.58);border:1px solid rgba(148,163,184,.12)}
-  .tax-form{display:grid;grid-template-columns:minmax(150px,.7fr) minmax(180px,.9fr) auto;gap:12px;align-items:end}
-  .tax-field{display:grid;gap:6px}
-  .formula-flow{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin-top:14px}
-  .formula-step{position:relative;padding:12px;border:1px solid var(--line-soft);border-radius:14px;background:var(--panel-2);transition:transform .2s ease,border-color .2s ease}
-  .formula-step:hover{transform:translateY(-2px);border-color:rgba(96,165,250,.45)}
-  .formula-step:not(:last-child)::after{content:"→";position:absolute;right:-9px;top:50%;transform:translate(50%,-50%);z-index:2;color:var(--muted);font-weight:900}
-  .formula-amount{font-size:21px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:3px}
-  .danger-btn{background:rgba(239,68,68,.10)!important;border-color:rgba(248,113,113,.38)!important;color:#fecaca!important}
-  .danger-btn:hover{background:rgba(239,68,68,.20)!important;border-color:rgba(248,113,113,.68)!important}
-  @keyframes noticeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
-  @media(max-width:1100px){.formula-flow{grid-template-columns:repeat(3,minmax(0,1fr))}.formula-step:nth-child(3)::after{display:none}}
-  @media(max-width:900px){.kpi-grid,.split-grid,.entry-grid,.custom-row,.month-grid,.tax-form{grid-template-columns:1fr}.month-values{grid-template-columns:1fr 1fr}.formula-flow{grid-template-columns:1fr 1fr}.formula-step::after{display:none}}
+  @media(max-width:900px){.kpi-grid,.split-grid,.entry-grid,.custom-row{grid-template-columns:1fr}}
 </style>
 
 <div class="card">
@@ -52,44 +35,13 @@
 </div>
 
 {% if created %}<div class="ok-box">Negozio archiviato creato. Ora puoi inserire entrate, uscite o incollare le note.</div>{% endif %}
-{% if settings_saved %}<div class="ok-box" role="status">Percentuali aggiornate. IVA e quota proprietario sono state ricalcolate automaticamente su tutti i dati del negozio.</div>{% endif %}
-{% if import_error %}<div class="err-box" role="alert">{{ import_error }}</div>{% endif %}
-{% if deleted_month %}<div class="ok-box" role="status">Mese <strong>{{ deleted_month[5:7] }}/{{ deleted_month[:4] }}</strong> eliminato: {{ deleted_entries }} entrate e {{ deleted_expenses }} uscite rimosse. Gli altri mesi non sono stati modificati.</div>{% endif %}
-{% if imported_entries or imported_expenses %}<div class="ok-box" role="status">Import completato: <strong>{{ imported_entries }}</strong> entrate{% if imported_expenses %} e <strong>{{ imported_expenses }}</strong> uscite{% endif %} salvate.</div>{% endif %}
-
-<div class="card" style="margin-top:14px;">
-  <div class="row" style="justify-content:space-between;align-items:flex-start;gap:14px;">
-    <div>
-      <h3 style="margin:0 0 5px 0;">Percentuali IVA e appalto</h3>
-      <div class="muted">L'IVA viene scorporata dall'incasso lordo. La quota del proprietario viene poi calcolata sull'incasso al netto IVA.</div>
-    </div>
-    <span class="pill">Calcolo automatico</span>
-  </div>
-  <form class="tax-form" method="post" action="/gestionale/archiviati/{{ store_key }}/percentuali" style="margin-top:14px;" data-submit-label="Ricalcolo...">
-    <label class="tax-field">
-      <span>Percentuale IVA</span>
-      <input id="vatPercentInput" type="number" name="vat_percent" min="0" max="100" step="0.01" inputmode="decimal" value="{{ store.vat_percent or 0 }}" required>
-    </label>
-    <label class="tax-field">
-      <span>Percentuale proprietario/appalto</span>
-      <input id="ownerPercentInput" type="number" name="owner_percent" min="0" max="100" step="0.01" inputmode="decimal" value="{{ store.owner_percent or 0 }}" required>
-    </label>
-    <button class="btn" type="submit">Salva e ricalcola</button>
-  </form>
-  <div class="formula-flow" id="archivedFormula" data-gross="{{ totals.income or 0 }}" data-manual="{{ totals.manual_expense or 0 }}">
-    <div class="formula-step"><div class="tiny">Incasso lordo</div><div class="formula-amount">€ <span data-formula="gross">{{ '%.2f'|format(totals.income or 0) }}</span></div></div>
-    <div class="formula-step"><div class="tiny">IVA scorporata</div><div class="formula-amount">− € <span data-formula="vat">{{ '%.2f'|format(totals.vat_amount or 0) }}</span></div></div>
-    <div class="formula-step"><div class="tiny">Incasso netto IVA</div><div class="formula-amount">€ <span data-formula="net-vat">{{ '%.2f'|format(totals.net_vat_income or 0) }}</span></div></div>
-    <div class="formula-step"><div class="tiny">Quota proprietario</div><div class="formula-amount">− € <span data-formula="owner">{{ '%.2f'|format(totals.owner_amount or 0) }}</span></div></div>
-    <div class="formula-step"><div class="tiny">Spese manuali</div><div class="formula-amount">− € <span data-formula="manual">{{ '%.2f'|format(totals.manual_expense or 0) }}</span></div></div>
-    <div class="formula-step"><div class="tiny">Bilancio finale</div><div class="formula-amount">€ <span data-formula="balance">{{ '%.2f'|format(totals.net or 0) }}</span></div></div>
-  </div>
-</div>
+{% if import_error %}<div class="err-box">{{ import_error }}</div>{% endif %}
+{% if imported_entries or imported_expenses %}<div class="ok-box">Import completato: <strong>{{ imported_entries }}</strong> entrate{% if imported_expenses %} e <strong>{{ imported_expenses }}</strong> uscite{% endif %} salvate.</div>{% endif %}
 
 <div class="kpi-grid" style="margin-top:14px;">
-  <div class="kpi"><div class="muted">Entrate lorde di sempre</div><div class="big" data-count-up="{{ totals.income or 0 }}" data-count-prefix="€ ">€ {{ '%.2f'|format(totals.income or 0) }}</div><div class="tiny">Netto IVA € {{ '%.2f'|format(totals.net_vat_income or 0) }}</div></div>
-  <div class="kpi"><div class="muted">Uscite complessive</div><div class="big" data-count-up="{{ totals.expense or 0 }}" data-count-prefix="€ ">€ {{ '%.2f'|format(totals.expense or 0) }}</div><div class="tiny">Manuali € {{ '%.2f'|format(totals.manual_expense or 0) }} · IVA € {{ '%.2f'|format(totals.vat_amount or 0) }} · Proprietario € {{ '%.2f'|format(totals.owner_amount or 0) }}</div></div>
-  <div class="kpi"><div class="muted">Bilancio storico</div><div class="big" data-count-up="{{ totals.net or 0 }}" data-count-prefix="€ ">€ {{ '%.2f'|format(totals.net or 0) }}</div></div>
+  <div class="kpi"><div class="muted">Entrate di sempre</div><div class="big">€ {{ '%.2f'|format(totals.income or 0) }}</div></div>
+  <div class="kpi"><div class="muted">Uscite di sempre</div><div class="big">€ {{ '%.2f'|format(totals.expense or 0) }}</div></div>
+  <div class="kpi"><div class="muted">Bilancio storico</div><div class="big">€ {{ '%.2f'|format(totals.net or 0) }}</div></div>
   <div class="kpi"><div class="muted">Righe salvate</div><div class="big">{{ totals.entries_count + totals.expenses_count }}</div><div class="muted">{{ totals.entries_count }} entrate · {{ totals.expenses_count }} uscite</div></div>
 </div>
 
@@ -97,57 +49,15 @@
   <h3 style="margin-top:0;">Riepilogo per anno</h3>
   <div style="overflow-x:auto;">
     <table>
-      <thead><tr><th>Anno</th><th>Entrate lorde</th><th>IVA</th><th>Netto IVA</th><th>Quota proprietario</th><th>Spese manuali</th><th>Uscite totali</th><th>Bilancio</th><th>Righe</th></tr></thead>
+      <thead><tr><th>Anno</th><th>Entrate</th><th>Uscite</th><th>Bilancio</th><th>Righe</th></tr></thead>
       <tbody>
         {% for row in by_year %}
-        <tr><td><strong>{{ row.year }}</strong></td><td>€ {{ '%.2f'|format(row.income or 0) }}</td><td>€ {{ '%.2f'|format(row.vat_amount or 0) }}</td><td>€ {{ '%.2f'|format(row.net_vat_income or 0) }}</td><td>€ {{ '%.2f'|format(row.owner_amount or 0) }}</td><td>€ {{ '%.2f'|format(row.manual_expense or 0) }}</td><td>€ {{ '%.2f'|format(row.expense or 0) }}</td><td><strong>€ {{ '%.2f'|format(row.net or 0) }}</strong></td><td>{{ row.entries_count }} + {{ row.expenses_count }}</td></tr>
+        <tr><td><strong>{{ row.year }}</strong></td><td>€ {{ '%.2f'|format(row.income or 0) }}</td><td>€ {{ '%.2f'|format(row.expense or 0) }}</td><td><strong>€ {{ '%.2f'|format(row.net or 0) }}</strong></td><td>{{ row.entries_count }} + {{ row.expenses_count }}</td></tr>
         {% else %}
-        <tr><td colspan="9" class="muted">Ancora nessun dato.</td></tr>
+        <tr><td colspan="5" class="muted">Ancora nessun dato.</td></tr>
         {% endfor %}
       </tbody>
     </table>
-  </div>
-</div>
-
-<div class="card" style="margin-top:14px;">
-  <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px;">
-    <div>
-      <h3 style="margin:0 0 4px 0;">Gestione mesi</h3>
-      <div class="muted">Puoi eliminare un mese sbagliato senza cancellare il negozio o gli altri periodi.</div>
-    </div>
-    <span class="pill">{{ by_month|length }} mesi</span>
-  </div>
-  <div class="month-grid">
-    {% for row in by_month %}
-    <article class="month-card">
-      <div class="month-card-head">
-        <div>
-          <div class="muted">Mese</div>
-          <h3 style="margin:2px 0 0 0;">{{ row.label }}</h3>
-        </div>
-        <span class="pill">{{ row.entries_count + row.expenses_count }} righe</span>
-      </div>
-      <div class="month-values">
-        <div class="month-value"><div class="tiny">Entrate lorde</div><strong>€ {{ '%.2f'|format(row.income or 0) }}</strong></div>
-        <div class="month-value"><div class="tiny">IVA</div><strong>€ {{ '%.2f'|format(row.vat_amount or 0) }}</strong></div>
-        <div class="month-value"><div class="tiny">Netto IVA</div><strong>€ {{ '%.2f'|format(row.net_vat_income or 0) }}</strong></div>
-        <div class="month-value"><div class="tiny">Proprietario</div><strong>€ {{ '%.2f'|format(row.owner_amount or 0) }}</strong></div>
-        <div class="month-value"><div class="tiny">Spese manuali</div><strong>€ {{ '%.2f'|format(row.manual_expense or 0) }}</strong></div>
-        <div class="month-value"><div class="tiny">Uscite totali</div><strong>€ {{ '%.2f'|format(row.expense or 0) }}</strong></div>
-        <div class="month-value"><div class="tiny">Bilancio</div><strong>€ {{ '%.2f'|format(row.net or 0) }}</strong></div>
-      </div>
-      <form method="post" action="/gestionale/archiviati/{{ store_key }}/mesi/{{ row.month_key }}/delete"
-            style="margin-top:12px;"
-            data-confirm="Eliminare tutti i dati di {{ row.label }}? Verranno rimosse {{ row.entries_count }} entrate e {{ row.expenses_count }} uscite. Gli altri mesi resteranno intatti."
-            data-confirm-title="Elimina il mese {{ row.label }}"
-            data-confirm-action="Elimina questo mese"
-            data-confirm-danger="true">
-        <button class="btn2 danger-btn" type="submit" style="width:100%;">🗑️ Elimina solo {{ row.label }}</button>
-      </form>
-    </article>
-    {% else %}
-    <div class="muted">Non ci sono ancora mesi salvati.</div>
-    {% endfor %}
   </div>
 </div>
 
@@ -283,7 +193,7 @@
         <thead><tr><th>Data</th><th>Metodo</th><th>Importo</th><th>Note</th><th></th></tr></thead>
         <tbody>
           {% for row in entries %}
-          <tr><td>{{ row.flow_date }}</td><td style="text-transform:capitalize;">{{ row.payment_method }}</td><td><strong>€ {{ '%.2f'|format(row.amount or 0) }}</strong></td><td>{{ row.notes }}</td><td><form method="post" action="/gestionale/archiviati/{{ store_key }}/incassi/{{ row.id }}/delete" data-confirm="Eliminare questa entrata di € {{ '%.2f'|format(row.amount or 0) }}?" data-confirm-title="Elimina entrata" data-confirm-action="Elimina" data-confirm-danger="true"><button class="btn2 danger-btn" type="submit">Elimina</button></form></td></tr>
+          <tr><td>{{ row.flow_date }}</td><td style="text-transform:capitalize;">{{ row.payment_method }}</td><td><strong>€ {{ '%.2f'|format(row.amount or 0) }}</strong></td><td>{{ row.notes }}</td><td><form method="post" action="/gestionale/archiviati/{{ store_key }}/incassi/{{ row.id }}/delete" onsubmit="return confirm('Eliminare questa entrata?');"><button class="btn2" type="submit">Elimina</button></form></td></tr>
           {% else %}<tr><td colspan="5" class="muted">Ancora nessuna entrata.</td></tr>{% endfor %}
         </tbody>
       </table>
@@ -296,39 +206,11 @@
         <thead><tr><th>Data</th><th>Categoria</th><th>Fornitore</th><th>Importo</th><th></th></tr></thead>
         <tbody>
           {% for row in expenses %}
-          <tr><td>{{ row.flow_date }}</td><td>{{ row.category }}</td><td>{{ row.supplier }}</td><td><strong>€ {{ '%.2f'|format(row.amount or 0) }}</strong></td><td><form method="post" action="/gestionale/archiviati/{{ store_key }}/uscite/{{ row.id }}/delete" data-confirm="Eliminare questa uscita di € {{ '%.2f'|format(row.amount or 0) }}?" data-confirm-title="Elimina uscita" data-confirm-action="Elimina" data-confirm-danger="true"><button class="btn2 danger-btn" type="submit">Elimina</button></form></td></tr>
+          <tr><td>{{ row.flow_date }}</td><td>{{ row.category }}</td><td>{{ row.supplier }}</td><td><strong>€ {{ '%.2f'|format(row.amount or 0) }}</strong></td><td><form method="post" action="/gestionale/archiviati/{{ store_key }}/uscite/{{ row.id }}/delete" onsubmit="return confirm('Eliminare questa uscita?');"><button class="btn2" type="submit">Elimina</button></form></td></tr>
           {% else %}<tr><td colspan="5" class="muted">Ancora nessuna uscita.</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
   </div>
 </div>
-<script>
-  document.addEventListener('DOMContentLoaded', function(){
-    const box = document.getElementById('archivedFormula');
-    const vatInput = document.getElementById('vatPercentInput');
-    const ownerInput = document.getElementById('ownerPercentInput');
-    if(!box || !vatInput || !ownerInput) return;
-    const gross = Number(box.dataset.gross || 0);
-    const manual = Number(box.dataset.manual || 0);
-    const money = value => Number(value || 0).toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2});
-    const put = (key, value) => {
-      const target = box.querySelector('[data-formula="' + key + '"]');
-      if(target) target.textContent = money(value);
-    };
-    function updateFormula(){
-      const vatPct = Math.max(0, Math.min(100, Number(String(vatInput.value || 0).replace(',', '.')) || 0));
-      const ownerPct = Math.max(0, Math.min(100, Number(String(ownerInput.value || 0).replace(',', '.')) || 0));
-      const netVat = vatPct > 0 ? gross / (1 + vatPct / 100) : gross;
-      const vat = gross - netVat;
-      const owner = netVat * ownerPct / 100;
-      const balance = gross - vat - owner - manual;
-      put('gross', gross); put('vat', vat); put('net-vat', netVat);
-      put('owner', owner); put('manual', manual); put('balance', balance);
-    }
-    vatInput.addEventListener('input', updateFormula);
-    ownerInput.addEventListener('input', updateFormula);
-    updateFormula();
-  });
-</script>
 {% endblock %}

@@ -5,12 +5,12 @@ from contextlib import contextmanager
 import sqlite3
 from pathlib import Path
 
-# Postgres (Supabase). Import opzionale: in locale SQLite deve avviarsi anche
-# quando il driver PostgreSQL non è installato.
+# Postgres (Supabase). Import facoltativo per permettere l'avvio locale
+# con SQLite anche quando psycopg non è installato.
 try:
-    import psycopg
+    import psycopg  # type: ignore
     from psycopg.rows import dict_row
-except ImportError:  # pragma: no cover - dipende dall'ambiente di deploy
+except ImportError:
     psycopg = None
     dict_row = None
 
@@ -51,9 +51,10 @@ def connect():
     if url:
         if psycopg is None:
             raise RuntimeError(
-                "DATABASE_URL è impostato, ma il driver psycopg non è installato. "
-                "Installa le dipendenze da requirements.txt."
+                "DATABASE_URL è impostato, ma il driver PostgreSQL psycopg non è installato. "
+                "Esegui: pip install -r requirements.txt"
             )
+
         # Se Render ti dà "postgres://", psycopg preferisce "postgresql://"
         if url.startswith("postgres://"):
             url = "postgresql://" + url[len("postgres://") :]
@@ -116,12 +117,17 @@ def init_db():
                     db.rollback()
                 except Exception:
                     pass
-            # Su SQLite le migrazioni compatibili provano volutamente alcune
-            # colonne già presenti. Non sporcare i log con falsi errori.
-            expected_duplicate = (not pg and "duplicate column name" in str(e).lower())
-            if not expected_duplicate:
-                print("[DB INIT] ERRORE SQL:", repr(e))
-                print("[DB INIT] SQL FALLITA:\n", sql)
+
+            # Le migrazioni possono tentare di aggiungere colonne già presenti:
+            # è una condizione normale, non un errore di avvio.
+            message = str(e).lower()
+            sqlstate = getattr(e, "sqlstate", None)
+            if "duplicate column name" in message or sqlstate == "42701":
+                return
+
+            # Logga solo gli errori SQL reali e bloccanti.
+            print("[DB INIT] ERRORE SQL:", repr(e))
+            print("[DB INIT] SQL FALLITA:\n", sql)
             raise
 
     with connect() as db:
@@ -372,31 +378,11 @@ def init_db():
             name TEXT NOT NULL,
             opened_at {date_col},
             closed_at {date_col},
-            vat_percent {qty_col} NOT NULL DEFAULT 0,
-            owner_percent {qty_col} NOT NULL DEFAULT 0,
             notes TEXT NOT NULL DEFAULT '',
             created_by TEXT NOT NULL DEFAULT 'system',
             ts {ts_default}
         )
         """)
-
-        # Compatibilità con i database esistenti: le percentuali sono salvate
-        # sul singolo negozio archiviato e non modificano i negozi attivi.
-        if pg:
-            archived_store_alters = [
-                "ALTER TABLE archived_stores ADD COLUMN IF NOT EXISTS vat_percent DOUBLE PRECISION NOT NULL DEFAULT 0",
-                "ALTER TABLE archived_stores ADD COLUMN IF NOT EXISTS owner_percent DOUBLE PRECISION NOT NULL DEFAULT 0",
-            ]
-        else:
-            archived_store_alters = [
-                "ALTER TABLE archived_stores ADD COLUMN vat_percent REAL NOT NULL DEFAULT 0",
-                "ALTER TABLE archived_stores ADD COLUMN owner_percent REAL NOT NULL DEFAULT 0",
-            ]
-        for stmt in archived_store_alters:
-            try:
-                _safe_exec(cur, stmt)
-            except Exception:
-                pass
 
         _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS sales_report_periods (

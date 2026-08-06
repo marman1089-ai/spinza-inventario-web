@@ -2,11 +2,15 @@ import io
 from typing import Tuple
 
 from PIL import Image
-try:
-    import img2pdf
-except ImportError:  # l'app resta avviabile; serve solo per convertire immagini
-    img2pdf = None
 from pypdf import PdfReader, PdfWriter
+
+# img2pdf è facoltativo. In alcuni ambienti di deploy il pacchetto può
+# non essere disponibile o non avere una build compatibile con la versione
+# di Python. Il sito deve comunque avviarsi: in quel caso usiamo Pillow.
+try:
+    import img2pdf  # type: ignore
+except ImportError:
+    img2pdf = None
 
 # Impostazioni consigliate per fatture/chiusure:
 # - max_side: 1400px (leggibile ma molto più leggero delle foto originali)
@@ -15,8 +19,6 @@ DEFAULT_MAX_SIDE = 1400
 DEFAULT_JPEG_QUALITY = 55
 
 def _image_bytes_to_pdf(image_bytes: bytes, max_side: int, jpeg_quality: int) -> bytes:
-    if img2pdf is None:
-        raise RuntimeError('Conversione immagini non disponibile: installa img2pdf da requirements.txt.')
     img = Image.open(io.BytesIO(image_bytes))
     img.load()
 
@@ -37,7 +39,17 @@ def _image_bytes_to_pdf(image_bytes: bytes, max_side: int, jpeg_quality: int) ->
         optimize=True,
         progressive=True,
     )
-    return img2pdf.convert(jpg_buf.getvalue())
+    jpg_data = jpg_buf.getvalue()
+    if img2pdf is not None:
+        return img2pdf.convert(jpg_data)
+
+    # Fallback senza dipendenze aggiuntive: Pillow crea un PDF valido.
+    pdf_buf = io.BytesIO()
+    with Image.open(io.BytesIO(jpg_data)) as pdf_img:
+        if pdf_img.mode != "RGB":
+            pdf_img = pdf_img.convert("RGB")
+        pdf_img.save(pdf_buf, format="PDF", resolution=100.0)
+    return pdf_buf.getvalue()
 
 def ensure_pdf(
     file_bytes: bytes,

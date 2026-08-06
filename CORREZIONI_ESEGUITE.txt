@@ -1,0 +1,20 @@
+CORREZIONI ESEGUITE
+
+1. Eliminata la struttura duplicata: nello ZIP originale erano presenti più copie complete del progetto annidate.
+2. Reso facoltativo img2pdf: il sito non si blocca più all'import del modulo PDF e usa Pillow come fallback.
+3. Reso facoltativo psycopg durante l'avvio locale con SQLite; se DATABASE_URL è impostato e manca il driver, viene mostrato un errore chiaro.
+4. Fissata Python 3.11.9 per il deploy Render, evitando incompatibilità con dipendenze datate.
+5. Aggiunto health check Render su /select-store.
+6. Eliminati i falsi errori "duplicate column" durante l'aggiornamento del database.
+7. Aggiunti AVVIA_SITO_WINDOWS.bat e AVVIO_RIPARATO.txt.
+
+TEST ESEGUITI
+- Avvio Uvicorn: OK
+- Pagina selezione negozio: OK
+- Login amministratore: OK
+- Inventario: OK
+- Gestionale: OK
+- Log: OK
+- Ordini: OK
+- Fatture: OK
+- Conversione immagine -> PDF: OK

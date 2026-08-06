@@ -3,25 +3,13 @@
 {% block content %}
 <style>
   .arch-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
-  .arch-card{position:relative;overflow:hidden;border:1px solid var(--line-soft);border-radius:18px;padding:16px;background:var(--panel);transition:transform .25s ease,border-color .25s ease,box-shadow .25s ease}
-  .arch-card::before{content:"";position:absolute;inset:0 auto auto 0;width:100%;height:3px;background:linear-gradient(90deg,var(--accent),var(--accent-3));opacity:.72}
-  .arch-card:hover{transform:translateY(-4px);border-color:rgba(96,165,250,.48);box-shadow:0 20px 44px rgba(0,0,0,.28)}
-  .arch-card.is-hidden{display:none}
-  .arch-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
-  .arch-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:14px}
-  .big{font-size:28px;font-weight:800;line-height:1.05;font-variant-numeric:tabular-nums}
+  .arch-card{border:1px solid var(--line-soft);border-radius:18px;padding:16px;background:var(--panel)}
+  .big{font-size:28px;font-weight:800;line-height:1.05}
   .kpi-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-  .ok-box,.err-box{padding:12px 14px;border-radius:14px;margin-top:14px;animation:noticeIn .3s ease both}
+  .ok-box,.err-box{padding:12px 14px;border-radius:14px;margin-top:14px}
   .ok-box{background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.34);color:var(--accent-emerald-2)}
   .err-box{background:rgba(239,68,68,.12);border:1px solid rgba(248,113,113,.34);color:var(--accent-red-2)}
-  .danger-btn{background:rgba(239,68,68,.10)!important;border-color:rgba(248,113,113,.38)!important;color:#fecaca!important}
-  .danger-btn:hover{background:rgba(239,68,68,.20)!important;border-color:rgba(248,113,113,.68)!important}
-  .search-box{display:flex;gap:10px;align-items:center;flex:1;min-width:min(100%,300px)}
-  .search-box input{width:100%;min-width:0}
-  .empty-filter{display:none;grid-column:1/-1;text-align:center;padding:28px}
-  .empty-filter.is-visible{display:block}
-  @keyframes noticeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
-  @media(max-width:900px){.arch-grid,.kpi-grid{grid-template-columns:1fr}.arch-head{align-items:center}.arch-actions>*{flex:1}.arch-actions form,.arch-actions button,.arch-actions a{width:100%;text-align:center}}
+  @media(max-width:900px){.arch-grid,.kpi-grid{grid-template-columns:1fr}}
 </style>
 
 <div class="card">
@@ -37,111 +25,42 @@
   </div>
 </div>
 
-{% if created %}<div class="ok-box" role="status">Negozio archiviato creato.</div>{% endif %}
-{% if deleted %}<div class="ok-box" role="status">Il negozio <strong>{{ deleted_name }}</strong> e tutti i suoi dati contabili sono stati eliminati.</div>{% endif %}
-{% if error %}<div class="err-box" role="alert">{{ error }}</div>{% endif %}
+{% if created %}<div class="ok-box">Negozio archiviato creato.</div>{% endif %}
+{% if error %}<div class="err-box">{{ error }}</div>{% endif %}
 
 <div class="card" style="margin-top:14px;">
   <h3 style="margin-top:0;">Aggiungi negozio archiviato</h3>
-  <form method="post" action="/gestionale/archiviati" class="row" data-submit-label="Creo il negozio...">
-    <input name="name" maxlength="120" placeholder="Nome negozio, es. Le Cure vecchio" required style="min-width:260px;flex:1;">
+  <form method="post" action="/gestionale/archiviati" class="row">
+    <input name="name" placeholder="Nome negozio, es. Le Cure vecchio" required style="min-width:260px;flex:1;">
     <input type="date" name="opened_at" title="Data apertura facoltativa">
     <input type="date" name="closed_at" title="Data chiusura facoltativa">
-    <label class="tiny" style="display:grid;gap:5px;min-width:135px;">IVA %
-      <input type="number" name="vat_percent" min="0" max="100" step="0.01" value="22" inputmode="decimal" required>
-    </label>
-    <label class="tiny" style="display:grid;gap:5px;min-width:175px;">Quota proprietario %
-      <input type="number" name="owner_percent" min="0" max="100" step="0.01" value="20" inputmode="decimal" required>
-    </label>
-    <input name="notes" maxlength="500" placeholder="Note facoltative" style="min-width:220px;flex:1;">
+    <input name="notes" placeholder="Note facoltative" style="min-width:220px;flex:1;">
     <button class="btn" type="submit">Crea negozio</button>
   </form>
-  <div class="muted" style="margin-top:10px;">La quota del proprietario viene calcolata sull'incasso dopo lo scorporo dell'IVA.</div>
 </div>
 
-<div class="card" style="margin-top:14px;">
-  <div class="row" style="justify-content:space-between;align-items:center;">
-    <div>
-      <h3 style="margin:0 0 4px 0;">Storico negozi</h3>
-      <div class="muted"><span id="archVisibleCount">{{ archived_stores|length }}</span> negozi visualizzati</div>
-    </div>
-    <label class="search-box">
-      <span aria-hidden="true">🔎</span>
-      <input id="archivedStoreSearch" type="search" autocomplete="off" placeholder="Cerca un negozio archiviato..." aria-label="Cerca negozio archiviato">
-    </label>
-  </div>
-</div>
-
-<div class="arch-grid" id="archivedStoresGrid" style="margin-top:14px;">
+<div class="arch-grid" style="margin-top:14px;">
   {% for row in archived_stores %}
-  <article class="arch-card" data-store-card data-store-name="{{ row.name|lower }}">
-    <div class="arch-head">
-      <div>
-        <div class="pill" style="width:max-content;margin-bottom:10px;">Archiviato</div>
-        <h3 style="margin:0 0 8px 0;">{{ row.name }}</h3>
-      </div>
-      <span class="pill" title="Totale righe salvate">{{ row.entries_count + row.expenses_count }} righe</span>
-    </div>
+  <div class="arch-card">
+    <div class="pill" style="width:max-content;margin-bottom:10px;">Archiviato</div>
+    <h3 style="margin:0 0 8px 0;">{{ row.name }}</h3>
     <div class="muted">
       {% if row.opened_at %}Apertura: {{ row.opened_at }}{% endif %}
       {% if row.closed_at %}{% if row.opened_at %} · {% endif %}Chiusura: {{ row.closed_at }}{% endif %}
       {% if not row.opened_at and not row.closed_at %}Date non impostate{% endif %}
     </div>
     {% if row.notes %}<div class="tiny" style="margin-top:8px;">{{ row.notes }}</div>{% endif %}
-    <div class="row" style="margin-top:10px;gap:7px;">
-      <span class="pill">IVA {{ '%g'|format(row.vat_percent or 0) }}%</span>
-      <span class="pill">Proprietario {{ '%g'|format(row.owner_percent or 0) }}%</span>
-    </div>
     <div class="kpi-grid" style="grid-template-columns:1fr;gap:8px;margin-top:12px;">
-      <div class="kpi"><div class="muted">Entrate</div><div class="big" data-count-up="{{ row.income_total or 0 }}" data-count-prefix="€ ">€ {{ '%.2f'|format(row.income_total or 0) }}</div></div>
-      <div class="kpi">
-        <div class="muted">Uscite complessive</div>
-        <div class="big" data-count-up="{{ row.expense_total or 0 }}" data-count-prefix="€ ">€ {{ '%.2f'|format(row.expense_total or 0) }}</div>
-        <div class="tiny">Manuali € {{ '%.2f'|format(row.manual_expense or 0) }} · IVA € {{ '%.2f'|format(row.vat_amount or 0) }} · Proprietario € {{ '%.2f'|format(row.owner_amount or 0) }}</div>
-      </div>
-      <div class="kpi"><div class="muted">Bilancio</div><div class="big" data-count-up="{{ row.net_total or 0 }}" data-count-prefix="€ ">€ {{ '%.2f'|format(row.net_total or 0) }}</div></div>
+      <div class="kpi"><div class="muted">Entrate</div><div class="big">€ {{ '%.2f'|format(row.income_total or 0) }}</div></div>
+      <div class="kpi"><div class="muted">Uscite</div><div class="big">€ {{ '%.2f'|format(row.expense_total or 0) }}</div></div>
+      <div class="kpi"><div class="muted">Bilancio</div><div class="big">€ {{ '%.2f'|format(row.net_total or 0) }}</div></div>
     </div>
-    <div class="arch-actions">
-      <a class="btn" href="/gestionale/archiviati/{{ row.store_key }}" style="text-decoration:none;display:inline-block;">Apri storico</a>
-      <form method="post" action="/gestionale/archiviati/{{ row.store_key }}/delete"
-            data-confirm="Eliminare definitivamente {{ row.name }}? Verranno cancellate {{ row.entries_count }} entrate e {{ row.expenses_count }} uscite. Questa operazione non si può annullare."
-            data-confirm-title="Elimina negozio archiviato"
-            data-confirm-action="Elimina tutto"
-            data-confirm-danger="true">
-        <button class="btn2 danger-btn" type="submit">🗑️ Elimina</button>
-      </form>
-    </div>
-  </article>
+    <a class="btn" href="/gestionale/archiviati/{{ row.store_key }}" style="text-decoration:none;display:inline-block;margin-top:14px;">Apri storico</a>
+  </div>
   {% else %}
   <div class="card" style="grid-column:1/-1;">
     <div class="muted">Ancora nessun negozio archiviato. Crea il primo qui sopra e poi incolla i dati storici.</div>
   </div>
   {% endfor %}
-  <div class="card empty-filter" id="archivedSearchEmpty">
-    <div style="font-size:30px;margin-bottom:8px;">🔎</div>
-    <strong>Nessun negozio trovato</strong>
-    <div class="muted" style="margin-top:4px;">Prova a cambiare il testo della ricerca.</div>
-  </div>
 </div>
-
-<script>
-  document.addEventListener('DOMContentLoaded', function(){
-    const search = document.getElementById('archivedStoreSearch');
-    const cards = Array.from(document.querySelectorAll('[data-store-card]'));
-    const empty = document.getElementById('archivedSearchEmpty');
-    const count = document.getElementById('archVisibleCount');
-    if(!search || !cards.length) return;
-    search.addEventListener('input', function(){
-      const query = (search.value || '').trim().toLocaleLowerCase('it');
-      let visible = 0;
-      cards.forEach(function(card){
-        const show = !query || (card.dataset.storeName || '').includes(query);
-        card.classList.toggle('is-hidden', !show);
-        if(show) visible += 1;
-      });
-      if(count) count.textContent = String(visible);
-      if(empty) empty.classList.toggle('is-visible', visible === 0);
-    });
-  });
-</script>
 {% endblock %}
