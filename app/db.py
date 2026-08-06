@@ -5,10 +5,10 @@ from contextlib import contextmanager
 import sqlite3
 from pathlib import Path
 
-# Postgres (Supabase). Import facoltativo per permettere l'avvio locale
-# con SQLite anche quando psycopg non è installato.
+# Postgres (Supabase). In locale può non essere installato: in quel caso
+# SQLite continua a funzionare, mentre PostgreSQL mostra un errore esplicito.
 try:
-    import psycopg  # type: ignore
+    import psycopg
     from psycopg.rows import dict_row
 except ImportError:
     psycopg = None
@@ -16,12 +16,6 @@ except ImportError:
 
 
 BASE_DIR = Path(__file__).resolve().parent
-
-# Se la DATABASE_URL configurata sul servizio non e' raggiungibile, il sito
-# puo' continuare a funzionare con il database SQLite incluso nel progetto.
-# Questo evita che un vecchio URL Supabase blocchi completamente l'avvio.
-_FORCE_SQLITE_FALLBACK = os.environ.get("USE_SQLITE", "0").strip().lower() in {"1", "true", "yes", "on"}
-_SQLITE_FALLBACK_REASON: str | None = None
 
 
 def _sqlite_dict_factory(cursor, row):
@@ -34,44 +28,10 @@ SQLITE_PATH = _ROOT_SQLITE_PATH if _ROOT_SQLITE_PATH.exists() and _ROOT_SQLITE_P
 
 
 def _database_url() -> str | None:
-    if _FORCE_SQLITE_FALLBACK:
-        return None
     url = os.environ.get("DATABASE_URL")
     if not url:
         return None
     return url.strip()
-
-
-def activate_sqlite_fallback(exc: Exception | str) -> None:
-    """Forza SQLite per tutto il processo dopo un errore di connessione Postgres."""
-    global _FORCE_SQLITE_FALLBACK, _SQLITE_FALLBACK_REASON
-    _FORCE_SQLITE_FALLBACK = True
-    _SQLITE_FALLBACK_REASON = str(exc)
-
-
-def sqlite_fallback_reason() -> str | None:
-    return _SQLITE_FALLBACK_REASON
-
-
-def can_fallback_from_postgres(exc: Exception) -> bool:
-    """Ritorna True solo per errori di connessione PostgreSQL, non per errori SQL."""
-    if os.environ.get("ALLOW_SQLITE_FALLBACK", "1").strip().lower() in {"0", "false", "no", "off"}:
-        return False
-    if psycopg is not None and isinstance(exc, psycopg.OperationalError):
-        return True
-    message = str(exc).lower()
-    connection_markers = (
-        "connection failed",
-        "could not connect",
-        "connection refused",
-        "name or service not known",
-        "enotfound",
-        "tenant/user",
-        "password authentication failed",
-        "driver postgresql psycopg non è installato",
-        "psycopg non è installato",
-    )
-    return bool(os.environ.get("DATABASE_URL")) and any(marker in message for marker in connection_markers)
 
 
 def using_postgres() -> bool:
@@ -89,19 +49,27 @@ def connect():
 
     # --- POSTGRES ---
     if url:
-        if psycopg is None:
-            raise RuntimeError(
-                "DATABASE_URL è impostato, ma il driver PostgreSQL psycopg non è installato. "
-                "Esegui: pip install -r requirements.txt"
-            )
-
         # Se Render ti dà "postgres://", psycopg preferisce "postgresql://"
         if url.startswith("postgres://"):
             url = "postgresql://" + url[len("postgres://") :]
 
         # IMPORTANTISSIMO per Supabase: SSL
         # (Supabase richiede SSL, quindi enforce)
-        conn = psycopg.connect(url, row_factory=dict_row, sslmode="require", connect_timeout=8)
+        if psycopg is None:
+            raise RuntimeError(
+                "DATABASE_URL è impostata ma il pacchetto psycopg non è installato. "
+                "Esegui: pip install -r requirements.txt"
+            )
+        try:
+            conn = psycopg.connect(url, row_factory=dict_row, sslmode="require")
+        except psycopg.OperationalError as exc:
+            message = str(exc)
+            print("[DATABASE] Connessione PostgreSQL/Supabase non riuscita.")
+            print("[DATABASE] Nessun dato è stato cancellato o modificato.")
+            if "tenant/user" in message.lower() and "not found" in message.lower():
+                print("[DATABASE] La DATABASE_URL usa un progetto/tenant Supabase non valido o non più esistente.")
+                print("[DATABASE] Copiare una nuova Session pooler connection string dal pannello Supabase > Connect.")
+            raise
         try:
             yield conn
             conn.commit()
@@ -157,15 +125,7 @@ def init_db():
                     db.rollback()
                 except Exception:
                     pass
-
-            # Le migrazioni possono tentare di aggiungere colonne già presenti:
-            # è una condizione normale, non un errore di avvio.
-            message = str(e).lower()
-            sqlstate = getattr(e, "sqlstate", None)
-            if "duplicate column name" in message or sqlstate == "42701":
-                return
-
-            # Logga solo gli errori SQL reali e bloccanti.
+            # Log the *real* failing statement to Render logs (very useful)
             print("[DB INIT] ERRORE SQL:", repr(e))
             print("[DB INIT] SQL FALLITA:\n", sql)
             raise

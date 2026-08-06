@@ -1,4 +1,2 @@
 Pillow==10.4.0
-psycopg[binary]==3.2.3
 psycopg2-binary==2.9.9
-pypdf==4.3.1

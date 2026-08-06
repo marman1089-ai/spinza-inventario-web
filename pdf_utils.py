@@ -1,10 +1,6 @@
 import io
 from PIL import Image
-
-try:
-    import img2pdf  # type: ignore
-except ImportError:
-    img2pdf = None
+import img2pdf
 
 def image_to_compressed_pdf(image_bytes: bytes, max_side: int = 1600, jpeg_quality: int = 70) -> bytes:
     """
