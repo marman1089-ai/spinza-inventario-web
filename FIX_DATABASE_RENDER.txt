@@ -1,0 +1,45 @@
+CORREZIONE AVVIO RENDER - DATABASE
+===================================
+
+ERRORE TROVATO
+Render riceve una DATABASE_URL PostgreSQL/Supabase non valida.
+Il messaggio "tenant/user ... not found" indica che il database configurato
+non esiste più, il project reference è errato oppure è stato usato un URL
+Supabase vecchio.
+
+CORREZIONE INSERITA NEL CODICE
+- Il sito prova normalmente a usare PostgreSQL.
+- Se PostgreSQL risponde con un errore di connessione, il sito NON si spegne.
+- Passa automaticamente al file SQLite spinza.db incluso nel progetto.
+- Nel log comparirà: "DB EFFETTIVO: SQLITE".
+
+IMPOSTAZIONI RENDER
+Build Command:
+    pip install -r requirements.txt
+
+Start Command:
+    uvicorn app.main:app --host 0.0.0.0 --port $PORT
+
+La Root Directory deve essere vuota se app, requirements.txt e run.py si
+trovano direttamente nella radice del repository.
+
+PER SISTEMARE DEFINITIVAMENTE SUPABASE
+In Render > Environment:
+1. Elimina la vecchia DATABASE_URL oppure sostituiscila con il nuovo URL
+   PostgreSQL copiato dal progetto Supabase corretto.
+2. Esegui un nuovo deploy.
+3. Nel log deve comparire: "DB EFFETTIVO: POSTGRES".
+
+IMPORTANTE
+SQLite permette al sito di avviarsi subito, ma sul filesystem temporaneo di
+Render le modifiche possono essere perse dopo riavvii o nuovi deploy.
+Per conservare i dati online in modo stabile è necessario correggere la
+DATABASE_URL di PostgreSQL/Supabase.
+
+VARIABILI FACOLTATIVE
+USE_SQLITE=1
+    Ignora sempre DATABASE_URL e usa SQLite.
+
+ALLOW_SQLITE_FALLBACK=0
+    Disattiva il passaggio automatico a SQLite e rende gli errori PostgreSQL
+    nuovamente bloccanti.

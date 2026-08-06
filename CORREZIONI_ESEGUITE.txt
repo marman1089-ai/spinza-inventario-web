@@ -18,3 +18,9 @@ TEST ESEGUITI
 - Ordini: OK
 - Fatture: OK
 - Conversione immagine -> PDF: OK
+
+AGGIORNAMENTO DATABASE RENDER (06/08/2026)
+- Gestita DATABASE_URL Supabase non valida senza arrestare Uvicorn.
+- Fallback automatico e globale a SQLite solo per errori di connessione.
+- Aggiunto connect_timeout PostgreSQL di 8 secondi.
+- Verificato avvio con DATABASE_URL errata: HTTP 200 su /select-store.

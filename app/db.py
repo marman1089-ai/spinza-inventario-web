@@ -17,6 +17,12 @@ except ImportError:
 
 BASE_DIR = Path(__file__).resolve().parent
 
+# Se la DATABASE_URL configurata sul servizio non e' raggiungibile, il sito
+# puo' continuare a funzionare con il database SQLite incluso nel progetto.
+# Questo evita che un vecchio URL Supabase blocchi completamente l'avvio.
+_FORCE_SQLITE_FALLBACK = os.environ.get("USE_SQLITE", "0").strip().lower() in {"1", "true", "yes", "on"}
+_SQLITE_FALLBACK_REASON: str | None = None
+
 
 def _sqlite_dict_factory(cursor, row):
     return {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
@@ -28,10 +34,44 @@ SQLITE_PATH = _ROOT_SQLITE_PATH if _ROOT_SQLITE_PATH.exists() and _ROOT_SQLITE_P
 
 
 def _database_url() -> str | None:
+    if _FORCE_SQLITE_FALLBACK:
+        return None
     url = os.environ.get("DATABASE_URL")
     if not url:
         return None
     return url.strip()
+
+
+def activate_sqlite_fallback(exc: Exception | str) -> None:
+    """Forza SQLite per tutto il processo dopo un errore di connessione Postgres."""
+    global _FORCE_SQLITE_FALLBACK, _SQLITE_FALLBACK_REASON
+    _FORCE_SQLITE_FALLBACK = True
+    _SQLITE_FALLBACK_REASON = str(exc)
+
+
+def sqlite_fallback_reason() -> str | None:
+    return _SQLITE_FALLBACK_REASON
+
+
+def can_fallback_from_postgres(exc: Exception) -> bool:
+    """Ritorna True solo per errori di connessione PostgreSQL, non per errori SQL."""
+    if os.environ.get("ALLOW_SQLITE_FALLBACK", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return False
+    if psycopg is not None and isinstance(exc, psycopg.OperationalError):
+        return True
+    message = str(exc).lower()
+    connection_markers = (
+        "connection failed",
+        "could not connect",
+        "connection refused",
+        "name or service not known",
+        "enotfound",
+        "tenant/user",
+        "password authentication failed",
+        "driver postgresql psycopg non è installato",
+        "psycopg non è installato",
+    )
+    return bool(os.environ.get("DATABASE_URL")) and any(marker in message for marker in connection_markers)
 
 
 def using_postgres() -> bool:
@@ -61,7 +101,7 @@ def connect():
 
         # IMPORTANTISSIMO per Supabase: SSL
         # (Supabase richiede SSL, quindi enforce)
-        conn = psycopg.connect(url, row_factory=dict_row, sslmode="require")
+        conn = psycopg.connect(url, row_factory=dict_row, sslmode="require", connect_timeout=8)
         try:
             yield conn
             conn.commit()

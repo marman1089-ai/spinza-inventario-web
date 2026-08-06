@@ -17,7 +17,10 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.status import HTTP_303_SEE_OTHER
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from .db import connect, init_db, ensure_db_exists, using_postgres
+from .db import (
+    connect, init_db, ensure_db_exists, using_postgres,
+    activate_sqlite_fallback, can_fallback_from_postgres, sqlite_fallback_reason,
+)
 from .security import verify_password, legacy_sha256, make_password
 from .migrate_from_old import run_migration
 
@@ -380,9 +383,24 @@ def _startup():
     print("[STARTUP] DATABASE_URL presente:", bool(db_url))
     print("[STARTUP] DB TYPE:", "POSTGRES (Supabase)" if using_postgres() else "SQLITE (ATTENZIONE)")
 
-    ensure_db_exists()
-    init_db()
+    try:
+        ensure_db_exists()
+        init_db()
+    except Exception as exc:
+        if not can_fallback_from_postgres(exc):
+            raise
+
+        # Una DATABASE_URL vecchia o errata non deve spegnere l'intero sito.
+        # Da questo punto tutte le query del processo useranno SQLite.
+        activate_sqlite_fallback(exc)
+        print("[STARTUP] ATTENZIONE: PostgreSQL non raggiungibile.")
+        print("[STARTUP] Passaggio automatico a SQLITE.")
+        print("[STARTUP] Motivo:", sqlite_fallback_reason())
+        ensure_db_exists()
+        init_db()
+
     print("[STARTUP] init_db() completato")
+    print("[STARTUP] DB EFFETTIVO:", "POSTGRES" if using_postgres() else "SQLITE")
 
     ensure_admin_user()
     print("[STARTUP] ensure_admin_user() completato")
