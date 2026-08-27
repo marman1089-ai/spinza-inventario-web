@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% set title = "Storico mensile" %}
+{% block content %}
+{% macro money(v) -%}
+  € {{ "%.2f"|format((v or 0)|float)|replace('.', ',') }}
+{%- endmacro %}
+
+<style>
+  .mt-hero{position:relative;overflow:hidden;margin-bottom:14px;isolation:isolate}
+  .mt-hero::before{content:"";position:absolute;width:330px;height:330px;right:-130px;top:-190px;border-radius:50%;background:radial-gradient(circle, color-mix(in srgb, var(--brand-cyan) 30%, transparent), transparent 68%);filter:blur(2px);z-index:-1;pointer-events:none}
+  .mt-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
+  .mt-title{display:flex;align-items:center;gap:11px}
+  .mt-title-icon{width:42px;height:42px;display:grid;place-items:center;border-radius:15px;background:linear-gradient(145deg,color-mix(in srgb,var(--brand-primary) 32%,transparent),color-mix(in srgb,var(--brand-blue) 25%,transparent));border:1px solid var(--brand-line-strong);box-shadow:0 12px 28px rgba(0,0,0,.22)}
+  .mt-filter{display:grid;grid-template-columns:minmax(170px,1fr) minmax(170px,1fr) auto auto;gap:9px;align-items:end;margin-top:15px}
+  .mt-filter label{display:flex;flex-direction:column;gap:5px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--brand-muted)}
+  .mt-filter select{width:100%}
+  .mt-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}
+  .mt-kpi{position:relative;overflow:hidden;padding:14px!important;min-height:102px}
+  .mt-kpi::after{content:"";position:absolute;left:12px;right:12px;bottom:0;height:2px;border-radius:999px;background:linear-gradient(90deg,transparent,var(--brand-primary-2),transparent);opacity:.65}
+  .mt-kpi .label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--brand-muted);font-weight:850}
+  .mt-kpi .value{font-size:clamp(21px,2.3vw,30px);font-weight:900;letter-spacing:-.04em;margin-top:8px}
+  .mt-kpi .sub{font-size:11px;color:var(--brand-faint);margin-top:5px}
+  .mt-timeline{position:relative;display:flex;flex-direction:column;gap:9px;padding-left:26px}
+  .mt-timeline::before{content:"";position:absolute;left:9px;top:14px;bottom:14px;width:2px;background:linear-gradient(180deg,var(--brand-primary),var(--brand-cyan),var(--brand-blue));border-radius:999px;opacity:.62;box-shadow:0 0 18px color-mix(in srgb,var(--brand-cyan) 28%,transparent)}
+  .mt-month{position:relative;display:grid;grid-template-columns:minmax(150px,1.15fr) repeat(3,minmax(120px,.8fr)) auto;gap:10px;align-items:center;padding:13px 14px!important;margin:0!important;transition:transform .24s var(--ease-ui),border-color .2s ease,box-shadow .24s var(--ease-ui)!important}
+  .mt-month::before{content:"";position:absolute;left:-23px;top:50%;width:12px;height:12px;transform:translateY(-50%);border-radius:50%;background:var(--brand-panel-solid);border:3px solid var(--brand-cyan);box-shadow:0 0 0 4px color-mix(in srgb,var(--brand-cyan) 13%,transparent),0 0 18px color-mix(in srgb,var(--brand-cyan) 40%,transparent)}
+  .mt-month:hover{transform:translateX(3px);border-color:var(--brand-line-strong)!important;box-shadow:var(--shadow-hover)!important}
+  .mt-month-title strong{font-size:17px;text-transform:capitalize}
+  .mt-month-title .meta{font-size:11px;color:var(--brand-muted);margin-top:4px}
+  .mt-amount{display:flex;flex-direction:column;gap:3px}
+  .mt-amount span{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--brand-faint);font-weight:850}
+  .mt-amount strong{font-size:15px;white-space:nowrap}
+  .mt-income strong{color:#4ade80!important}.mt-expense strong{color:#fb7185!important}.mt-net.pos strong{color:#4ade80!important}.mt-net.neg strong{color:#fb7185!important}
+  .mt-open{white-space:nowrap;text-decoration:none}
+  .mt-empty{padding:28px;text-align:center}
+  .mt-range-note{margin-top:8px;font-size:12px;color:var(--brand-muted)}
+  @media(max-width:900px){
+    .mt-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .mt-filter{grid-template-columns:1fr 1fr}.mt-filter .btn,.mt-filter .btn2{width:100%}
+    .mt-month{grid-template-columns:1fr 1fr 1fr;gap:9px}.mt-month-title{grid-column:1 / -1}.mt-open{grid-column:1 / -1;text-align:center}
+  }
+  @media(max-width:560px){
+    .mt-filter{grid-template-columns:1fr}.mt-summary{grid-template-columns:1fr 1fr;gap:7px}.mt-kpi{min-height:88px;padding:10px!important}.mt-kpi .value{font-size:18px}.mt-timeline{padding-left:20px}.mt-timeline::before{left:6px}.mt-month{grid-template-columns:1fr 1fr;padding:11px!important}.mt-month::before{left:-19px;width:10px;height:10px}.mt-month-title,.mt-net,.mt-open{grid-column:1 / -1}.mt-open{width:100%}
+  }
+</style>
+
+<div class="card mt-hero">
+  <div class="mt-head">
+    <div>
+      <div class="mt-title">
+        <div class="mt-title-icon">🗓️</div>
+        <div>
+          <h2 style="margin:0;">Storico mensile</h2>
+          <div class="muted">Entrate e uscite mese per mese · {{ scope_label }}</div>
+        </div>
+      </div>
+      <div class="mt-range-note">Ordine cronologico dal mese più vecchio al più recente. I mesi senza movimenti restano visibili con valore zero.</div>
+    </div>
+    <a href="/gestionale" class="btn2" style="text-decoration:none;">← Dashboard</a>
+  </div>
+
+  <form method="get" action="/gestionale/storico-mensile" class="mt-filter">
+    <label>Da mese
+      <select name="from_month">
+        {% for option in timeline.options %}
+          <option value="{{ option.key }}" {% if option.key == timeline.selected_from %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>A mese
+      <select name="to_month">
+        {% for option in timeline.options %}
+          <option value="{{ option.key }}" {% if option.key == timeline.selected_to %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button class="btn" type="submit">Applica range</button>
+    <a class="btn2" href="/gestionale/storico-mensile" style="text-decoration:none;text-align:center;">Tutto lo storico</a>
+  </form>
+  {% if timeline.range_swapped %}<div class="mt-range-note">Il range era invertito: l’ho riordinato automaticamente.</div>{% endif %}
+</div>
+
+<div class="mt-summary">
+  <div class="card mt-kpi">
+    <div class="label">Entrate nel range</div>
+    <div class="value pos">{{ money(timeline.totals.income_total) }}</div>
+    <div class="sub">Media {{ money(timeline.totals.avg_income) }} / mese</div>
+  </div>
+  <div class="card mt-kpi">
+    <div class="label">Uscite nel range</div>
+    <div class="value neg">{{ money(timeline.totals.expense_total) }}</div>
+    <div class="sub">Media {{ money(timeline.totals.avg_expense) }} / mese</div>
+  </div>
+  <div class="card mt-kpi">
+    <div class="label">Bilancio</div>
+    <div class="value {% if timeline.totals.net_total >= 0 %}pos{% else %}neg{% endif %}">{{ money(timeline.totals.net_total) }}</div>
+    <div class="sub">Entrate − uscite</div>
+  </div>
+  <div class="card mt-kpi">
+    <div class="label">Periodo</div>
+    <div class="value">{{ timeline.totals.months_count }}</div>
+    <div class="sub">mesi · {{ timeline.totals.income_count + timeline.totals.expense_count }} movimenti</div>
+  </div>
+</div>
+
+{% if timeline.rows %}
+  <div class="mt-timeline" aria-label="Storico mensile">
+    {% for row in timeline.rows %}
+      <div class="card mt-month">
+        <div class="mt-month-title">
+          <strong>{{ row.label }}</strong>
+          <div class="meta">{{ row.income_count }} entrate · {{ row.expense_count }} uscite{% if brand == 'ALL' and row.store_labels != '—' %} · {{ row.store_labels }}{% endif %}</div>
+        </div>
+        <div class="mt-amount mt-income"><span>Entrate</span><strong>{{ money(row.income_total) }}</strong></div>
+        <div class="mt-amount mt-expense"><span>Uscite</span><strong>{{ money(row.expense_total) }}</strong></div>
+        <div class="mt-amount mt-net {% if row.net_total >= 0 %}pos{% else %}neg{% endif %}"><span>Bilancio</span><strong>{{ money(row.net_total) }}</strong></div>
+        <a class="btn2 mt-open" href="{{ row.detail_url }}">Apri mese →</a>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="card mt-empty">
+    <h3 style="margin-top:0;">Nessun mese disponibile</h3>
+    <div class="muted">Quando inserirai entrate o uscite, compariranno qui in ordine cronologico.</div>
+  </div>
+{% endif %}
+{% endblock %}

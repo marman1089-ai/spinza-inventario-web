@@ -83,6 +83,7 @@
         {% if can_view_finance %}
           <a href="/gestionale/incassi" class="btn2" style="text-decoration:none;display:inline-block;">Incassi</a>
           <a href="/gestionale/uscite" class="btn2" style="text-decoration:none;display:inline-block;">Uscite</a>
+          <a href="/gestionale/storico-mensile" class="btn2" style="text-decoration:none;display:inline-block;">🗓️ Storico mensile</a>
           <a href="/gestionale/report-vendite?store={{ sales_overview.store }}&month_key={{ selected_month }}" class="btn2" style="text-decoration:none;display:inline-block;">Report vendite</a>
         {% endif %}
       </div>
@@ -356,7 +357,10 @@
       <h3 style="margin:4px 0 0 0;">Riepilogo entrate / uscite per mese</h3>
       <div class="muted" style="margin-top:6px;">Da qui puoi pulire velocemente un mese sbagliato: il pulsante elimina insieme incassi e uscite di quel mese.</div>
     </div>
-    <div class="pill">{{ month_summaries|length }} mesi</div>
+    <div class="row" style="align-items:center;justify-content:flex-end;">
+      <div class="pill">{{ month_summaries|length }} mesi</div>
+      <a class="btn2" href="/gestionale/storico-mensile" style="text-decoration:none;">🗓️ Apri storico mensile</a>
+    </div>
   </div>
   <div class="month-summary-wrap">
     <table class="month-summary-table">

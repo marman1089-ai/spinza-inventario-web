@@ -120,15 +120,21 @@ def init_db():
         try:
             cur.execute(sql)
         except Exception as e:
+            # Su SQLite gli ALTER TABLE usati per migrare DB vecchi non hanno
+            # sempre IF NOT EXISTS. Una colonna già presente non è un errore:
+            # la trattiamo come migrazione già applicata, evitando falsi allarmi.
+            if not pg and isinstance(e, sqlite3.OperationalError) and 'duplicate column name' in str(e).lower():
+                return False
             if pg:
                 try:
                     db.rollback()
                 except Exception:
                     pass
-            # Log the *real* failing statement to Render logs (very useful)
+            # Per errori reali manteniamo log completo e statement preciso.
             print("[DB INIT] ERRORE SQL:", repr(e))
             print("[DB INIT] SQL FALLITA:\n", sql)
             raise
+        return True
 
     with connect() as db:
         # IMPORTANT: in Postgres, DDL inside one long transaction is fragile.

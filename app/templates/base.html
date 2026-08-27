@@ -297,7 +297,7 @@
 </style>
 
   <link rel="preload" href="/static/css/pro-ui-refresh.css?v=20260501b" as="style">
-  <link rel="stylesheet" href="/static/css/pro-ui-refresh.css?v=20260501b">
+  <link rel="stylesheet" href="/static/css/pro-ui-refresh.css?v=20260827c">
 </head>
 <body class="brand-{{ _brand or 'ALL' }}">
 <div id="pageProgress" aria-hidden="true"></div>
@@ -337,6 +337,7 @@
           {% if user.role == 'admin' %}
             <a href="/gestionale/incassi">💶 Incassi</a>
             <a href="/gestionale/uscite">💸 Uscite</a>
+            <a href="/gestionale/storico-mensile">🗓️ Storico mensile</a>
             <a href="/gestionale/report-vendite">📈 Report vendite</a>
             <a href="/gestionale/archiviati">🗂️ Negozi archiviati</a>
             <a href="/gestionale/panoramica-totale">🌍 Panoramica totale</a>
@@ -397,6 +398,7 @@
         {% if user.role == 'admin' %}
           <a href="/gestionale/incassi" onclick="closeMobileMenu()">💶 Incassi</a>
           <a href="/gestionale/uscite" onclick="closeMobileMenu()">💸 Uscite</a>
+          <a href="/gestionale/storico-mensile" onclick="closeMobileMenu()">🗓️ Storico mensile</a>
           <a href="/gestionale/report-vendite" onclick="closeMobileMenu()">📈 Report vendite</a>
           <a href="/gestionale/archiviati" onclick="closeMobileMenu()">🗂️ Negozi archiviati</a>
           <a href="/gestionale/panoramica-totale" onclick="closeMobileMenu()">🌍 Panoramica totale</a>
@@ -585,7 +587,7 @@
   })();
 </script>
 
-<script defer src="/static/js/pro-ui-refresh.js?v=20260501b"></script>
+<script defer src="/static/js/pro-ui-refresh.js?v=20260827c"></script>
 </body>
 
 </html>

@@ -81,7 +81,7 @@
       </div>
 
       <div class="inv-toolbar-actions">
-        <details class="inv-add-details inv-product-modal-details">
+        <details class="inv-add-details inv-product-modal-details" id="inventoryAddDetails">
           <summary class="pill">➕ Prodotto</summary>
           <div class="inv-popover inv-modal-popover inv-add-popover">
             {% if can_bulk_edit %}
@@ -104,9 +104,10 @@
         </details>
 
         {% if can_bulk_edit %}
-        <details class="inv-add-details">
+        <details class="inv-add-details inv-product-modal-details" id="inventoryCsvDetails">
           <summary class="pill">CSV</summary>
-          <div class="inv-popover inv-csv-popover">
+          <div class="inv-popover inv-modal-popover inv-csv-popover">
+            <div class="inv-modal-head"><strong>📄 Importa / esporta CSV</strong><button class="mini" type="button" onclick="closeInventoryDetails(this)">✖</button></div>
             <a class="pill" href="/export.csv" style="text-decoration:none;color:var(--text);">⬇️ Scarica CSV</a>
             <form method="post" action="/import.csv" enctype="multipart/form-data" class="inv-csv-form">
               <input type="file" name="file" accept=".csv,text/csv" required />
@@ -151,7 +152,7 @@
               <button class="mini btn" type="submit" title="Imposta quantità">✓</button>
             </form>
 
-            <details class="inv-edit-details">
+            <details class="inv-edit-details" id="inventoryEditDetails-{{ p.id }}">
               <summary class="mini inv-icon-btn" title="Modifica">✏️</summary>
               <div class="inv-popover inv-modal-popover inv-edit-popover">
                 <div class="inv-modal-head"><strong>✏️ Modifica prodotto</strong><button class="mini" type="button" onclick="closeInventoryDetails(this)">✖</button></div>
@@ -187,8 +188,10 @@
     </div>
   </div>
 
+  <div id="inventoryDetailsPortal" class="inv-details-portal" aria-hidden="true"></div>
+
   <!-- Modal: Calcolatrice (+ / -) -->
-  <div id="calcModal" class="inv-modal" style="display:none;">
+  <div id="calcModal" class="inv-modal" aria-hidden="true" role="dialog" aria-modal="true">
     <div class="card inv-calc-card">
       <div class="row" style="justify-content:space-between;align-items:center;">
         <strong>🧮 Modifica quantità</strong>
@@ -221,7 +224,7 @@
   </div>
 
   <!-- Modal: Quantità ordine -->
-  <div id="orderModal" class="inv-modal" style="display:none;">
+  <div id="orderModal" class="inv-modal" aria-hidden="true" role="dialog" aria-modal="true">
     <div class="card inv-order-card">
       <div class="row" style="justify-content:space-between;align-items:center;">
         <strong>🛒 Ordina</strong>
@@ -282,16 +285,20 @@
       document.getElementById('calcResult').textContent = '';
       calcRefreshSignButtons();
       const m = document.getElementById('calcModal');
-      m.style.display = 'flex';
-      document.documentElement.classList.add('modal-open');
+      m.classList.add('is-open');
+      m.setAttribute('aria-hidden', 'false');
+      refreshInventoryModalLock();
       setTimeout(()=>{
         input.focus({preventScroll:true});
         input.oninput = calcUpdateResult;
       }, 80);
     }
     function closeCalc() {
-      document.getElementById('calcModal').style.display = 'none';
-      document.documentElement.classList.remove('modal-open');
+      const modal = document.getElementById('calcModal');
+      if (!modal) return;
+      modal.classList.remove('is-open');
+      modal.setAttribute('aria-hidden', 'true');
+      refreshInventoryModalLock();
     }
     function calcRefreshSignButtons(){
       const minus = document.getElementById('calcMinusBtn');
@@ -360,16 +367,53 @@
 
 
 
+    function getInventoryDetailsOwner(panel) {
+      if (!panel) return null;
+      const ownerId = panel.dataset ? panel.dataset.ownerId : '';
+      return ownerId ? document.getElementById(ownerId) : null;
+    }
+
+    function portalInventoryDetails(details) {
+      const portal = document.getElementById('inventoryDetailsPortal');
+      if (!portal || !details) return;
+      let panel = details._inventoryModalPanel || details.querySelector('.inv-modal-popover');
+      if (!panel) return;
+      if (!details.id) details.id = 'inventoryDetails-' + Math.random().toString(36).slice(2);
+      details._inventoryModalPanel = panel;
+      panel.dataset.ownerId = details.id;
+      panel.classList.add('is-portal-modal');
+      portal.appendChild(panel);
+      portal.classList.add('is-open');
+      portal.setAttribute('aria-hidden', 'false');
+    }
+
+    function restoreInventoryDetails(details) {
+      if (!details) return;
+      const portal = document.getElementById('inventoryDetailsPortal');
+      const panel = details._inventoryModalPanel;
+      if (panel) {
+        panel.classList.remove('is-portal-modal');
+        panel.removeAttribute('data-owner-id');
+        details.appendChild(panel);
+      }
+      details._inventoryModalPanel = null;
+      if (portal && !document.querySelector('.inv-product-modal-details[open], .inv-edit-details[open]')) {
+        portal.classList.remove('is-open');
+        portal.setAttribute('aria-hidden', 'true');
+      }
+    }
+
     function closeInventoryDetails(el) {
-      const details = el && el.closest ? el.closest('details') : null;
+      const panel = el && el.closest ? el.closest('.inv-modal-popover') : null;
+      const details = getInventoryDetailsOwner(panel) || (el && el.closest ? el.closest('details') : null);
       if (details) details.removeAttribute('open');
       refreshInventoryModalLock();
     }
 
     function refreshInventoryModalLock() {
       const hasDetailsModal = !!document.querySelector('.inv-product-modal-details[open], .inv-edit-details[open]');
-      const calcOpen = document.getElementById('calcModal') && document.getElementById('calcModal').style.display !== 'none';
-      const orderOpen = document.getElementById('orderModal') && document.getElementById('orderModal').style.display !== 'none';
+      const calcOpen = !!(document.getElementById('calcModal') && document.getElementById('calcModal').classList.contains('is-open'));
+      const orderOpen = !!(document.getElementById('orderModal') && document.getElementById('orderModal').classList.contains('is-open'));
       document.documentElement.classList.toggle('modal-open', hasDetailsModal || calcOpen || orderOpen);
     }
 
@@ -380,26 +424,45 @@
     }
 
     document.addEventListener('DOMContentLoaded', function(){
+      // Le finestre vengono portate direttamente sotto <body>: così position:fixed
+      // è sempre relativo allo schermo, anche se card/wrapper hanno animazioni o filtri.
+      ['inventoryDetailsPortal', 'calcModal', 'orderModal'].forEach(function(id){
+        const el = document.getElementById(id);
+        if (el && el.parentElement !== document.body) document.body.appendChild(el);
+      });
+
       document.querySelectorAll('.inv-product-modal-details, .inv-edit-details').forEach(function(details){
         details.addEventListener('toggle', function(){
           if (details.open) {
             closeOtherInventoryDetails(details);
+            portalInventoryDetails(details);
             refreshInventoryModalLock();
-            const first = details.querySelector('.inv-modal-popover input:not([type="hidden"]), .inv-modal-popover select, .inv-modal-popover textarea');
-            if (first) setTimeout(function(){ first.focus({preventScroll:true}); }, 80);
+            const panel = details._inventoryModalPanel;
+            const first = panel && panel.querySelector('input:not([type="hidden"]), select, textarea');
+            if (first) setTimeout(function(){ first.focus({preventScroll:true}); }, 100);
           } else {
+            restoreInventoryDetails(details);
             setTimeout(refreshInventoryModalLock, 0);
           }
         });
       });
 
-      document.addEventListener('click', function(ev){
-        const openDetails = document.querySelector('.inv-product-modal-details[open], .inv-edit-details[open]');
-        if (!openDetails) return;
-        if (ev.target && ev.target.closest && ev.target.closest('.inv-modal-popover')) return;
-        if (ev.target && ev.target.closest && ev.target.closest('summary')) return;
-        openDetails.removeAttribute('open');
-        refreshInventoryModalLock();
+      const portal = document.getElementById('inventoryDetailsPortal');
+      if (portal) {
+        portal.addEventListener('click', function(ev){
+          if (ev.target !== portal) return;
+          const openDetails = document.querySelector('.inv-product-modal-details[open], .inv-edit-details[open]');
+          if (openDetails) openDetails.removeAttribute('open');
+        });
+      }
+
+      ['calcModal', 'orderModal'].forEach(function(id){
+        const modal = document.getElementById(id);
+        if (!modal) return;
+        modal.addEventListener('click', function(ev){
+          if (ev.target !== modal) return;
+          if (id === 'calcModal') closeCalc(); else closeOrderQty();
+        });
       });
 
       document.addEventListener('keydown', function(ev){
@@ -420,13 +483,18 @@
       _orderCurrent = Number(currentQty) || 0;
       document.getElementById('orderQty').value = '';
       document.getElementById('orderInfo').textContent = `Ti sono rimasti: ${formatQty(_orderCurrent)}. Quanto vuoi ordinare?`;
-      document.getElementById('orderModal').style.display = 'flex';
-      document.documentElement.classList.add('modal-open');
+      const modal = document.getElementById('orderModal');
+      modal.classList.add('is-open');
+      modal.setAttribute('aria-hidden', 'false');
+      refreshInventoryModalLock();
       setTimeout(()=>document.getElementById('orderQty').focus({preventScroll:true}), 50);
     }
     function closeOrderQty() {
-      document.getElementById('orderModal').style.display = 'none';
-      document.documentElement.classList.remove('modal-open');
+      const modal = document.getElementById('orderModal');
+      if (!modal) return;
+      modal.classList.remove('is-open');
+      modal.setAttribute('aria-hidden', 'true');
+      refreshInventoryModalLock();
     }
     function orderQtySet(add) {
       const el = document.getElementById('orderQty');
@@ -589,6 +657,36 @@
   }
   .inv-edit-details[open] .inv-edit-popover{width:min(94vw,390px);}
   .inv-product-modal-details[open]::before,.inv-edit-details[open]::before{content:"";position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:6400;}
+
+
+  /* Overlay centrale reale: i pannelli vengono spostati sotto body via JS. */
+  .inv-product-modal-details[open]::before,.inv-edit-details[open]::before{display:none!important;}
+  .inv-details-portal{
+    position:fixed;inset:0;z-index:6400;display:grid;place-items:center;padding:12px;box-sizing:border-box;
+    background:rgba(2,6,18,.68);backdrop-filter:blur(10px) saturate(1.08);
+    opacity:0;visibility:hidden;pointer-events:none;
+    transition:opacity .22s ease,visibility .22s ease;
+  }
+  .inv-details-portal.is-open{opacity:1;visibility:visible;pointer-events:auto;}
+  .inv-modal-popover.is-portal-modal{
+    position:relative!important;left:auto!important;top:auto!important;right:auto!important;
+    transform:none!important;margin:auto!important;max-width:calc(100vw - 24px)!important;max-height:calc(100dvh - 24px)!important;
+    overflow:auto;z-index:6500!important;
+    animation:invModalIn .28s cubic-bezier(.22,1,.36,1) both;
+    box-shadow:0 26px 80px rgba(0,0,0,.52),0 0 0 1px color-mix(in srgb,var(--brand-cyan) 18%,transparent)!important;
+  }
+  .inv-csv-popover.is-portal-modal{width:min(92vw,520px)!important;}
+  .inv-modal{
+    display:flex!important;position:fixed!important;inset:0!important;z-index:6600!important;
+    align-items:center!important;justify-content:center!important;padding:12px!important;box-sizing:border-box!important;
+    background:rgba(2,6,18,.70)!important;backdrop-filter:blur(10px) saturate(1.08);
+    opacity:0;visibility:hidden;pointer-events:none;
+    transition:opacity .22s ease,visibility .22s ease;
+  }
+  .inv-modal.is-open{opacity:1;visibility:visible;pointer-events:auto;}
+  .inv-modal.is-open > .card{animation:invModalIn .28s cubic-bezier(.22,1,.36,1) both;box-shadow:0 28px 90px rgba(0,0,0,.52)!important;}
+  html.modal-open,html.modal-open body{overflow:hidden!important;overscroll-behavior:none;}
+  @keyframes invModalIn{from{opacity:0;transform:translateY(14px) scale(.965)}to{opacity:1;transform:none}}
 </style>
 
 {% endblock %}

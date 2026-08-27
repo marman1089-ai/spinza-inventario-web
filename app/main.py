@@ -2621,8 +2621,12 @@ def _next_month_start(month_key: str) -> date:
     return date(start.year, start.month + 1, 1)
 
 
-def _cash_month_summaries(cur, scope_store: str):
-    """Riepilogo mensile di entrate e uscite salvate nel gestionale."""
+def _cash_month_summaries(cur, scope_store: str, limit: int | None = 120):
+    """Riepilogo mensile di entrate e uscite salvate nel gestionale.
+
+    Il limite predefinito mantiene invariata la home esistente; la pagina storico
+    può chiedere l'intera serie passando ``limit=None``.
+    """
     where_sql, params = _cash_scope_where(scope_store)
     months = {}
 
@@ -2689,7 +2693,110 @@ def _cash_month_summaries(cur, scope_store: str):
         item.pop('expense_families', None)
         rows.append(item)
     rows.sort(key=lambda x: x.get('key') or '', reverse=True)
-    return rows[:120]
+    if limit is None:
+        return rows
+    try:
+        safe_limit = max(0, int(limit))
+    except Exception:
+        safe_limit = 120
+    return rows[:safe_limit]
+
+
+def _month_keys_between(start_key: str, end_key: str, max_months: int = 600):
+    """Restituisce mesi YYYY-MM inclusivi, senza dipendere dal database."""
+    start_key = _month_key_from_value(start_key)
+    end_key = _month_key_from_value(end_key)
+    try:
+        cursor = datetime.strptime(start_key + '-01', '%Y-%m-%d').date()
+        end_d = datetime.strptime(end_key + '-01', '%Y-%m-%d').date()
+    except Exception:
+        cursor = date.today().replace(day=1)
+        end_d = cursor
+    if cursor > end_d:
+        cursor, end_d = end_d, cursor
+    out = []
+    safety = 0
+    while cursor <= end_d and safety < max(1, int(max_months or 600)):
+        out.append(cursor.strftime('%Y-%m'))
+        safety += 1
+        cursor = _next_month_start(cursor.strftime('%Y-%m'))
+    return out
+
+
+def _cash_month_timeline(cur, scope_store: str, from_month: str = '', to_month: str = ''):
+    """Serie mensile continua per la nuova pagina storico/range."""
+    raw_rows = _cash_month_summaries(cur, scope_store, limit=None)
+    by_key = {str(row.get('key') or ''): dict(row) for row in raw_rows if row.get('key')}
+    existing_keys = sorted(by_key)
+    today_key = date.today().strftime('%Y-%m')
+    available_from = existing_keys[0] if existing_keys else today_key
+    available_to = existing_keys[-1] if existing_keys else today_key
+
+    def valid_or(raw, fallback):
+        raw = str(raw or '').strip()
+        return raw if re.match(r'^\d{4}-\d{2}$', raw) else fallback
+
+    selected_from = valid_or(from_month, available_from)
+    selected_to = valid_or(to_month, available_to)
+    # Il range resta confinato allo storico realmente disponibile: evita input
+    # enormi/accidentali e rende i filtri sempre coerenti con i mesi selezionabili.
+    selected_from = max(available_from, min(selected_from, available_to))
+    selected_to = max(available_from, min(selected_to, available_to))
+    range_swapped = selected_from > selected_to
+    if range_swapped:
+        selected_from, selected_to = selected_to, selected_from
+
+    all_keys = _month_keys_between(available_from, available_to)
+    selected_keys = [k for k in all_keys if selected_from <= k <= selected_to]
+    rows = []
+    for key in selected_keys:
+        row = by_key.get(key)
+        if row is None:
+            row = {
+                'key': key,
+                'label': _month_label(key),
+                'income_total': 0.0,
+                'expense_total': 0.0,
+                'net_total': 0.0,
+                'income_count': 0,
+                'expense_count': 0,
+                'total_count': 0,
+                'store_labels': '—',
+                'expense_breakdown': [],
+                'expense_breakdown_count': 0,
+                'expense_top_family': {'name': '—', 'total': 0.0, 'share_pct': 0.0},
+            }
+        row['detail_url'] = _query_url(
+            '/gestionale',
+            period_type='month',
+            month_key=key,
+            anchor_date=key + '-01',
+        )
+        rows.append(row)
+
+    totals = {
+        'income_total': round(sum(float(r.get('income_total') or 0) for r in rows), 2),
+        'expense_total': round(sum(float(r.get('expense_total') or 0) for r in rows), 2),
+        'net_total': 0.0,
+        'income_count': sum(int(r.get('income_count') or 0) for r in rows),
+        'expense_count': sum(int(r.get('expense_count') or 0) for r in rows),
+        'months_count': len(rows),
+    }
+    totals['net_total'] = round(totals['income_total'] - totals['expense_total'], 2)
+    totals['avg_income'] = round(totals['income_total'] / len(rows), 2) if rows else 0.0
+    totals['avg_expense'] = round(totals['expense_total'] / len(rows), 2) if rows else 0.0
+
+    options = [{'key': key, 'label': _month_label(key)} for key in all_keys]
+    return {
+        'rows': rows,  # ordine cronologico: dal più vecchio al più recente
+        'totals': totals,
+        'options': options,
+        'selected_from': selected_from,
+        'selected_to': selected_to,
+        'available_from': available_from,
+        'available_to': available_to,
+        'range_swapped': range_swapped,
+    }
 
 
 def _cash_month_delete_stats(cur, scope_store: str, month_key: str):
@@ -3538,6 +3645,30 @@ def gestionale_home(request: Request, period_type: str = 'month', anchor_date: s
         deleted_expenses=deleted_expenses,
     )
 
+
+
+@app.get("/gestionale/storico-mensile", response_class=HTMLResponse)
+def gestionale_month_timeline(request: Request, from_month: str = '', to_month: str = ''):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not can_view_management_finance(request, user):
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+
+    brand = _current_store_scope(request, user)
+    active_store = request.session.get("active_store") if is_admin(request) else None
+    with connect() as conn:
+        cur = conn.cursor()
+        timeline = _cash_month_timeline(cur, brand, from_month, to_month)
+
+    return render(
+        "gestionale_month_timeline.html",
+        user=user,
+        brand=brand,
+        active_store=active_store,
+        timeline=timeline,
+        scope_label='Tutti i negozi' if brand == 'ALL' else _store_label(brand),
+    )
 
 
 @app.post("/gestionale/mese/elimina")
