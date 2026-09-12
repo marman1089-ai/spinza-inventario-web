@@ -20,7 +20,10 @@
   .archive-item.folder{background:linear-gradient(180deg,rgba(30,41,59,.96),rgba(17,27,49,.94))}
   .archive-icon{font-size:32px;line-height:1;margin-bottom:10px}
 <<<<<<< HEAD
+<<<<<<< HEAD
   .archive-thumb{width:100%;height:145px;object-fit:cover;border-radius:13px;border:1px solid var(--line-soft);background:#060d1b;display:block;margin-bottom:11px;cursor:pointer}
+=======
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
 =======
 >>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
   .archive-name{font-weight:850;font-size:16px;overflow-wrap:anywhere;margin-bottom:6px}
@@ -41,6 +44,7 @@
   .archive-message{padding:10px 12px;border-radius:12px;margin-bottom:12px}
   .archive-ok{background:rgba(16,185,129,.10);border:1px solid rgba(52,211,153,.28);color:#a7f3d0}
   .archive-error{background:rgba(239,68,68,.10);border:1px solid rgba(248,113,113,.28);color:#fecaca}
+<<<<<<< HEAD
 <<<<<<< HEAD
 
   /* Visualizzatore interno */
@@ -69,6 +73,10 @@
 
   @media(max-width:900px){.archive-hero,.archive-forms{grid-template-columns:1fr}.archive-grid{grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}.archive-viewer{padding:8px}.viewer-shell{height:96vh;border-radius:16px}.viewer-head{flex-wrap:wrap}.viewer-title{order:1;flex-basis:calc(100% - 55px)}.viewer-counter{order:3}.viewer-head .viewer-download{order:3;margin-left:auto}.viewer-nav{width:40px;height:54px}.viewer-prev{left:8px}.viewer-next{right:8px}}
   @media(max-width:560px){.archive-stats{grid-template-columns:1fr 1fr 1fr}.archive-grid{grid-template-columns:1fr}.archive-actions details[open] .archive-pop{left:0;right:auto;max-width:calc(100vw - 50px)}.archive-thumb{height:190px}.viewer-filmstrip button{width:68px;height:54px}}
+=======
+  @media(max-width:900px){.archive-hero,.archive-forms{grid-template-columns:1fr}.archive-grid{grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}}
+  @media(max-width:560px){.archive-stats{grid-template-columns:1fr 1fr 1fr}.archive-grid{grid-template-columns:1fr}.archive-actions details[open] .archive-pop{left:0;right:auto;max-width:calc(100vw - 50px)}}
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
 =======
   @media(max-width:900px){.archive-hero,.archive-forms{grid-template-columns:1fr}.archive-grid{grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}}
   @media(max-width:560px){.archive-stats{grid-template-columns:1fr 1fr 1fr}.archive-grid{grid-template-columns:1fr}.archive-actions details[open] .archive-pop{left:0;right:auto;max-width:calc(100vw - 50px)}}
@@ -154,7 +162,11 @@
     <div>
       <h2 style="margin:0 0 5px">{% if q %}Risultati ricerca{% elif current_folder %}📁 {{ current_folder.name }}{% else %}🏠 Archivio principale{% endif %}</h2>
 <<<<<<< HEAD
+<<<<<<< HEAD
       <div class="muted">{% if q %}La ricerca controlla tutto lo spazio “{{ scope_label }}”.{% else %}Apri una cartella per vedere il suo contenuto. Foto e PDF si visualizzano direttamente qui nel gestionale.{% endif %}</div>
+=======
+      <div class="muted">{% if q %}La ricerca controlla tutto lo spazio “{{ scope_label }}”.{% else %}Apri una cartella per vedere il suo contenuto.{% endif %}</div>
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
 =======
       <div class="muted">{% if q %}La ricerca controlla tutto lo spazio “{{ scope_label }}”.{% else %}Apri una cartella per vedere il suo contenuto.{% endif %}</div>
 >>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
@@ -190,6 +202,7 @@
 
   {% for file in files %}
 <<<<<<< HEAD
+<<<<<<< HEAD
     <div class="archive-item js-file-card"
          data-file-id="{{ file.id }}"
          data-file-name="{{ file.filename|e }}"
@@ -209,6 +222,8 @@
         {% endif %}
         <a class="btn2" href="/file-archiviati/file/{{ file.id }}/download">⬇️ Scarica</a>
 =======
+=======
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
     <div class="archive-item">
       <div class="archive-icon">{{ file.icon }}</div>
       <div class="archive-name">{{ file.filename }}</div>
@@ -216,6 +231,9 @@
       <div class="archive-actions">
         <a class="btn2" href="/file-archiviati/file/{{ file.id }}/apri" target="_blank" rel="noopener">Apri</a>
         <a class="btn2" href="/file-archiviati/file/{{ file.id }}/download">Scarica</a>
+<<<<<<< HEAD
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
+=======
 >>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
         <details>
           <summary>•••</summary>
@@ -239,6 +257,7 @@
     {% if q %}Nessun file o cartella corrisponde alla ricerca.{% else %}Questa cartella è vuota. Crea una cartella o carica il primo file.{% endif %}
   </div>
 {% endif %}
+<<<<<<< HEAD
 <<<<<<< HEAD
 
 <!-- Visualizzatore: resta dentro la pagina del gestionale -->
@@ -432,6 +451,8 @@
   }, {passive:true});
 })();
 </script>
+=======
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
 =======
 >>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
 {% endblock %}

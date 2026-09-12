@@ -5592,6 +5592,7 @@ ARCHIVE_MAX_TEXT_BYTES = int(os.environ.get("ARCHIVE_MAX_TEXT_BYTES", str(2 * 10
 
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 def _archive_admin_user(request: Request):
     """L'archivio documentale è riservato esclusivamente agli amministratori."""
     user = require_login(request)
@@ -5600,6 +5601,8 @@ def _archive_admin_user(request: Request):
     return user
 
 
+=======
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
 =======
 >>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
 def _archive_scope(request: Request, user: dict) -> str:
@@ -5721,9 +5724,15 @@ def _archive_descendant_ids(cur, scope: str, folder_id: int) -> list[int]:
 @app.get("/file-archiviati", response_class=HTMLResponse)
 def archive_files_home(request: Request, folder_id: int = 0, q: str = "", ok: str = "", error: str = ""):
 <<<<<<< HEAD
+<<<<<<< HEAD
     user = _archive_admin_user(request)
     if not user:
         return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
 =======
     user = require_login(request)
     if not user:
@@ -5776,12 +5785,15 @@ def archive_files_home(request: Request, folder_id: int = 0, q: str = "", ok: st
             item["kind"] = kind
             item["size_label"] = _archive_format_size(item.get("size_bytes"))
 <<<<<<< HEAD
+<<<<<<< HEAD
             mime = (item.get("content_type") or "").split(";")[0].strip().lower()
             ext = (str(item.get("filename") or "").rsplit(".", 1)[-1].lower() if "." in str(item.get("filename") or "") else "")
             item["is_image"] = mime.startswith("image/") or ext in {"jpg", "jpeg", "png", "gif", "webp", "bmp"}
             item["is_pdf"] = mime == "application/pdf" or ext == "pdf"
             item["is_text"] = mime.startswith("text/") or ext in {"txt", "md", "csv", "log"}
             item["previewable"] = bool(item["is_image"] or item["is_pdf"] or item["is_text"])
+=======
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
 =======
 >>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
             parent = folder_map.get(int(item["folder_id"])) if item.get("folder_id") else None
@@ -5828,9 +5840,15 @@ def archive_files_home(request: Request, folder_id: int = 0, q: str = "", ok: st
 @app.post("/file-archiviati/cartelle")
 async def archive_folder_create(request: Request):
 <<<<<<< HEAD
+<<<<<<< HEAD
     user = _archive_admin_user(request)
     if not user:
         return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
 =======
     user = require_login(request)
     if not user:
@@ -5868,9 +5886,15 @@ async def archive_folder_create(request: Request):
 @app.post("/file-archiviati/cartelle/{folder_id}/rinomina")
 async def archive_folder_rename(request: Request, folder_id: int):
 <<<<<<< HEAD
+<<<<<<< HEAD
     user = _archive_admin_user(request)
     if not user:
         return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
 =======
     user = require_login(request)
     if not user:
@@ -5902,9 +5926,15 @@ async def archive_folder_rename(request: Request, folder_id: int):
 @app.post("/file-archiviati/cartelle/{folder_id}/elimina")
 def archive_folder_delete(request: Request, folder_id: int):
 <<<<<<< HEAD
+<<<<<<< HEAD
     user = _archive_admin_user(request)
     if not user:
         return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
 =======
     user = require_login(request)
     if not user:
@@ -5929,9 +5959,15 @@ def archive_folder_delete(request: Request, folder_id: int):
 @app.post("/file-archiviati/upload")
 async def archive_upload(request: Request):
 <<<<<<< HEAD
+<<<<<<< HEAD
     user = _archive_admin_user(request)
     if not user:
         return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
 =======
     user = require_login(request)
     if not user:
@@ -5990,9 +6026,15 @@ async def archive_upload(request: Request):
 @app.post("/file-archiviati/testo")
 async def archive_create_text(request: Request):
 <<<<<<< HEAD
+<<<<<<< HEAD
     user = _archive_admin_user(request)
     if not user:
         return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
 =======
     user = require_login(request)
     if not user:
@@ -6026,9 +6068,15 @@ async def archive_create_text(request: Request):
 
 def _archive_file_response(request: Request, file_id: int, download: bool = False):
 <<<<<<< HEAD
+<<<<<<< HEAD
     user = _archive_admin_user(request)
     if not user:
         return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
 =======
     user = require_login(request)
     if not user:
@@ -6075,9 +6123,15 @@ def archive_file_download(request: Request, file_id: int):
 @app.post("/file-archiviati/file/{file_id}/rinomina")
 async def archive_file_rename(request: Request, file_id: int):
 <<<<<<< HEAD
+<<<<<<< HEAD
     user = _archive_admin_user(request)
     if not user:
         return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
 =======
     user = require_login(request)
     if not user:
@@ -6105,9 +6159,15 @@ async def archive_file_rename(request: Request, file_id: int):
 @app.post("/file-archiviati/file/{file_id}/elimina")
 def archive_file_delete(request: Request, file_id: int):
 <<<<<<< HEAD
+<<<<<<< HEAD
     user = _archive_admin_user(request)
     if not user:
         return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
 =======
     user = require_login(request)
     if not user:
