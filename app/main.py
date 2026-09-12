@@ -6,11 +6,12 @@ import io
 import calendar
 from datetime import date, datetime, timedelta
 import re
-from urllib.parse import quote_plus, unquote_plus, urlencode
+import mimetypes
+from urllib.parse import quote, quote_plus, unquote_plus, urlencode
 
 from fastapi import FastAPI, Request, Form, UploadFile, File
 from .pdf_tools import ensure_pdf, merge_pdfs
-from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.gzip import GZipMiddleware
@@ -5581,6 +5582,552 @@ def select_area_get(request: Request, area: str = ""):
 # =========================
 # PROFILE (admin can change own username/password)
 # =========================
+
+# =========================
+# FILE ARCHIVIATI
+# =========================
+ARCHIVE_MAX_FILE_BYTES = int(os.environ.get("ARCHIVE_MAX_FILE_BYTES", str(25 * 1024 * 1024)))
+ARCHIVE_MAX_FILES_PER_UPLOAD = int(os.environ.get("ARCHIVE_MAX_FILES_PER_UPLOAD", "30"))
+ARCHIVE_MAX_TEXT_BYTES = int(os.environ.get("ARCHIVE_MAX_TEXT_BYTES", str(2 * 1024 * 1024)))
+
+
+<<<<<<< HEAD
+def _archive_admin_user(request: Request):
+    """L'archivio documentale è riservato esclusivamente agli amministratori."""
+    user = require_login(request)
+    if not user or not is_admin(request):
+        return None
+    return user
+
+
+=======
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
+def _archive_scope(request: Request, user: dict) -> str:
+    """Archivio separato per negozio; per un admin con 'Tutti' usa uno spazio generale ALL."""
+    return _current_store_scope(request, user)
+
+
+def _archive_clean_name(value: str | None, fallback: str = "Senza nome", max_len: int = 180) -> str:
+    name = str(value or "").replace("\x00", "").strip()
+    name = re.sub(r"[\\/]+", "-", name)
+    name = re.sub(r"[\r\n\t]+", " ", name)
+    name = re.sub(r"\s{2,}", " ", name).strip(" .")
+    return (name or fallback)[:max_len]
+
+
+def _archive_folder(cur, scope: str, folder_id: int | None):
+    if not folder_id:
+        return None
+    ph = _ph()
+    return cur.execute(
+        f"SELECT * FROM archive_folders WHERE id={ph} AND store={ph}",
+        (int(folder_id), scope),
+    ).fetchone()
+
+
+def _archive_parent_clause(folder_id: int | None) -> tuple[str, tuple]:
+    ph = _ph()
+    if folder_id:
+        return f"parent_id={ph}", (int(folder_id),)
+    return "parent_id IS NULL", ()
+
+
+def _archive_back_url(folder_id: int | None = None, *, ok: str = "", error: str = "") -> str:
+    params = {}
+    if folder_id:
+        params["folder_id"] = int(folder_id)
+    if ok:
+        params["ok"] = ok
+    if error:
+        params["error"] = error
+    return "/file-archiviati" + (("?" + urlencode(params)) if params else "")
+
+
+def _archive_breadcrumbs(cur, scope: str, folder_row) -> list[dict]:
+    crumbs = []
+    seen = set()
+    row = folder_row
+    ph = _ph()
+    while row and row.get("id") not in seen:
+        seen.add(row.get("id"))
+        crumbs.append({"id": row.get("id"), "name": row.get("name")})
+        parent_id = row.get("parent_id")
+        if not parent_id:
+            break
+        row = cur.execute(
+            f"SELECT * FROM archive_folders WHERE id={ph} AND store={ph}",
+            (int(parent_id), scope),
+        ).fetchone()
+    crumbs.reverse()
+    return crumbs
+
+
+def _archive_format_size(value) -> str:
+    try:
+        n = float(value or 0)
+    except Exception:
+        n = 0.0
+    units = ["B", "KB", "MB", "GB", "TB"]
+    idx = 0
+    while n >= 1024 and idx < len(units) - 1:
+        n /= 1024.0
+        idx += 1
+    if idx == 0:
+        return f"{int(n)} {units[idx]}"
+    return f"{n:.1f} {units[idx]}"
+
+
+def _archive_file_kind(filename: str, content_type: str) -> tuple[str, str]:
+    mime = (content_type or "").lower()
+    ext = (str(filename or "").rsplit(".", 1)[-1].lower() if "." in str(filename or "") else "")
+    if mime.startswith("image/"):
+        return "🖼️", "Immagine"
+    if mime == "application/pdf" or ext == "pdf":
+        return "📕", "PDF"
+    if mime.startswith("text/") or ext in {"txt", "md", "csv", "log"}:
+        return "📝", "Testo"
+    if ext in {"doc", "docx", "odt", "rtf"}:
+        return "📘", "Documento"
+    if ext in {"xls", "xlsx", "ods"}:
+        return "📊", "Foglio di calcolo"
+    if ext in {"zip", "rar", "7z", "tar", "gz"}:
+        return "🗜️", "Archivio"
+    return "📄", "File"
+
+
+def _archive_descendant_ids(cur, scope: str, folder_id: int) -> list[int]:
+    """Calcolo in Python per restare identico su SQLite e PostgreSQL."""
+    ph = _ph()
+    rows = [dict(r) for r in cur.execute(
+        f"SELECT id, parent_id FROM archive_folders WHERE store={ph}",
+        (scope,),
+    ).fetchall()]
+    children = {}
+    for row in rows:
+        children.setdefault(row.get("parent_id"), []).append(int(row["id"]))
+    out = []
+    stack = [int(folder_id)]
+    seen = set()
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        out.append(current)
+        stack.extend(children.get(current, []))
+    return out
+
+
+@app.get("/file-archiviati", response_class=HTMLResponse)
+def archive_files_home(request: Request, folder_id: int = 0, q: str = "", ok: str = "", error: str = ""):
+<<<<<<< HEAD
+    user = _archive_admin_user(request)
+    if not user:
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
+
+    scope = _archive_scope(request, user)
+    active_store = request.session.get("active_store") if is_admin(request) else None
+    brand = scope if scope != "ALL" else (user.get("store") or "spinza")
+    q = (q or "").strip()[:120]
+
+    with connect() as conn:
+        cur = conn.cursor()
+        current_folder = _archive_folder(cur, scope, folder_id)
+        if folder_id and not current_folder:
+            return RedirectResponse(_archive_back_url(error="Cartella non trovata."), status_code=HTTP_303_SEE_OTHER)
+
+        ph = _ph()
+        if q:
+            like = f"%{q.lower()}%"
+            folders = [dict(r) for r in cur.execute(
+                f"SELECT * FROM archive_folders WHERE store={ph} AND LOWER(name) LIKE {ph} ORDER BY LOWER(name), id",
+                (scope, like),
+            ).fetchall()]
+            files = [dict(r) for r in cur.execute(
+                f"SELECT * FROM archive_files WHERE store={ph} AND LOWER(filename) LIKE {ph} ORDER BY LOWER(filename), id",
+                (scope, like),
+            ).fetchall()]
+        else:
+            folder_clause, parent_params = _archive_parent_clause(folder_id or None)
+            folders = [dict(r) for r in cur.execute(
+                f"SELECT * FROM archive_folders WHERE store={ph} AND {folder_clause} ORDER BY LOWER(name), id",
+                (scope, *parent_params),
+            ).fetchall()]
+            files = [dict(r) for r in cur.execute(
+                f"SELECT * FROM archive_files WHERE store={ph} AND " + (f"folder_id={ph}" if folder_id else "folder_id IS NULL") + " ORDER BY LOWER(filename), id",
+                ((scope, int(folder_id)) if folder_id else (scope,)),
+            ).fetchall()]
+
+        # Mappa delle cartelle per mostrare dove si trova un risultato di ricerca.
+        all_folder_rows = [dict(r) for r in cur.execute(
+            f"SELECT id, parent_id, name FROM archive_folders WHERE store={ph}",
+            (scope,),
+        ).fetchall()]
+        folder_map = {int(r["id"]): r for r in all_folder_rows}
+
+        for item in files:
+            icon, kind = _archive_file_kind(item.get("filename", ""), item.get("content_type", ""))
+            item["icon"] = icon
+            item["kind"] = kind
+            item["size_label"] = _archive_format_size(item.get("size_bytes"))
+<<<<<<< HEAD
+            mime = (item.get("content_type") or "").split(";")[0].strip().lower()
+            ext = (str(item.get("filename") or "").rsplit(".", 1)[-1].lower() if "." in str(item.get("filename") or "") else "")
+            item["is_image"] = mime.startswith("image/") or ext in {"jpg", "jpeg", "png", "gif", "webp", "bmp"}
+            item["is_pdf"] = mime == "application/pdf" or ext == "pdf"
+            item["is_text"] = mime.startswith("text/") or ext in {"txt", "md", "csv", "log"}
+            item["previewable"] = bool(item["is_image"] or item["is_pdf"] or item["is_text"])
+=======
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
+            parent = folder_map.get(int(item["folder_id"])) if item.get("folder_id") else None
+            item["folder_name"] = parent.get("name") if parent else "Radice"
+
+        for folder in folders:
+            folder["parent_name"] = (folder_map.get(int(folder["parent_id"]), {}).get("name") if folder.get("parent_id") else "Radice")
+
+        total_files_row = cur.execute(
+            f"SELECT COUNT(*) AS n, COALESCE(SUM(size_bytes),0) AS total_size FROM archive_files WHERE store={ph}",
+            (scope,),
+        ).fetchone()
+        total_folders_row = cur.execute(
+            f"SELECT COUNT(*) AS n FROM archive_folders WHERE store={ph}",
+            (scope,),
+        ).fetchone()
+        total_files = int((total_files_row or {}).get("n") or 0)
+        total_size = int((total_files_row or {}).get("total_size") or 0)
+        total_folders = int((total_folders_row or {}).get("n") or 0)
+        breadcrumbs = _archive_breadcrumbs(cur, scope, current_folder)
+
+    scope_label = "Archivio generale · tutti i negozi" if scope == "ALL" else _store_label(scope)
+    return render(
+        "file_archiviati.html",
+        user=user,
+        brand=brand,
+        active_store=active_store,
+        current_folder=dict(current_folder) if current_folder else None,
+        breadcrumbs=breadcrumbs,
+        folders=folders,
+        files=files,
+        q=q,
+        ok=ok,
+        error=error,
+        scope=scope,
+        scope_label=scope_label,
+        total_files=total_files,
+        total_folders=total_folders,
+        total_size_label=_archive_format_size(total_size),
+        max_file_size_label=_archive_format_size(ARCHIVE_MAX_FILE_BYTES),
+    )
+
+
+@app.post("/file-archiviati/cartelle")
+async def archive_folder_create(request: Request):
+<<<<<<< HEAD
+    user = _archive_admin_user(request)
+    if not user:
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
+    form = await request.form()
+    name = _archive_clean_name(form.get("name"), "")
+    try:
+        parent_id = int(form.get("parent_id") or 0) or None
+    except Exception:
+        parent_id = None
+    scope = _archive_scope(request, user)
+    if not name:
+        return RedirectResponse(_archive_back_url(parent_id, error="Scrivi un nome per la cartella."), status_code=HTTP_303_SEE_OTHER)
+
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        if parent_id and not _archive_folder(cur, scope, parent_id):
+            return RedirectResponse(_archive_back_url(error="Cartella di destinazione non trovata."), status_code=HTTP_303_SEE_OTHER)
+        clause, params = _archive_parent_clause(parent_id)
+        duplicate = cur.execute(
+            f"SELECT id FROM archive_folders WHERE store={ph} AND {clause} AND LOWER(name)={ph}",
+            (scope, *params, name.lower()),
+        ).fetchone()
+        if duplicate:
+            return RedirectResponse(_archive_back_url(parent_id, error="Esiste già una cartella con questo nome qui."), status_code=HTTP_303_SEE_OTHER)
+        cur.execute(
+            f"INSERT INTO archive_folders(store, parent_id, name, created_by) VALUES({ph},{ph},{ph},{ph})",
+            (scope, parent_id, name, user.get("username") or "utente"),
+        )
+    return RedirectResponse(_archive_back_url(parent_id, ok="Cartella creata."), status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/file-archiviati/cartelle/{folder_id}/rinomina")
+async def archive_folder_rename(request: Request, folder_id: int):
+<<<<<<< HEAD
+    user = _archive_admin_user(request)
+    if not user:
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
+    form = await request.form()
+    name = _archive_clean_name(form.get("name"), "")
+    scope = _archive_scope(request, user)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = _archive_folder(cur, scope, folder_id)
+        if not row:
+            return RedirectResponse(_archive_back_url(error="Cartella non trovata."), status_code=HTTP_303_SEE_OTHER)
+        parent_id = row.get("parent_id")
+        if not name:
+            return RedirectResponse(_archive_back_url(parent_id, error="Il nome non può essere vuoto."), status_code=HTTP_303_SEE_OTHER)
+        clause, params = _archive_parent_clause(parent_id)
+        duplicate = cur.execute(
+            f"SELECT id FROM archive_folders WHERE store={ph} AND {clause} AND LOWER(name)={ph} AND id<>{ph}",
+            (scope, *params, name.lower(), int(folder_id)),
+        ).fetchone()
+        if duplicate:
+            return RedirectResponse(_archive_back_url(parent_id, error="Esiste già una cartella con questo nome qui."), status_code=HTTP_303_SEE_OTHER)
+        cur.execute(f"UPDATE archive_folders SET name={ph} WHERE id={ph} AND store={ph}", (name, folder_id, scope))
+    return RedirectResponse(_archive_back_url(parent_id, ok="Cartella rinominata."), status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/file-archiviati/cartelle/{folder_id}/elimina")
+def archive_folder_delete(request: Request, folder_id: int):
+<<<<<<< HEAD
+    user = _archive_admin_user(request)
+    if not user:
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
+    scope = _archive_scope(request, user)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = _archive_folder(cur, scope, folder_id)
+        if not row:
+            return RedirectResponse(_archive_back_url(error="Cartella non trovata."), status_code=HTTP_303_SEE_OTHER)
+        parent_id = row.get("parent_id")
+        ids = _archive_descendant_ids(cur, scope, folder_id)
+        if ids:
+            placeholders = ",".join([ph] * len(ids))
+            cur.execute(f"DELETE FROM archive_files WHERE store={ph} AND folder_id IN ({placeholders})", (scope, *ids))
+            cur.execute(f"DELETE FROM archive_folders WHERE store={ph} AND id IN ({placeholders})", (scope, *ids))
+    return RedirectResponse(_archive_back_url(parent_id, ok="Cartella e contenuto eliminati."), status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/file-archiviati/upload")
+async def archive_upload(request: Request):
+<<<<<<< HEAD
+    user = _archive_admin_user(request)
+    if not user:
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
+    form = await request.form()
+    try:
+        folder_id = int(form.get("folder_id") or 0) or None
+    except Exception:
+        folder_id = None
+    scope = _archive_scope(request, user)
+    uploads = [f for f in form.getlist("files") if hasattr(f, "read")]
+    if not uploads:
+        return RedirectResponse(_archive_back_url(folder_id, error="Seleziona almeno un file."), status_code=HTTP_303_SEE_OTHER)
+    if len(uploads) > ARCHIVE_MAX_FILES_PER_UPLOAD:
+        return RedirectResponse(_archive_back_url(folder_id, error=f"Puoi caricare al massimo {ARCHIVE_MAX_FILES_PER_UPLOAD} file per volta."), status_code=HTTP_303_SEE_OTHER)
+
+    ph = _ph()
+    saved = 0
+    rejected = []
+    with connect() as conn:
+        cur = conn.cursor()
+        if folder_id and not _archive_folder(cur, scope, folder_id):
+            return RedirectResponse(_archive_back_url(error="Cartella di destinazione non trovata."), status_code=HTTP_303_SEE_OTHER)
+
+        for upload in uploads:
+            filename = _archive_clean_name(getattr(upload, "filename", ""), "file")
+            try:
+                raw = await upload.read(ARCHIVE_MAX_FILE_BYTES + 1)
+            finally:
+                try:
+                    await upload.close()
+                except Exception:
+                    pass
+            if not raw:
+                rejected.append(f"{filename}: vuoto")
+                continue
+            if len(raw) > ARCHIVE_MAX_FILE_BYTES:
+                rejected.append(f"{filename}: troppo grande")
+                continue
+            content_type = (getattr(upload, "content_type", None) or mimetypes.guess_type(filename)[0] or "application/octet-stream")[:160]
+            cur.execute(
+                f"INSERT INTO archive_files(store, folder_id, filename, content_type, size_bytes, data, created_by) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (scope, folder_id, filename, content_type, len(raw), raw, user.get("username") or "utente"),
+            )
+            saved += 1
+
+    if rejected:
+        detail = "; ".join(rejected[:3])
+        if len(rejected) > 3:
+            detail += f"; +{len(rejected)-3} altri"
+        return RedirectResponse(_archive_back_url(folder_id, ok=f"Caricati {saved} file.", error=detail), status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse(_archive_back_url(folder_id, ok=f"Caricati {saved} file."), status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/file-archiviati/testo")
+async def archive_create_text(request: Request):
+<<<<<<< HEAD
+    user = _archive_admin_user(request)
+    if not user:
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
+    form = await request.form()
+    try:
+        folder_id = int(form.get("folder_id") or 0) or None
+    except Exception:
+        folder_id = None
+    title = _archive_clean_name(form.get("filename"), "Nota")
+    if not title.lower().endswith(".txt"):
+        title += ".txt"
+    content = str(form.get("content") or "")
+    raw = content.encode("utf-8")
+    if len(raw) > ARCHIVE_MAX_TEXT_BYTES:
+        return RedirectResponse(_archive_back_url(folder_id, error="Il file di testo è troppo grande."), status_code=HTTP_303_SEE_OTHER)
+
+    scope = _archive_scope(request, user)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        if folder_id and not _archive_folder(cur, scope, folder_id):
+            return RedirectResponse(_archive_back_url(error="Cartella di destinazione non trovata."), status_code=HTTP_303_SEE_OTHER)
+        cur.execute(
+            f"INSERT INTO archive_files(store, folder_id, filename, content_type, size_bytes, data, created_by) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (scope, folder_id, title, "text/plain; charset=utf-8", len(raw), raw, user.get("username") or "utente"),
+        )
+    return RedirectResponse(_archive_back_url(folder_id, ok="File di testo creato."), status_code=HTTP_303_SEE_OTHER)
+
+
+def _archive_file_response(request: Request, file_id: int, download: bool = False):
+<<<<<<< HEAD
+    user = _archive_admin_user(request)
+    if not user:
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
+    scope = _archive_scope(request, user)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(
+            f"SELECT id, filename, content_type, size_bytes, data FROM archive_files WHERE id={ph} AND store={ph}",
+            (int(file_id), scope),
+        ).fetchone()
+    if not row:
+        return PlainTextResponse("File non trovato.", status_code=404)
+
+    filename = _archive_clean_name(row.get("filename"), "file")
+    mime = (row.get("content_type") or mimetypes.guess_type(filename)[0] or "application/octet-stream").split(";")[0].strip().lower()
+    raw = bytes(row.get("data") or b"")
+    safe_inline = (
+        mime in {"application/pdf", "text/plain", "text/csv"}
+        or (mime in {"image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"})
+    )
+    disposition = "attachment" if (download or not safe_inline) else "inline"
+    headers = {
+        "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(filename)}",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store",
+    }
+    media_type = mime if safe_inline else "application/octet-stream"
+    return Response(content=raw, media_type=media_type, headers=headers)
+
+
+@app.get("/file-archiviati/file/{file_id}/apri")
+def archive_file_open(request: Request, file_id: int):
+    return _archive_file_response(request, file_id, download=False)
+
+
+@app.get("/file-archiviati/file/{file_id}/download")
+def archive_file_download(request: Request, file_id: int):
+    return _archive_file_response(request, file_id, download=True)
+
+
+@app.post("/file-archiviati/file/{file_id}/rinomina")
+async def archive_file_rename(request: Request, file_id: int):
+<<<<<<< HEAD
+    user = _archive_admin_user(request)
+    if not user:
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
+    form = await request.form()
+    name = _archive_clean_name(form.get("name"), "")
+    scope = _archive_scope(request, user)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(
+            f"SELECT folder_id FROM archive_files WHERE id={ph} AND store={ph}",
+            (int(file_id), scope),
+        ).fetchone()
+        if not row:
+            return RedirectResponse(_archive_back_url(error="File non trovato."), status_code=HTTP_303_SEE_OTHER)
+        folder_id = row.get("folder_id")
+        if not name:
+            return RedirectResponse(_archive_back_url(folder_id, error="Il nome non può essere vuoto."), status_code=HTTP_303_SEE_OTHER)
+        cur.execute(f"UPDATE archive_files SET filename={ph} WHERE id={ph} AND store={ph}", (name, int(file_id), scope))
+    return RedirectResponse(_archive_back_url(folder_id, ok="File rinominato."), status_code=HTTP_303_SEE_OTHER)
+
+
+@app.post("/file-archiviati/file/{file_id}/elimina")
+def archive_file_delete(request: Request, file_id: int):
+<<<<<<< HEAD
+    user = _archive_admin_user(request)
+    if not user:
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+=======
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+>>>>>>> 197853a4b25f9efc9f43fa70865aac817af78b83
+    scope = _archive_scope(request, user)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(
+            f"SELECT folder_id FROM archive_files WHERE id={ph} AND store={ph}",
+            (int(file_id), scope),
+        ).fetchone()
+        if not row:
+            return RedirectResponse(_archive_back_url(error="File non trovato."), status_code=HTTP_303_SEE_OTHER)
+        folder_id = row.get("folder_id")
+        cur.execute(f"DELETE FROM archive_files WHERE id={ph} AND store={ph}", (int(file_id), scope))
+    return RedirectResponse(_archive_back_url(folder_id, ok="File eliminato."), status_code=HTTP_303_SEE_OTHER)
+
+
 @app.get("/profile", response_class=HTMLResponse)
 def profile_get(request: Request):
     user = require_login(request)
