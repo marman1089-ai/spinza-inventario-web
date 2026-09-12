@@ -358,6 +358,9 @@
           <a href="/scambi">🔁 Scambi tra negozi</a>
         </div>
       </details>
+      {% if user.role == 'admin' %}
+        <a href="/file-archiviati" class="pill" style="text-decoration:none;color:var(--text)">🗄️ File archiviati</a>
+      {% endif %}
       <a href="/updates" class="pill" style="text-decoration:none;color:var(--text)">🆕 Novità</a>
       <a href="/profile" class="pill" style="text-decoration:none;color:var(--text)">⚙️ Profilo</a>
 
@@ -419,6 +422,9 @@
       </div>
 
       <div class="section">Altro</div>
+      {% if user.role == 'admin' %}
+        <a href="/file-archiviati" onclick="closeMobileMenu()">🗄️ File archiviati</a>
+      {% endif %}
       <a href="/updates" onclick="closeMobileMenu()">🆕 Novità</a>
 
       <div class="section">Account</div>

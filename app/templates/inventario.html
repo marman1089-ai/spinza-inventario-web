@@ -671,10 +671,14 @@
   .inv-modal-popover.is-portal-modal{
     position:relative!important;left:auto!important;top:auto!important;right:auto!important;
     transform:none!important;margin:auto!important;max-width:calc(100vw - 24px)!important;max-height:calc(100dvh - 24px)!important;
-    overflow:auto;z-index:6500!important;
+    overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;z-index:6500!important;
     animation:invModalIn .28s cubic-bezier(.22,1,.36,1) both;
     box-shadow:0 26px 80px rgba(0,0,0,.52),0 0 0 1px color-mix(in srgb,var(--brand-cyan) 18%,transparent)!important;
   }
+  .inv-modal-popover.is-portal-modal::-webkit-scrollbar,.inv-modal.is-open > .card::-webkit-scrollbar{width:10px}
+  .inv-modal-popover.is-portal-modal::-webkit-scrollbar-track,.inv-modal.is-open > .card::-webkit-scrollbar-track{background:rgba(15,23,42,.55)}
+  .inv-modal-popover.is-portal-modal::-webkit-scrollbar-thumb,.inv-modal.is-open > .card::-webkit-scrollbar-thumb{background:rgba(148,163,184,.42);border-radius:999px;border:3px solid rgba(15,23,42,.55)}
+  .inv-modal-popover.is-portal-modal::-webkit-scrollbar-thumb:hover,.inv-modal.is-open > .card::-webkit-scrollbar-thumb:hover{background:rgba(96,165,250,.58)}
   .inv-csv-popover.is-portal-modal{width:min(92vw,520px)!important;}
   .inv-modal{
     display:flex!important;position:fixed!important;inset:0!important;z-index:6600!important;
@@ -684,7 +688,13 @@
     transition:opacity .22s ease,visibility .22s ease;
   }
   .inv-modal.is-open{opacity:1;visibility:visible;pointer-events:auto;}
-  .inv-modal.is-open > .card{animation:invModalIn .28s cubic-bezier(.22,1,.36,1) both;box-shadow:0 28px 90px rgba(0,0,0,.52)!important;}
+  .inv-modal.is-open > .card{
+    max-height:calc(100dvh - 24px)!important;overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior:contain;scrollbar-gutter:stable;box-sizing:border-box;
+    animation:invModalIn .28s cubic-bezier(.22,1,.36,1) both;box-shadow:0 28px 90px rgba(0,0,0,.52)!important;
+  }
+  @supports not (height:100dvh){
+    .inv-modal-popover.is-portal-modal,.inv-modal.is-open > .card{max-height:calc(100vh - 24px)!important;}
+  }
   html.modal-open,html.modal-open body{overflow:hidden!important;overscroll-behavior:none;}
   @keyframes invModalIn{from{opacity:0;transform:translateY(14px) scale(.965)}to{opacity:1;transform:none}}
 </style>
