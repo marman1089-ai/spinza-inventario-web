@@ -562,6 +562,39 @@ def init_db():
         )
         """)
 
+        # FILE ARCHIVIATI: cartelle e file persistenti salvati direttamente nel DB.
+        # Non usiamo il filesystem di Render, che puo essere effimero.
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS archive_folders (
+            id {id_col},
+            store TEXT NOT NULL,
+            parent_id INTEGER,
+            name TEXT NOT NULL,
+            created_by TEXT NOT NULL,
+            ts {ts_default}
+        )
+        """)
+
+        _safe_exec(cur, f"""
+        CREATE TABLE IF NOT EXISTS archive_files (
+            id {id_col},
+            store TEXT NOT NULL,
+            folder_id INTEGER,
+            filename TEXT NOT NULL,
+            content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            data {blob_col} NOT NULL,
+            created_by TEXT NOT NULL,
+            ts {ts_default}
+        )
+        """)
+
+        try:
+            _safe_exec(cur, "CREATE INDEX IF NOT EXISTS ix_archive_folders_store_parent ON archive_folders(store, parent_id)")
+            _safe_exec(cur, "CREATE INDEX IF NOT EXISTS ix_archive_files_store_folder ON archive_files(store, folder_id)")
+        except Exception:
+            pass
+
         # LOGS
         _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS logs (
