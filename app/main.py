@@ -5760,6 +5760,19 @@ def archive_files_home(request: Request, folder_id: int = 0, q: str = "", ok: st
             (scope,),
         ).fetchall()]
         folder_map = {int(r["id"]): r for r in all_folder_rows}
+        def folder_path(folder_id):
+            names, seen = [], set()
+            while folder_id and int(folder_id) in folder_map and int(folder_id) not in seen:
+                seen.add(int(folder_id))
+                entry = folder_map[int(folder_id)]
+                names.append(entry["name"])
+                folder_id = entry.get("parent_id")
+            return " / ".join(reversed(names))
+        destinations = [{"id": 0, "label": "🏠 Radice"}] + [
+            {"id": int(row["id"]), "label": "📁 " + folder_path(row["id"])}
+            for row in all_folder_rows
+        ]
+        destinations[1:] = sorted(destinations[1:], key=lambda row: row["label"].casefold())
 
         for item in files:
             icon, kind = _archive_file_kind(item.get("filename", ""), item.get("content_type", ""))
@@ -5772,6 +5785,7 @@ def archive_files_home(request: Request, folder_id: int = 0, q: str = "", ok: st
             item["is_pdf"] = mime == "application/pdf" or ext == "pdf"
             item["is_text"] = mime.startswith("text/") or ext in {"txt", "md", "csv", "log"}
             item["previewable"] = bool(item["is_image"] or item["is_pdf"] or item["is_text"])
+            item["editable_text"] = bool(item["is_text"] and (item.get("size_bytes") or 0) <= 1024 * 1024)
             parent = folder_map.get(int(item["folder_id"])) if item.get("folder_id") else None
             item["folder_name"] = parent.get("name") if parent else "Radice"
 
@@ -5801,6 +5815,7 @@ def archive_files_home(request: Request, folder_id: int = 0, q: str = "", ok: st
         breadcrumbs=breadcrumbs,
         folders=folders,
         files=files,
+        destinations=destinations,
         q=q,
         ok=ok,
         error=error,
@@ -5845,6 +5860,120 @@ async def archive_folder_create(request: Request):
             (scope, parent_id, name, user.get("username") or "utente"),
         )
     return RedirectResponse(_archive_back_url(parent_id, ok="Cartella creata."), status_code=HTTP_303_SEE_OTHER)
+
+
+def _archive_target(form):
+    try:
+        target = int(form.get("target_folder_id") or 0)
+        if target < 0:
+            raise ValueError()
+        return target or None
+    except (ValueError, TypeError):
+        return -1
+
+
+@app.post("/file-archiviati/cartelle/{folder_id}/sposta")
+async def archive_folder_move(request: Request, folder_id: int):
+    user = _archive_admin_user(request)
+    if not user:
+        return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
+    target = _archive_target(await request.form())
+    scope, ph = _archive_scope(request, user), _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = _archive_folder(cur, scope, folder_id)
+        if not row:
+            return RedirectResponse(_archive_back_url(error="Cartella non trovata."), status_code=303)
+        old_parent = row.get("parent_id")
+        if target == -1 or (target and not _archive_folder(cur, scope, target)):
+            return RedirectResponse(_archive_back_url(old_parent, error="Destinazione non valida."), status_code=303)
+        if target in _archive_descendant_ids(cur, scope, folder_id):
+            return RedirectResponse(_archive_back_url(old_parent, error="Non puoi spostare una cartella dentro se stessa o una sua sottocartella."), status_code=303)
+        clause, params = _archive_parent_clause(target)
+        duplicate = cur.execute(f"SELECT id FROM archive_folders WHERE store={ph} AND {clause} AND LOWER(name)={ph} AND id<>{ph}", (scope, *params, row["name"].lower(), folder_id)).fetchone()
+        if duplicate:
+            return RedirectResponse(_archive_back_url(old_parent, error="Esiste già una cartella con questo nome nella destinazione."), status_code=303)
+        cur.execute(f"UPDATE archive_folders SET parent_id={ph} WHERE store={ph} AND id={ph}", (target, scope, folder_id))
+    return RedirectResponse(_archive_back_url(old_parent, ok="Cartella spostata con tutto il contenuto."), status_code=303)
+
+
+@app.post("/file-archiviati/file/{file_id}/sposta")
+async def archive_file_move(request: Request, file_id: int):
+    user = _archive_admin_user(request)
+    if not user:
+        return RedirectResponse("/gestionale", status_code=303)
+    target = _archive_target(await request.form())
+    scope, ph = _archive_scope(request, user), _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(f"SELECT folder_id FROM archive_files WHERE store={ph} AND id={ph}", (scope, file_id)).fetchone()
+        if not row:
+            return RedirectResponse(_archive_back_url(error="File non trovato."), status_code=303)
+        old_parent = row.get("folder_id")
+        if target == -1 or (target and not _archive_folder(cur, scope, target)):
+            return RedirectResponse(_archive_back_url(old_parent, error="Destinazione non valida."), status_code=303)
+        cur.execute(f"UPDATE archive_files SET folder_id={ph} WHERE store={ph} AND id={ph}", (target, scope, file_id))
+    return RedirectResponse(_archive_back_url(old_parent, ok="File spostato."), status_code=303)
+
+
+@app.get("/file-archiviati/file/{file_id}/modifica", response_class=HTMLResponse)
+def archive_text_editor(request: Request, file_id: int):
+    user = _archive_admin_user(request)
+    if not user:
+        return RedirectResponse("/gestionale", status_code=303)
+    scope, ph = _archive_scope(request, user), _ph()
+    with connect() as conn:
+        row = conn.cursor().execute(f"SELECT * FROM archive_files WHERE store={ph} AND id={ph}", (scope, file_id)).fetchone()
+    if not row:
+        return RedirectResponse(_archive_back_url(error="File non trovato."), status_code=303)
+    name, mime = row["filename"], (row.get("content_type") or "").lower()
+    if not (mime.startswith("text/") or name.lower().endswith((".txt", ".md", ".csv", ".log"))) or len(row["data"]) > 1024 * 1024:
+        return RedirectResponse(_archive_back_url(row.get("folder_id"), error="Questo formato non è modificabile direttamente. Usa Sostituisci file."), status_code=303)
+    return render("archive_text_edit.html", user=user, file=dict(row), content=bytes(row["data"]).decode("utf-8", errors="replace"))
+
+
+@app.post("/file-archiviati/file/{file_id}/modifica")
+async def archive_text_save(request: Request, file_id: int):
+    user = _archive_admin_user(request)
+    if not user:
+        return RedirectResponse("/gestionale", status_code=303)
+    form = await request.form()
+    content = str(form.get("content") or "").encode("utf-8")
+    scope, ph = _archive_scope(request, user), _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(f"SELECT folder_id, filename, content_type, size_bytes FROM archive_files WHERE store={ph} AND id={ph}", (scope, file_id)).fetchone()
+        if not row:
+            return RedirectResponse(_archive_back_url(error="File non trovato."), status_code=303)
+        if not ((row.get("content_type") or "").lower().startswith("text/") or row["filename"].lower().endswith((".txt", ".md", ".csv", ".log"))) or row["size_bytes"] > 1024*1024 or len(content)>1024*1024:
+            return RedirectResponse(_archive_back_url(row.get("folder_id"), error="Testo troppo grande o formato non modificabile."), status_code=303)
+        cur.execute(f"UPDATE archive_files SET data={ph}, size_bytes={ph} WHERE store={ph} AND id={ph}", (content, len(content), scope, file_id))
+    return RedirectResponse(_archive_back_url(row.get("folder_id"), ok="Modifiche al testo salvate."), status_code=303)
+
+
+@app.post("/file-archiviati/file/{file_id}/sostituisci")
+async def archive_file_replace(request: Request, file_id: int):
+    user = _archive_admin_user(request)
+    if not user:
+        return RedirectResponse("/gestionale", status_code=303)
+    form = await request.form()
+    upload = form.get("file")
+    scope, ph = _archive_scope(request, user), _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(f"SELECT folder_id FROM archive_files WHERE store={ph} AND id={ph}", (scope, file_id)).fetchone()
+        if not row:
+            return RedirectResponse(_archive_back_url(error="File non trovato."), status_code=303)
+        parent = row.get("folder_id")
+        if not upload or not getattr(upload, "filename", ""):
+            return RedirectResponse(_archive_back_url(parent, error="Seleziona un file da sostituire."), status_code=303)
+        raw = await upload.read(ARCHIVE_MAX_FILE_BYTES + 1)
+        if len(raw)>ARCHIVE_MAX_FILE_BYTES:
+            return RedirectResponse(_archive_back_url(parent, error="File troppo grande."), status_code=303)
+        name = _archive_clean_name(upload.filename, "file")
+        mime = upload.content_type or "application/octet-stream"
+        cur.execute(f"UPDATE archive_files SET filename={ph}, data={ph}, size_bytes={ph}, content_type={ph} WHERE store={ph} AND id={ph}", (name, raw, len(raw), mime, scope, file_id))
+    return RedirectResponse(_archive_back_url(parent, ok="File sostituito senza cambiare posizione."), status_code=303)
 
 
 @app.post("/file-archiviati/cartelle/{folder_id}/rinomina")

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% set title = "Modifica file di testo" %}
+{% block content %}
+<div class="card" style="max-width:1100px;margin:20px auto">
+  <h1>✏️ Modifica: {{ file.filename }}</h1>
+  <p class="muted">Puoi modificare il testo e salvarlo nello stesso file archiviato.</p>
+  <form method="post" action="/file-archiviati/file/{{ file.id }}/modifica">
+    <textarea name="content" spellcheck="false" style="display:block;width:100%;min-height:60vh;box-sizing:border-box;padding:18px;font:14px/1.55 monospace;resize:vertical">{{ content }}</textarea>
+    <div style="display:flex;gap:12px;margin-top:14px;align-items:center">
+      <button type="submit" class="btn">💾 Salva modifiche</button>
+      <a class="btn2" href="/file-archiviati{% if file.folder_id %}?folder_id={{ file.folder_id }}{% endif %}">Annulla / Torna all'archivio</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

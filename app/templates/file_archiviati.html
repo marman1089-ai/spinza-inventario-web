@@ -28,7 +28,10 @@
   .archive-actions details>summary{list-style:none;border:1px solid var(--line);background:#0b1328}
   .archive-actions details[open] .archive-pop{position:absolute;right:0;top:38px;z-index:30;min-width:235px;padding:10px;border-radius:14px;background:#07101f;border:1px solid var(--line-soft);box-shadow:0 18px 40px rgba(0,0,0,.36)}
   .archive-pop form{display:flex;gap:7px;flex-wrap:wrap}
-  .archive-pop input{width:100%;box-sizing:border-box}
+  .archive-pop input,.archive-pop select{width:100%;box-sizing:border-box}
+  .archive-pop form{margin-top:10px;border-top:1px solid var(--line-soft);padding-top:10px}
+  .archive-pop form:first-child{margin-top:0;border:0;padding-top:0}
+  .archive-pop{max-height:70vh;overflow-y:auto}
   .archive-empty{padding:34px 16px;text-align:center;color:var(--muted)}
   .archive-drop{border:1px dashed rgba(96,165,250,.4)!important;background:linear-gradient(180deg,rgba(37,99,235,.08),rgba(124,58,237,.05))!important}
   .archive-drop input[type=file]{width:100%;box-sizing:border-box}
@@ -78,7 +81,7 @@
       <div style="font-size:38px">🗄️</div>
       <div>
         <h1>File archiviati</h1>
-        <div class="muted">Uno spazio ordinato per documenti, foto e file di testo.</div>
+        <div class="muted">Gestisci cartelle e sottocartelle, sposta documenti, modifica testi e sostituisci file senza perdere l’organizzazione.</div>
       </div>
       <div class="archive-badge">{{ scope_label }}</div>
     </div>
@@ -172,6 +175,13 @@
               <input name="name" value="{{ folder.name }}" maxlength="180" required>
               <button class="btn2" type="submit">Rinomina</button>
             </form>
+            <form method="post" action="/file-archiviati/cartelle/{{ folder.id }}/sposta">
+              <label class="muted">📦 Sposta cartella e contenuto</label>
+              <select name="target_folder_id" required>
+                {% for dest in destinations if dest.id != folder.id %}<option value="{{ dest.id }}" {% if (folder.parent_id or 0) == dest.id %}selected{% endif %}>{{ dest.label }}</option>{% endfor %}
+              </select>
+              <button class="btn2" type="submit">Sposta cartella</button>
+            </form>
             <form method="post" action="/file-archiviati/cartelle/{{ folder.id }}/elimina" style="margin-top:10px" onsubmit="return confirm('Eliminare questa cartella e TUTTO il suo contenuto?')">
               <button class="danger" type="submit">🗑️ Elimina cartella</button>
             </form>
@@ -200,12 +210,25 @@
           <button class="btn2 js-preview-trigger" type="button">👁️ Visualizza</button>
         {% endif %}
         <a class="btn2" href="/file-archiviati/file/{{ file.id }}/download">⬇️ Scarica</a>
+        {% if file.editable_text %}<a class="btn2" href="/file-archiviati/file/{{ file.id }}/modifica">✏️ Modifica testo</a>{% endif %}
         <details>
           <summary>•••</summary>
           <div class="archive-pop">
             <form method="post" action="/file-archiviati/file/{{ file.id }}/rinomina">
               <input name="name" value="{{ file.filename }}" maxlength="180" required>
               <button class="btn2" type="submit">Rinomina</button>
+            </form>
+            <form method="post" action="/file-archiviati/file/{{ file.id }}/sposta">
+              <label class="muted">📦 Sposta in una cartella</label>
+              <select name="target_folder_id" required>
+                {% for dest in destinations %}<option value="{{ dest.id }}" {% if (file.folder_id or 0) == dest.id %}selected{% endif %}>{{ dest.label }}</option>{% endfor %}
+              </select>
+              <button class="btn2" type="submit">Sposta file</button>
+            </form>
+            <form method="post" action="/file-archiviati/file/{{ file.id }}/sostituisci" enctype="multipart/form-data" onsubmit="return confirm('Sostituire il contenuto del file?')">
+              <label class="muted">🔄 Sostituisci con nuova versione</label>
+              <input type="file" name="file" required>
+              <button class="btn2" type="submit">Sostituisci file</button>
             </form>
             <form method="post" action="/file-archiviati/file/{{ file.id }}/elimina" style="margin-top:10px" onsubmit="return confirm('Eliminare definitivamente questo file?')">
               <button class="danger" type="submit">🗑️ Elimina file</button>
