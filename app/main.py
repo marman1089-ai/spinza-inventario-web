@@ -6491,13 +6491,13 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
             key_params.append(loc)
 
         if q:
-            key_sql += f" AND (lower(name) LIKE {ph} OR lower(category) LIKE {ph} OR lower(location) LIKE {ph})"
-            key_params.extend([f"%{q}%", f"%{q}%", f"%{q}%"])
+            key_sql += f" AND (lower(name) LIKE {ph} OR lower(category) LIKE {ph} OR lower(subgroup) LIKE {ph} OR lower(location) LIKE {ph})"
+            key_params.extend([f"%{q}%"] * 4)
 
         if only_low:
             key_sql += " AND qty <= min_qty"
 
-        key_sql += " ORDER BY category, name"
+        key_sql += " ORDER BY category, subgroup, name"
 
         keys = cur.execute(key_sql, tuple(key_params)).fetchall()
 
@@ -6512,7 +6512,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
                 clauses.append(f"(store={ph} AND area={ph} AND category={ph} AND name={ph})")
                 params.extend([k["store"], k["area"], k["category"], k["name"]])
             rows = cur.execute(
-                "SELECT * FROM products WHERE " + " OR ".join(clauses) + " ORDER BY category, name, location",
+                "SELECT * FROM products WHERE " + " OR ".join(clauses) + " ORDER BY category, subgroup, name, location",
                 tuple(params),
             ).fetchall()
 
@@ -6542,6 +6542,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
                 break
         if not category_color:
             category_color = _default_category_color(cat_k)
+        subgroup = (lst_sorted[0].get("subgroup") or "").strip()
         positions = []
         total = 0.0
         min_total = 0.0
@@ -6560,6 +6561,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
                 "id": rr.get("id"),
                 "store": rr.get("store"),
                 "category": rr.get("category"),
+                "subgroup": rr.get("subgroup") or "",
                 "name": rr.get("name"),
                 "category_color": _clean_category_color(rr.get("category_color") or category_color),
                 "area": rr.get("area") or area_k,
@@ -6579,6 +6581,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
             "store": store_k,
             "area": area_k,
             "category": cat_k,
+            "subgroup": subgroup,
             "name": name_k,
             "category_color": category_color,
             "unit": unit,
@@ -6593,7 +6596,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
         })
 
     # mantieni ordine categoria/nome
-    groups.sort(key=lambda g: (str(g["category"]).lower(), str(g["name"]).lower()))
+    groups.sort(key=lambda g: (str(g["category"]).lower(), str(g["subgroup"]).lower(), str(g["name"]).lower()))
 
     return render(
         "inventario.html",
@@ -6620,7 +6623,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
 
 def _collapse_product_rows_for_single_position(cur, *, row, effective_store, new_qty=None,
                                                new_category=None, new_name=None,
-                                               new_unit=None, new_min_qty=None, new_category_color=None):
+                                               new_unit=None, new_min_qty=None, new_category_color=None, new_subgroup=None):
     """Compatta eventuali vecchie posizioni multiple in una sola riga prodotto.
 
     La nuova UI non usa più posizioni: ogni prodotto resta unico con location MAGAZZINO.
@@ -6647,9 +6650,10 @@ def _collapse_product_rows_for_single_position(cur, *, row, effective_store, new
         final_qty = 0.0
     final_category = (new_category if new_category is not None else old_category).strip()
     final_name = (new_name if new_name is not None else old_name).strip()
+    final_subgroup = (new_subgroup if new_subgroup is not None else (row.get("subgroup") or "")).strip()
     final_unit = (new_unit if new_unit is not None else (row.get("unit") or "")).strip()
     final_min = float(total_min if new_min_qty is None else new_min_qty)
-    final_category_color = _clean_category_color(new_category_color if new_category_color is not None else (row.get("category_color") or _default_category_color(final_category)))
+    final_category_color = _clean_category_color(new_category_color if new_category_color is not None else (row.get("category_color") or _default_category_color(final_subgroup)))
 
     # Prima elimina le altre posizioni: evita conflitti con l'indice unico su MAGAZZINO.
     cur.execute(
@@ -6658,14 +6662,14 @@ def _collapse_product_rows_for_single_position(cur, *, row, effective_store, new
     )
     cur.execute(
         f"""UPDATE products
-            SET category={ph}, name={ph}, location={ph}, unit={ph}, qty={ph}, min_qty={ph}, missing_qty={ph}, category_color={ph}, updated_at={now}
+            SET category={ph}, name={ph}, subgroup={ph}, location={ph}, unit={ph}, qty={ph}, min_qty={ph}, missing_qty={ph}, category_color={ph}, updated_at={now}
             WHERE id={ph} AND store={ph}""",
-        (final_category, final_name, "MAGAZZINO", final_unit, final_qty, final_min, total_missing, final_category_color, base_id, effective_store),
+        (final_category, final_name, final_subgroup, "MAGAZZINO", final_unit, final_qty, final_min, total_missing, final_category_color, base_id, effective_store),
     )
     try:
         cur.execute(
-            f"UPDATE products SET category_color={ph} WHERE store={ph} AND area={ph} AND category={ph}",
-            (final_category_color, effective_store, area, final_category),
+            f"UPDATE products SET category_color={ph} WHERE store={ph} AND area={ph} AND subgroup={ph}",
+            (final_category_color, effective_store, area, final_subgroup),
         )
     except Exception:
         pass
@@ -6673,6 +6677,7 @@ def _collapse_product_rows_for_single_position(cur, *, row, effective_store, new
         "qty": final_qty,
         "min_qty": final_min,
         "category": final_category,
+        "subgroup": final_subgroup,
         "name": final_name,
         "category_color": final_category_color,
         "unit": final_unit,
@@ -6878,6 +6883,7 @@ def item_transfer(
 def item_add(
     request: Request,
     category: str = Form(...),
+    subgroup: str = Form(""),
     name: str = Form(...),
     location: str = Form("MAGAZZINO"),
     unit: str = Form(""),
@@ -6896,6 +6902,7 @@ def item_add(
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
     category = category.strip()
+    subgroup = subgroup.strip()
     name = name.strip()
 
     ph = _ph()
@@ -6909,21 +6916,21 @@ def item_add(
     location = (location or "MAGAZZINO").strip()
 
     unit = (unit or "").strip()
-    category_color = _clean_category_color(category_color or _default_category_color(category))
+    category_color = _clean_category_color(category_color or _default_category_color(subgroup))
 
     with connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            f"""INSERT INTO products(store, category, name, area, location, unit, qty, min_qty, category_color, updated_at)
-                VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
+            f"""INSERT INTO products(store, category, subgroup, name, area, location, unit, qty, min_qty, category_color, updated_at)
+                VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})
                 ON CONFLICT(store, area, category, name, location)
-                DO UPDATE SET unit=excluded.unit, qty=excluded.qty, min_qty=excluded.min_qty, category_color=excluded.category_color, updated_at={now}""",
-            (active_store, category, name, area, location, unit, float(qty), float(min_qty), category_color),
+                DO UPDATE SET subgroup=excluded.subgroup, unit=excluded.unit, qty=excluded.qty, min_qty=excluded.min_qty, category_color=excluded.category_color, updated_at={now}""",
+            (active_store, category, subgroup, name, area, location, unit, float(qty), float(min_qty), category_color),
         )
         try:
             cur.execute(
-                f"UPDATE products SET category_color={ph} WHERE store={ph} AND area={ph} AND category={ph}",
-                (category_color, active_store, area, category),
+                f"UPDATE products SET category_color={ph} WHERE store={ph} AND area={ph} AND subgroup={ph}",
+                (category_color, active_store, area, subgroup),
             )
         except Exception:
             pass
@@ -6940,6 +6947,7 @@ def item_edit(
     item_id: int,
     store: str = Form(""),
     category: str = Form(...),
+    subgroup: str = Form(""),
     name: str = Form(...),
     location: str = Form("MAGAZZINO"),
     unit: str = Form(""),
@@ -6962,11 +6970,12 @@ def item_edit(
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
     category = category.strip()
+    subgroup = subgroup.strip()
     name = name.strip()
     location = (location or "MAGAZZINO").strip()
 
     unit = (unit or "").strip()
-    category_color = _clean_category_color(category_color or _default_category_color(category))
+    category_color = _clean_category_color(category_color or _default_category_color(subgroup))
 
     ph = _ph()
     now = _now()
@@ -6985,6 +6994,7 @@ def item_edit(
             row=row,
             effective_store=effective_store,
             new_category=category,
+            new_subgroup=subgroup,
             new_name=name,
             new_unit=unit,
             new_min_qty=float(min_qty),

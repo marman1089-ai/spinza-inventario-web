@@ -195,6 +195,7 @@ def init_db():
             id {id_col},
             store TEXT NOT NULL,
             category TEXT NOT NULL,
+            subgroup TEXT NOT NULL DEFAULT '',
             category_color TEXT NOT NULL DEFAULT '#64748b',
             name TEXT NOT NULL,
             area TEXT NOT NULL DEFAULT 'prodotti',
@@ -215,6 +216,15 @@ def init_db():
         else:
             try:
                 cur.execute("ALTER TABLE products ADD COLUMN supplier TEXT NOT NULL DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+
+        # Sottogruppi: migrazione non distruttiva, preserva categorie e prodotti.
+        if pg:
+            _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS subgroup TEXT NOT NULL DEFAULT ''")
+        else:
+            try:
+                cur.execute("ALTER TABLE products ADD COLUMN subgroup TEXT NOT NULL DEFAULT ''")
             except sqlite3.OperationalError:
                 pass
 
