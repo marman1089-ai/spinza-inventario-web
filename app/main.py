@@ -6471,7 +6471,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
             locations = []
 
         # --- Selezione "chiavi prodotto" in base ai filtri, poi fetch di TUTTE le posizioni per quelle chiavi ---
-        key_sql = "SELECT DISTINCT store, area, category, name FROM products WHERE 1=1"
+        key_sql = "SELECT DISTINCT store, area, category, subgroup, name FROM products WHERE 1=1"
         key_params = []
         key_sql += f" AND area={ph}"
         key_params.append(area)
@@ -6509,8 +6509,8 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
             clauses = []
             params = []
             for k in keys:
-                clauses.append(f"(store={ph} AND area={ph} AND category={ph} AND name={ph})")
-                params.extend([k["store"], k["area"], k["category"], k["name"]])
+                clauses.append(f"(store={ph} AND area={ph} AND category={ph} AND subgroup={ph} AND name={ph})")
+                params.extend([k["store"], k["area"], k["category"], k["subgroup"], k["name"]])
             rows = cur.execute(
                 "SELECT * FROM products WHERE " + " OR ".join(clauses) + " ORDER BY category, subgroup, name, location",
                 tuple(params),
@@ -6518,7 +6518,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
 
     # --- Raggruppa per prodotto (stesso store+area+category+name), con posizioni affiancate e totale ---
     def _gkey(r):
-        return (r["store"], r.get("area") or area, r["category"], r["name"])
+        return (r["store"], r.get("area") or area, r["category"], r.get("subgroup") or "", r["name"])
 
     grouped = {}
     for r in rows:
@@ -6526,7 +6526,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
         grouped.setdefault(k, []).append(r)
 
     groups = []
-    for (store_k, area_k, cat_k, name_k), lst in grouped.items():
+    for (store_k, area_k, cat_k, subgroup_k, name_k), lst in grouped.items():
         # ordina posizioni
         lst_sorted = sorted(lst, key=lambda x: (str(x.get("location") or "").lower(), int(x.get("id") or 0)))
         unit = ""
@@ -6542,7 +6542,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
                 break
         if not category_color:
             category_color = _default_category_color(cat_k)
-        subgroup = (lst_sorted[0].get("subgroup") or "").strip()
+        subgroup = subgroup_k.strip()
         positions = []
         total = 0.0
         min_total = 0.0
