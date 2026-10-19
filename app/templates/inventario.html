@@ -139,7 +139,7 @@
               {% if g.unit %}<span class="inv-unit">{{ g.unit }}</span>{% endif %}
               {% if g.any_low %}<span class="inv-low-dot">min</span>{% endif %}
             </div>
-            <strong style="border-left:4px solid {{ color_value(g.category_color) }};padding-left:7px">{{ g.name }}</strong>
+            <strong class="inv-product-full-name" style="border-left:4px solid {{ color_value(g.category_color) }};padding-left:7px" title="{{ g.name }}">{{ g.name }}</strong>
             <small class="muted" style="display:block;margin-top:5px">🚚 {{ g.supplier or "Fornitore da assegnare" }}</small>
           </div>
 
@@ -719,6 +719,41 @@
   }
   html.modal-open,html.modal-open body{overflow:hidden!important;overscroll-behavior:none;}
   @keyframes invModalIn{from{opacity:0;transform:translateY(14px) scale(.965)}to{opacity:1;transform:none}}
+
+  /* Inventario smartphone: priorita ai nomi completi, senza ellissi o tagli. */
+  .inv-product-full-name{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:anywhere;word-break:normal;hyphens:auto;line-height:1.3!important;}
+  .inv-line-1{flex-wrap:wrap;row-gap:3px;}
+  .inv-cat,.inv-unit,.inv-low-dot{white-space:normal;overflow-wrap:anywhere;overflow:visible;text-overflow:clip;}
+  .inv-name-cell small{overflow-wrap:anywhere;white-space:normal;}
+  @media(max-width:768px){
+    .inv-list{gap:8px;}
+    .inv-row{
+      display:grid!important;
+      grid-template-columns:minmax(0,1fr) auto!important;
+      grid-template-areas:"nome totale" "azioni azioni";
+      align-items:start!important;
+      column-gap:10px!important;
+      row-gap:9px!important;
+      padding:11px 10px!important;
+      min-height:unset!important;
+    }
+    .inv-name-cell{grid-area:nome;min-width:0;gap:5px;}
+    .inv-name-cell .inv-product-full-name{display:block;font-size:clamp(14px,3.9vw,17px)!important;line-height:1.28!important;font-weight:800;}
+    .inv-line-1{display:flex;flex-wrap:wrap;gap:4px;}
+    .inv-cat,.inv-unit,.inv-low-dot{display:inline-flex!important;font-size:10px!important;max-width:100%!important;}
+    .inv-total-cell{grid-area:totale;min-width:70px;max-width:100px;align-items:flex-end;gap:3px;}
+    .inv-total-cell strong{font-size:13px!important;line-height:1.25!important;white-space:normal;overflow-wrap:anywhere;}
+    .inv-action-cell{grid-area:azioni;display:flex;justify-content:flex-start!important;flex-wrap:wrap;gap:7px!important;min-width:0;padding-top:7px;border-top:1px solid rgba(148,163,184,.16);}
+    .inv-icon-btn,.inv-trash,.inv-set-form button{min-width:36px!important;width:36px!important;height:36px!important;font-size:15px!important;}
+    .inv-set-form{gap:5px!important;}
+    .inv-set-form input{width:72px!important;height:36px!important;font-size:14px!important;}
+  }
+  @media(max-width:390px){
+    .inv-row{grid-template-columns:minmax(0,1fr) minmax(66px,83px)!important;padding:9px 8px!important;}
+    .inv-name-cell .inv-product-full-name{font-size:14px!important;}
+    .inv-cat,.inv-unit,.inv-low-dot{display:inline-flex!important;max-width:100%!important;}
+    .inv-total-cell{min-width:0;max-width:83px;}
+  }
 </style>
 
 {% endblock %}
