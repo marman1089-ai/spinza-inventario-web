@@ -60,7 +60,7 @@ async def add_static_cache_headers(request: Request, call_next):
 STORES = {
     "spinza": "Spinza",
     "reburger_camaldoli": "Reburger Camaldoli",
-    "reburger_palazzuolo": "Reburger Palazzuolo",
+    "reburger_maggio": "Reburger Maggio",
 }
 
 app.add_middleware(
@@ -6571,6 +6571,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
                 "missing_qty": missing,
                 "missing_order_date": rr.get("missing_order_date"),
                 "missing_delivery_date": rr.get("missing_delivery_date"),
+                "supplier": rr.get("supplier") or "",
             })
         # Interfaccia nuova: una sola riga per prodotto, senza più gestione posizioni.
         # Se nel DB esistono vecchie posizioni multiple, qui vengono comunque mostrate come totale unico.
@@ -6586,6 +6587,7 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
             "total": total,
             "min_total": min_total,
             "missing_total": missing_total,
+            "supplier": next((x.get("supplier") for x in lst_sorted if x.get("supplier")), ""),
             "any_low": any_low,
             "disp": _compute_display_totals(total, unit),
         })
@@ -7771,7 +7773,7 @@ def orders_queue_page(request: Request):
             rows = cur.execute(
                 """
                 SELECT q.id, q.store, q.category, q.name, q.qty_to_order, q.added_by, q.ts,
-                       p.qty AS qty_left, p.unit AS unit
+                       p.qty AS qty_left, p.unit AS unit, COALESCE(p.supplier, '') AS supplier
                 FROM order_queue q
                 LEFT JOIN products p ON p.id = q.product_id
                 ORDER BY q.store, q.category, q.name
@@ -7781,7 +7783,7 @@ def orders_queue_page(request: Request):
             rows = cur.execute(
                 f"""
                 SELECT q.id, q.store, q.category, q.name, q.qty_to_order, q.added_by, q.ts,
-                       p.qty AS qty_left, p.unit AS unit
+                       p.qty AS qty_left, p.unit AS unit, COALESCE(p.supplier, '') AS supplier
                 FROM order_queue q
                 LEFT JOIN products p ON p.id = q.product_id
                 WHERE q.store={ph}
@@ -7912,6 +7914,8 @@ def orders_confirm(request: Request, supplier: str = Form(...), queue_ids: list[
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
+    if not is_admin(request):
+        return RedirectResponse("/ordini", status_code=HTTP_303_SEE_OTHER)
     supplier = (supplier or "").strip()
     if not supplier:
         return RedirectResponse("/ordini", status_code=HTTP_303_SEE_OTHER)
@@ -7928,7 +7932,7 @@ def orders_confirm(request: Request, supplier: str = Form(...), queue_ids: list[
         cur = conn.cursor()
 
         # carico righe selezionate rispettando lo store corrente
-        if store == "ALL" and is_admin(request):
+        if is_admin(request):
             placeholders = ",".join([ph] * len(queue_ids))
             sel = cur.execute(
                 f"SELECT id, store, product_id, category, name, qty_to_order FROM order_queue WHERE id IN ({placeholders})",
@@ -7948,6 +7952,15 @@ def orders_confirm(request: Request, supplier: str = Form(...), queue_ids: list[
 
         for st, items in by_store.items():
             if not items:
+                continue
+            # Non mischiare prodotti di fornitori diversi nello stesso ordine.
+            check_ids = [int(x["product_id"]) for x in items]
+            product_suppliers = cur.execute(
+                f"SELECT id, COALESCE(supplier, '') AS supplier FROM products WHERE id IN ({','.join([ph] * len(check_ids))})",
+                tuple(check_ids),
+            ).fetchall()
+            mapping = {int(x["id"]): (x["supplier"] or "").strip() for x in product_suppliers}
+            if any(mapping.get(int(x["product_id"]), "") != supplier for x in items):
                 continue
             # crea ordine
             cur.execute(
@@ -9113,3 +9126,59 @@ def invoices_delete(request: Request, doc_id: int):
 
     return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
 
+
+
+# ============================================================
+# INVENTARIO 2026 — fornitori e preparazione ordini admin
+# ============================================================
+@app.post("/inventario/fornitore")
+def inventory_supplier_update(request: Request, product_id: int = Form(...), supplier: str = Form(""), next_url: str = Form("/inventario")):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    supplier = (supplier or "").strip()[:120]
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        row = cur.execute(f"SELECT store, area, category, name FROM products WHERE id={ph}", (product_id,)).fetchone()
+        if not row:
+            return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+        permitted = is_admin(request) or user.get("store") == row["store"]
+        if not permitted:
+            return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+        cur.execute(f"UPDATE products SET supplier={ph} WHERE store={ph} AND area={ph} AND category={ph} AND name={ph}",
+                    (supplier, row["store"], row["area"], row["category"], row["name"]))
+        _log(cur, store=row["store"], username=user["username"], action="FORNITORE", category=row["category"], name=row["name"] + " -> " + (supplier or "Da assegnare"), delta=0)
+    return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get("/ordini/preparazione", response_class=HTMLResponse)
+def admin_order_preparation(request: Request):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not is_admin(request):
+        return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
+    with connect() as conn:
+        cur = conn.cursor()
+        rows = cur.execute("""SELECT q.id, q.store, q.name, q.qty_to_order, q.category,
+                             COALESCE(p.supplier, '') AS supplier, COALESCE(p.unit, '') AS unit
+                             FROM order_queue q LEFT JOIN products p ON p.id=q.product_id
+                             ORDER BY q.store, p.supplier, q.name""").fetchall()
+    groups = {}
+    unassigned = []
+    for row in rows:
+        supplier = (row.get("supplier") or "").strip()
+        if not supplier:
+            unassigned.append(row)
+        else:
+            groups.setdefault((row["store"], supplier), []).append(row)
+    batches = []
+    for (store, supplier), items in sorted(groups.items()):
+        lines = [f"Ordine {STORES.get(store, store)} — {supplier}", ""]
+        for item in items:
+            qty = f'{float(item["qty_to_order"]):g}'
+            lines.append(f'- {item["name"]}: {qty} {item["unit"]}'.rstrip())
+        lines.append("Grazie!")
+        batches.append({"store":store,"supplier":supplier,"items":items,"message":"\n".join(lines)})
+    return render("order_preparation.html", user=user, batches=batches, unassigned=unassigned, stores=STORES, brand="ALL", active_store="ALL")

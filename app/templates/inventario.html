@@ -120,6 +120,12 @@
       </div>
     </div>
 
+    <div class="row" style="margin:8px 0 14px;gap:10px;align-items:center;flex-wrap:wrap">
+      <span class="pill">📦 Prodotti: {{ groups|length }}</span>
+      <span class="pill">⚠️ Sotto minimo: {{ groups|selectattr('any_low')|list|length }}</span>
+      {% if admin %}<a class="pill" href="/ordini/preparazione" style="text-decoration:none">📋 Prepara ordini per fornitore</a>{% endif %}
+    </div>
+    <datalist id="inventorySuppliers">{% for supplier in groups|map(attribute='supplier')|unique %}{% if supplier %}<option value="{{ supplier }}">{% endif %}{% endfor %}</datalist>
     <div class="inv-list">
       {% for g in groups %}
         {% set p = g.primary %}
@@ -132,6 +138,7 @@
               {% if g.any_low %}<span class="inv-low-dot">min</span>{% endif %}
             </div>
             <strong>{{ g.name }}</strong>
+            <small class="muted" style="display:block;margin-top:5px">🚚 {{ g.supplier or "Fornitore da assegnare" }}</small>
           </div>
 
           <div class="inv-total-cell">
@@ -164,12 +171,24 @@
                   <label>Colore gruppo<input name="category_color" type="color" value="{{ color_value(g.category_color) }}" /></label>
                   <label>Nome<input name="name" value="{{ p.name }}" required /></label>
                   <label>Unità<input name="unit" value="{{ g.unit or '' }}" /></label>
-                  <label>Minimo<input name="min_qty" type="number" step="0.1" value="{{ fmt_input(g.min_total or 0) }}" inputmode="decimal" /></label>
+                  <label>Minimo<input name="min_qty" type="number" min="0" step="any" value="{{ fmt_input(g.min_total or 0) }}" inputmode="decimal" /></label>
                   <button class="btn" type="submit">Salva modifica</button>
                 </form>
               </div>
             </details>
 
+            <details class="inv-edit-details">
+              <summary class="mini inv-icon-btn" title="Assegna fornitore">🚚</summary>
+              <div class="inv-popover inv-modal-popover inv-edit-popover">
+                <div class="inv-modal-head"><strong>Fornitore · {{ g.name }}</strong><button type="button" class="mini" onclick="closeInventoryDetails(this)">✖</button></div>
+                <form method="post" action="/inventario/fornitore" class="inv-edit-form">
+                  <input type="hidden" name="product_id" value="{{ p.id }}" />
+                  <input type="hidden" name="next_url" value="/inventario" />
+                  <label>Fornitore<input name="supplier" value="{{ g.supplier or '' }}" placeholder="Es. Metro" maxlength="120" list="inventorySuppliers" /></label>
+                  <button class="btn" type="submit">Salva fornitore</button>
+                </form>
+              </div>
+            </details>
             <button class="mini inv-icon-btn" type="button" title="Ordina" onclick="openOrderQty({{ p.id }}, {{ g.total }})">🛒</button>
 
             <form method="post" action="/items/{{ p.id }}/delete" onsubmit="return confirm('Eliminare {{ jsq(g.name) }}?')" class="inv-delete-form">

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>{{ title or 'Gestionale' }}</title>
-  {# brand: 'spinza' | 'reburger_camaldoli' | 'reburger_palazzuolo' | 'ALL' #}
+  {# brand: 'spinza' | 'reburger_camaldoli' | 'reburger_maggio' | 'ALL' #}
   {% set _brand = brand or (user.store if user and user.store) or '' %}
   {% if _brand == 'spinza' %}
     <link rel="icon" href="/static/logo_omino_spinza.png" />
@@ -353,6 +353,7 @@
           <a href="/select-area?area=bibite">🥤 Bibite</a>
           <a href="/select-area?area=prodotti">🍽️ Prodotti</a>
           <a href="/ordini">🚚 Ordini da fare</a>
+          {% if user and (user.role == "admin" or user.get("role") == "admin") %}<a href="/ordini/preparazione">📋 Preparazione fornitori</a>{% endif %}
           <a href="/ordinati">📦 Ordini in corso</a>
           <a href="/storico-ordini">🗂️ Storico ordini</a>
           <a href="/scambi">🔁 Scambi tra negozi</a>
@@ -416,6 +417,7 @@
         <a href="/select-area?area=bibite" onclick="closeMobileMenu()">🥤 Bibite</a>
         <a href="/select-area?area=prodotti" onclick="closeMobileMenu()">🍽️ Prodotti</a>
         <a href="/ordini" onclick="closeMobileMenu()">🚚 Ordini da fare</a>
+        {% if user and (user.role == "admin" or user.get("role") == "admin") %}<a href="/ordini/preparazione" onclick="closeMobileMenu()">📋 Preparazione fornitori</a>{% endif %}
         <a href="/ordinati" onclick="closeMobileMenu()">📦 Ordini in corso</a>
         <a href="/storico-ordini" onclick="closeMobileMenu()">🗂️ Storico ordini</a>
         <a href="/scambi" onclick="closeMobileMenu()">🔁 Scambi tra negozi</a>

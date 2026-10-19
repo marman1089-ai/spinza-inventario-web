@@ -3,15 +3,14 @@
 {% block content %}
   <div class="card" style="margin-bottom:12px;">
     <h2 style="margin:0 0 6px 0;">🚚 Logistica — Ordini da fare</h2>
-    <div class="muted">Da inventario premi <strong>Ordina</strong> su un prodotto: finisce qui. Seleziona più righe e conferma per creare un ordine (stesso fornitore).</div>
+    <div class="muted">Aggiungi i prodotti dal carrello in inventario. Le richieste sono divise per fornitore, e l'admin può preparare i messaggi e confermare gli ordini.</div>
+    {% if user.role == 'admin' or user.get('role') == 'admin' %}<a href="/ordini/preparazione" class="btn" style="display:inline-block;margin-top:12px;text-decoration:none">📋 Area admin · Prepara ordini</a>{% endif %}
   </div>
 
   <div class="card" style="margin-bottom:12px;">
-    <form method="post" action="/ordini/confirm">
-      <div class="row" style="align-items:center;">
-        <input name="supplier" placeholder="Fornitore (es. Metro, Prinz...)" style="flex:1;min-width:220px" required />
-        <button class="btn" type="submit">Conferma ordine</button>
-      </div>
+    {% if user.role == 'admin' or user.get('role') == 'admin' %}
+    <div>
+      <div class="muted">Per ordinare, utilizza <a href="/ordini/preparazione">Prepara ordini</a>: conferma solo prodotti dello stesso fornitore e negozio.</div>
 
       <div style="overflow:auto;margin-top:12px;">
         <table>
@@ -20,6 +19,7 @@
               <th>✓</th>
               <th>Categoria</th>
               <th>Prodotto</th>
+              <th>Fornitore</th>
               <th>Rimasti</th>
               <th>Q.tà da ordinare</th>
               {% if active_store == 'ALL' %}<th>Negozio</th>{% endif %}
@@ -32,10 +32,10 @@
             {% for r in rows %}
               <tr>
                 <td>
-                  <input type="checkbox" name="queue_ids" value="{{ r.id }}" />
+                  <span class="muted">·</span>
                 </td>
                 <td><span class="pill">{{ r.category }}</span></td>
-                <td><strong>{{ r.name }}</strong></td>
+                <td><strong>{{ r.name }}</strong></td><td>{{ r.supplier or '⚠️ Non assegnato' }}</td>
                 <td>
                   {{ "%.2f"|format(r.qty_left or 0) }}{% if r.unit %} <span class="muted">({{ r.unit }})</span>{% endif %}
                   <div class="muted total-auto" data-qty="{{ r.qty_left or 0 }}" data-unit="{{ r.unit or '' }}"></div>
@@ -64,7 +64,11 @@
           </tbody>
         </table>
       </div>
-    </form>
+    </div>
+    {% else %}
+    <div class="muted" style="margin-bottom:10px">Le tue richieste di acquisto vengono inviate all'admin.</div>
+    {% for r in rows %}<div class="pill" style="margin:4px">{{ r.name }} · {{ r.qty_to_order }} · {{ r.supplier or 'Fornitore da assegnare' }}</div>{% else %}<p>Nessuna richiesta in carrello.</p>{% endfor %}
+    {% endif %}
   </div>
 
   <div class="card">

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% set title = "Preparazione ordini fornitori" %}
+{% block content %}
+<div class="card" style="margin-bottom:14px">
+  <h1 style="margin:0 0 8px">📋 Preparazione ordini · Admin</h1>
+  <p class="muted">Un messaggio per ogni fornitore e negozio. Copia il messaggio, invialo al fornitore e poi conferma l'ordine; le righe passano alla gestione ordini in corso già esistente.</p>
+  <a href="/ordini" class="pill">← Carrello richieste</a> <a href="/ordinati" class="pill">📦 Ordini in corso</a>
+</div>
+{% if unassigned %}
+<div class="card" style="margin-bottom:14px;border:1px solid #f59e0b">
+  <h2>⚠️ Fornitore mancante · {{ unassigned|length }} prodotti</h2>
+  <p>Assegna il fornitore da Inventario con il pulsante 🚚: questi prodotti non possono essere confermati per errore con il fornitore sbagliato.</p>
+  {% for item in unassigned %}<div style="padding:6px 0">{{ stores.get(item.store, item.store) }} · {{ item.name }} · {{ item.qty_to_order }}</div>{% endfor %}
+</div>
+{% endif %}
+{% for batch in batches %}
+<div class="card" style="margin-bottom:16px">
+  <h2 style="margin:0 0 8px">🚚 {{ batch.supplier }} <span class="pill">{{ stores.get(batch.store, batch.store) }}</span></h2>
+  <p class="muted">{{ batch.items|length }} prodotti</p>
+  <textarea id="order-message-{{ loop.index }}" readonly style="width:100%;min-height:{{ [180, 70+batch.items|length*32]|max }}px;box-sizing:border-box;white-space:pre-wrap;padding:12px">{{ batch.message }}</textarea>
+  <div class="row" style="margin:12px 0;gap:12px;flex-wrap:wrap">
+    <button type="button" class="btn2" onclick="copyOrderMessage('order-message-{{ loop.index }}',this)">📋 Copia messaggio</button>
+    <form method="post" action="/ordini/confirm" onsubmit="return confirm('Confermi di aver inviato l’ordine a {{ batch.supplier|e }}?')" style="display:inline">
+      <input type="hidden" name="supplier" value="{{ batch.supplier }}" />
+      {% for item in batch.items %}<input type="hidden" name="queue_ids" value="{{ item.id }}" />{% endfor %}
+      <button class="btn" type="submit">✅ Conferma ordine inviato</button>
+    </form>
+  </div>
+  {% for item in batch.items %}<div style="padding:5px 0">{{ item.name }} · <strong>{{ '%g'|format(item.qty_to_order) }} {{ item.unit }}</strong></div>{% endfor %}
+</div>
+{% else %}
+{% if not unassigned %}<div class="card"><p>Nessun ordine da preparare.</p></div>{% endif %}
+{% endfor %}
+<script>
+async function copyOrderMessage(id, btn) {
+  const txt=document.getElementById(id).value;
+  try {await navigator.clipboard.writeText(txt)} catch(e) {const el=document.getElementById(id);el.select();document.execCommand('copy')}
+  btn.textContent='✓ Messaggio copiato';setTimeout(()=>btn.textContent='📋 Copia messaggio',1800);
+}
+</script>
+{% endblock %}

@@ -186,6 +186,9 @@ def init_db():
         except Exception:
             pass
 
+        # Le utenze staff dell'inventario seguono la nuova sede.
+        _safe_exec(cur, "UPDATE users SET store='reburger_maggio' WHERE store='reburger_palazzuolo'")
+
         # PRODUCTS
         _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS products (
@@ -205,6 +208,23 @@ def init_db():
             updated_at {ts_default}
         )
         """)
+
+        # Aggiornamento non distruttivo: colonna fornitore sui prodotti esistenti.
+        if pg:
+            _safe_exec(cur, "ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier TEXT NOT NULL DEFAULT ''")
+        else:
+            try:
+                cur.execute("ALTER TABLE products ADD COLUMN supplier TEXT NOT NULL DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+
+        # Migrazione idempotente di Palazzuolo a Maggio per il SOLO inventario.
+        # Le righe che entrerebbero in conflitto restano conservate con la chiave originale.
+        _safe_exec(cur, """UPDATE products SET store='reburger_maggio'
+            WHERE store='reburger_palazzuolo'
+              AND NOT EXISTS (SELECT 1 FROM products p2 WHERE p2.store='reburger_maggio'
+                  AND p2.area=products.area AND p2.category=products.category
+                  AND p2.name=products.name AND p2.location=products.location)""")
 
         # NOTE: Supporto multi-posizione.
         # In passato l'indice unico era (store, category, name) e impediva di avere
@@ -475,6 +495,8 @@ def init_db():
             ts {ts_default}
         )
         """)
+
+        _safe_exec(cur, "UPDATE order_queue SET store='reburger_maggio' WHERE store='reburger_palazzuolo'")
 
         _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS orders (
