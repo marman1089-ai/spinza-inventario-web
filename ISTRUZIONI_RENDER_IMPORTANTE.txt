@@ -1,0 +1,8 @@
+ARCHIVIO PULITO DAL FILE INVIATO: Nuovo Archivio WinRAR ZIP.zip
+
+Sono state eliminate le copie duplicate del progetto (fix, proj, appsrc, backup, spinza-inventario-web-main), i file di cache e i database locali.
+Python fissato a 3.11.9 in .python-version e runtime.txt (nel file originale erano discordanti).
+Non e una correzione garantita del deploy: per trovare il guasto serve il messaggio Build Logs / Runtime Logs.
+Non eliminare o sostituire DATABASE_URL, SESSION_SECRET, Postgres o gli upload persistenti.
+Root Directory Render: vuota; Build Command: pip install -r requirements.txt; Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+Prima del deploy, fare il backup del database. Render potrebbe richiedere altri fix una volta letti i log.
