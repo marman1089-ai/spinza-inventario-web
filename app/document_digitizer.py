@@ -24,28 +24,65 @@ def _pdf_pages(pdf_bytes):
     return texts, imgs
 
 
+def _parse_decimal(raw):
+    token = str(raw or '').replace('€','').replace(' ', '').strip()
+    if not token: return ''
+    if ',' in token and '.' in token:
+        token = token.replace('.', '').replace(',', '.') if token.rfind(',') > token.rfind('.') else token.replace(',', '')
+    elif ',' in token: token = token.replace(',', '.')
+    try: return str(round(float(token), 4))
+    except ValueError: return ''
+
+
 def _heuristic(text, kind):
-    lines = []
-    money_re = re.compile(r'(?<!\d)(\d{1,7}[.,]\d{2})(?!\d)')
-    qty_re = re.compile(r'^\s*(\d+(?:[.,]\d+)?)\s*(?:x|pz|kg|lt|l)?\s+', re.I)
-    for line in text.splitlines():
-        line = ' '.join(line.split()).strip()
-        if not line or len(line) < 5: continue
-        match = list(money_re.finditer(line))
-        if not match: continue
-        if re.search(r'^(?:totale|iva|imponibile|resto|pagato|importo|subtotale)\b', line, re.I): continue
-        title = line[:match[-1].start()].strip(' :-')
-        if len(title) < 3: continue
-        qm = qty_re.match(title)
-        qty = qm.group(1).replace(',', '.') if qm else '1'
-        if qm: title = title[qm.end():]
-        try: amount = float(match[-1].group(1).replace('.', '').replace(',', '.'))
-        except ValueError: continue
-        if amount < 0 or amount > 100000: continue
-        lines.append({'descrizione': title[:180], 'quantita': qty, 'prezzo_unitario': '', 'totale': amount, 'iva': ''})
-    totals = re.findall(r'(?:totale\s*(?:documento|fattura|pagato)?|incasso\s*totale)\s*[:€ ]*([\d.,]+)', text, flags=re.I)
-    total = totals[-1] if totals else ''
-    return {'fornitore': '', 'numero_documento': '', 'data': '', 'totale': total, 'imponibile': '', 'iva': '', 'pagamento': '', 'note': '', 'righe': lines[:150], 'testo_originale': text[:25000], 'metodo': 'testo/OCR locale (verifica manuale)'}
+    """OCR best-effort (non fiscal certification); every field is editable by user."""
+    rawlines = [' '.join(line.split()).strip() for line in text.splitlines() if line.strip()]
+    result = {'fornitore':'','numero_documento':'','data':'','ora':'','totale':'','imponibile':'',
+        'iva':'','pagamento':'','note':'','righe':[],'testo_originale':text[:40000],
+        'metodo':'OCR gratuito: risultato da verificare'}
+    date_match = re.search(r'\b(\d{2})[./-](\d{2})[./-](20\d{2})\b', text)
+    if date_match: result['data'] = f'{date_match.group(3)}-{date_match.group(2)}-{date_match.group(1)}'
+    time_match = re.search(r'\b([01]\d|2[0-3]):([0-5]\d)\b',text)
+    if time_match: result['ora']=time_match.group(0)
+    for ln in rawlines[:12]:
+        if len(ln)>3 and len(ln)<95 and not re.search(r'\b(?:P\.?IVA|C\.?F\.?|TEL|FATTURA|DOCUMENTO|PAGINA|DATA|QUANTIT|DESCRIZIONE)\b',ln,re.I) and not re.match(r'^[\d\W]+$',ln):
+            result['fornitore']=ln[:100]; break
+    num = re.search(r'\b(?:fattura|documento|doc\.)\s*(?:n\.?|numero|nr\.?|n°)?\s*[:#-]?\s*([\w/-]{2,28})',text,re.I)
+    if num: result['numero_documento']=num.group(1)
+    money=r'(\d{1,7}(?:[.,]\d{3})*[.,]\d{2})'
+    patterns = {
+      'totale':[r'\b(?:totale\s+(?:documento|fattura|dovuto|euro|pagare)|totale\s+complessivo|totale\s+vendite|totale\s+spesa|totale\s+incassi|importo\s+totale|totale)\s*[:€ ]*'+money],
+      'imponibile':[r'\bimponibile\s*[:€ ]*'+money],
+      'iva':[r'\b(?:totale\s+iva|iva\s+totale)\s*[:€ ]*'+money],
+    }
+    if kind=='chiusure':
+      patterns.update({'contanti':[r'\bcontanti\s*[:€ ]*'+money], 'pos':[r'\b(?:carta|pos|carte|bancomat)\s*[:€ ]*'+money], 'ticket':[r'\bticket\s*[:€ ]*'+money], 'sconti':[r'\bsconti\s*[:€ ]*'+money], 'annullamenti':[r'\bannullament[oi]\s*[:€ ]*'+money]})
+    if kind=='spese':
+      patterns.update({'resto':[r'\bresto\s*[:€ ]*'+money], 'importo_consegnato':[r'\b(?:contante\s+ricevuto|contanti\s+ricevuti)\s*[:€ ]*'+money]})
+    for key,expressions in patterns.items():
+        values=[]
+        for exp in expressions: values += re.findall(exp,text,re.I)
+        if values: result[key]=_parse_decimal(values[-1])
+    skip = re.compile(r'^(?:totale|iva|imponibile|resto|pagato|importo|subtotale|carta|pos|contanti|p\.?iva|cod\.?|numero|data|fattura|pagamento|documento|sconto|annullam|aliquota)',re.I)
+    for ln in rawlines:
+        if skip.match(ln) or len(ln)<5: continue
+        nums = list(re.finditer(money,ln))
+        if not nums: continue
+        # amount is at the end; never invent unit prices when source is ambiguous
+        match=nums[-1]
+        desc=ln[:match.start()].strip(' :-•')
+        if len(desc)<3 or not re.search('[A-Za-zÀ-ÿ]',desc): continue
+        qty=''; unit=''; unit_price=''
+        q=re.match(r'^(\d+(?:[.,]\d+)?)\s*(kg|pz|p[ez]z[i.]?|lt|l|cf|x|nr)?\s+',desc,re.I)
+        if q:qty=_parse_decimal(q.group(1));unit=q.group(2) or '';desc=desc[q.end():]
+        if len(nums)>=2:
+            # leftmost money column could be price; leave blank if likely uncertain
+            unit_price=_parse_decimal(nums[-2].group(1))
+        amount=_parse_decimal(match.group(1))
+        result['righe'].append({'descrizione':desc[:180],'quantita':qty,'unita_misura':unit,'prezzo_unitario':unit_price,'totale':amount,'iva':'','reparto':'','categoria':''})
+        if len(result['righe'])>=250: break
+    if not text.strip():result['note']='Non è stato rilevato testo leggibile. Compila manualmente.'
+    return result
 
 
 def extract_document(pdf_bytes, kind):

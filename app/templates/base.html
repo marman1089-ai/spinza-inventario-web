@@ -335,7 +335,7 @@
         <div class="nav-dd-panel">
           <a href="/gestionale">📊 Dashboard gestionale</a>
           {% if user.role == 'admin' %}
-            <a href="/admin/controllo">Centro di controllo</a><a href="/admin/cassa">Carica CSV cassa</a><a href="/admin/cassa/report">Vendite e consumi</a><a href="/admin/digitalizzazione">Digitalizzazione archivio</a><a href="/report-documenti">Report documenti</a><a href="/gestionale/incassi">💶 Incassi</a>
+            <a href="/gestionale/incassi">💶 Incassi</a>
             <a href="/gestionale/uscite">💸 Uscite</a>
             <a href="/gestionale/storico-mensile">🗓️ Storico mensile</a>
             <a href="/gestionale/report-vendite">📈 Report vendite</a>
@@ -350,13 +350,27 @@
       <details class="nav-dd" id="navInventario">
         <summary class="pill" style="text-decoration:none;color:var(--text)">📦 Inventario</summary>
         <div class="nav-dd-panel">
-          <a href="/inventario-controllo?area=bibite">Conteggi e movimenti sala</a><a href="/inventario-controllo?area=prodotti">Conteggi cucina</a><a href="/select-area?area=bibite">🥤 Bibite</a>
+          <a href="/select-area?area=bibite">🥤 Bibite</a>
           <a href="/select-area?area=prodotti">🍽️ Prodotti</a>
           <a href="/ordini">🚚 Ordini da fare</a>
           {% if user and (user.role == "admin" or user.get("role") == "admin") %}<a href="/ordini/preparazione">📋 Preparazione fornitori</a>{% endif %}
           <a href="/ordinati">📦 Ordini in corso</a>
           <a href="/storico-ordini">🗂️ Storico ordini</a>
           <a href="/scambi">🔁 Scambi tra negozi</a>
+        </div>
+      </details>
+      <details class="nav-dd" id="navStrumenti">
+        <summary class="pill" style="text-decoration:none;color:var(--text)">Strumenti digitali</summary>
+        <div class="nav-dd-panel">
+          <a href="/digitalizza/archivio/tutti">Digitalizza documenti già caricati</a>
+          <a href="/fatture">Fatture digitali</a>
+          <a href="/chiusure">Chiusure digitali</a>
+          <a href="/spese-secondarie">Spese secondarie digitali</a>
+          <a href="/inventario/conteggio?area=bibite">Conteggio Sala giornaliero</a>
+          <a href="/inventario/conteggio?area=prodotti">Conteggio Cucina settimanale</a>
+          <a href="/inventario/report?area=bibite">Report consumi Sala</a>
+          <a href="/inventario/report?area=prodotti">Report consumi Cucina</a>
+          {% if user.role=='admin' %}<a href="/admin/controllo">Centro di controllo</a><a href="/admin/cassa">Carica CSV cassa</a><a href="/admin/cassa/report">Vendite e consumi</a><a href="/report-documenti">Report documenti</a>{% endif %}
         </div>
       </details>
       {% if user.role == 'admin' %}
@@ -400,7 +414,7 @@
       <div class="sub">
         <a href="/gestionale" onclick="closeMobileMenu()">📊 Dashboard gestionale</a>
         {% if user.role == 'admin' %}
-          <a href="/admin/controllo">Centro di controllo</a><a href="/admin/cassa">Carica CSV cassa</a><a href="/admin/cassa/report">Vendite e consumi</a><a href="/admin/digitalizzazione">Digitalizzazione archivio</a><a href="/report-documenti">Report documenti</a><a href="/gestionale/incassi" onclick="closeMobileMenu()">💶 Incassi</a>
+          <a href="/gestionale/incassi" onclick="closeMobileMenu()">💶 Incassi</a>
           <a href="/gestionale/uscite" onclick="closeMobileMenu()">💸 Uscite</a>
           <a href="/gestionale/storico-mensile" onclick="closeMobileMenu()">🗓️ Storico mensile</a>
           <a href="/gestionale/report-vendite" onclick="closeMobileMenu()">📈 Report vendite</a>
@@ -414,7 +428,7 @@
 
       <div class="section">Inventario</div>
       <div class="sub">
-        <a href="/inventario-controllo?area=bibite">Conteggi e movimenti sala</a><a href="/inventario-controllo?area=prodotti">Conteggi cucina</a><a href="/select-area?area=bibite" onclick="closeMobileMenu()">🥤 Bibite</a>
+        <a href="/select-area?area=bibite" onclick="closeMobileMenu()">🥤 Bibite</a>
         <a href="/select-area?area=prodotti" onclick="closeMobileMenu()">🍽️ Prodotti</a>
         <a href="/ordini" onclick="closeMobileMenu()">🚚 Ordini da fare</a>
         {% if user and (user.role == "admin" or user.get("role") == "admin") %}<a href="/ordini/preparazione" onclick="closeMobileMenu()">📋 Preparazione fornitori</a>{% endif %}
@@ -423,6 +437,18 @@
         <a href="/scambi" onclick="closeMobileMenu()">🔁 Scambi tra negozi</a>
       </div>
 
+      <div class="section">Strumenti digitali</div>
+      <div class="sub">
+        <a href="/digitalizza/archivio/tutti">Digitalizza documenti già caricati</a>
+        <a href="/fatture">Fatture digitali</a>
+        <a href="/chiusure">Chiusure digitali</a>
+        <a href="/spese-secondarie">Spese secondarie digitali</a>
+        <a href="/inventario/conteggio?area=bibite">Conteggio Sala giornaliero</a>
+        <a href="/inventario/conteggio?area=prodotti">Conteggio Cucina settimanale</a>
+        <a href="/inventario/report?area=bibite">Report consumi Sala</a>
+        <a href="/inventario/report?area=prodotti">Report consumi Cucina</a>
+        {% if user.role=='admin' %}<a href="/admin/controllo">Centro di controllo</a><a href="/admin/cassa">Carica CSV cassa</a><a href="/admin/cassa/report">Vendite e consumi</a><a href="/report-documenti">Report documenti</a>{% endif %}
+      </div>
       <div class="section">Altro</div>
       {% if user.role == 'admin' %}
         <a href="/file-archiviati" onclick="closeMobileMenu()">🗄️ File archiviati</a>
@@ -491,7 +517,7 @@
 
   // Desktop dropdown: chiudi i menu cliccando fuori o scegliendo una voce
   (function(){
-    ['navGestionale','navInventario'].forEach(function(id){
+    ['navGestionale','navInventario','navStrumenti'].forEach(function(id){
       const dd = document.getElementById(id);
       if(!dd) return;
       document.addEventListener('click', function(ev){

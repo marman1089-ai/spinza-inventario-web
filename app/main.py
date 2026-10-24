@@ -7390,9 +7390,8 @@ async def closures_upload(request: Request, closure_date: str = Form(""), files:
             delta=0.0,
         )
 
-    from .document_jobs import enqueue
-    enqueue("chiusure", new_doc_id, store, user["username"])
-    return RedirectResponse(f"/documenti/chiusure/{new_doc_id}", status_code=HTTP_303_SEE_OTHER)
+    # OCR gratuito avviato nel browser dalla pagina documento.
+    return RedirectResponse(f"/digitalizza/chiusure/{new_doc_id}?auto=1", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/chiusure/{doc_id}")
@@ -7565,9 +7564,8 @@ async def secondary_expenses_upload(request: Request, expense_date: str = Form("
             delta=0.0,
         )
 
-    from .document_jobs import enqueue
-    enqueue("spese-secondarie", new_doc_id, store, user["username"])
-    return RedirectResponse(f"/documenti/spese-secondarie/{new_doc_id}", status_code=HTTP_303_SEE_OTHER)
+    # OCR gratuito avviato nel browser dalla pagina documento.
+    return RedirectResponse(f"/digitalizza/spese/{new_doc_id}?auto=1", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/spese-secondarie/{doc_id}")
@@ -8514,9 +8512,8 @@ async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: 
             delta=0.0,
         )
 
-    from .document_jobs import enqueue
-    enqueue("fatture", new_doc_id, store, user["username"])
-    return RedirectResponse(f"/documenti/fatture/{new_doc_id}", status_code=HTTP_303_SEE_OTHER)
+    # OCR gratuito avviato nel browser dalla pagina documento.
+    return RedirectResponse(f"/digitalizza/fatture/{new_doc_id}?auto=1", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/fatture/importa-prodotti", response_class=HTMLResponse)

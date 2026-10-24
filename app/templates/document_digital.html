@@ -2,14 +2,14 @@
 {% set title = "Digitalizzazione documento" %}
 {% block content %}
 <div class="card">
-  <h2>📋 Documento digitale — {{kind|capitalize}}</h2>
+  <h2>Documento digitale — {{kind|capitalize}}</h2>
   <p class="muted">Negozio: {{store}} · Documento n. {{document_id}}. I dati letti automaticamente possono essere sbagliati: controlla sempre sul documento originale, soprattutto prezzi, IVA e totali.</p>
   <div class="row">
     <a class="btn2" href="{{back}}">← Archivio</a>
     <form action="/digitalizza/{{kind}}/{{document_id}}/estrai" method="post" onsubmit="return confirm('Rileggere il documento? Le correzioni precedenti saranno sostituite.');"><button class="btn" type="submit">🔎 {{'Rielabora foto / PDF' if payload else 'Estrai dati dalla foto / PDF'}}</button></form>
     {% if has_data %}<a class="btn2" href="/digitalizza/{{kind}}/{{document_id}}/csv">⬇ Esporta CSV</a>{% endif %}
   </div>
-  <button type="button" class="btn" onclick="runFreeOCR()" id="ocr-btn">🆓 Leggi tutte le pagine con OCR gratuito</button>
+  <button type="button" class="btn" onclick="runFreeOCR()" id="ocr-btn">Leggi e trascrivi tutte le pagine (gratuito)</button>
   <span id="ocr-status" role="status" class="muted" style="display:block;margin-top:10px"></span>
   <p class="muted">OCR eseguito sul tuo dispositivo, senza chiave OpenAI. Prima del salvataggio controlla ogni cifra; le righe errate si possono eliminare e quelle mancanti aggiungere. La prima apertura può richiedere Internet per caricare i componenti gratuiti.</p>
   <details style="margin-top:12px"><summary>📄 Visualizza il documento originale</summary><iframe title="Documento originale" src="/digitalizza/{{kind}}/{{document_id}}/originale" style="width:100%;height:550px;border:1px solid #ddd;border-radius:8px"></iframe></details>
@@ -63,7 +63,7 @@ document.querySelector('#digital-form').addEventListener('submit',()=>{const lin
 async function runFreeOCR(){
   const btn=document.getElementById('ocr-btn'), status=document.getElementById('ocr-status');
   if(!window.pdfjsLib || !window.Tesseract){status.textContent='Librerie OCR non disponibili. Controlla la connessione Internet oppure usa il pannello manuale.';return;}
-  if(!confirm('La nuova lettura sostituirà le correzioni NON salvate. Proseguire?'))return;
+  if(!new URLSearchParams(window.location.search).has('auto') && !confirm('Rileggere il documento? Le modifiche non salvate andranno perse. Proseguire?'))return;
   btn.disabled=true;let worker;
   try {
     status.textContent='Caricamento documento...';
@@ -93,5 +93,6 @@ async function runFreeOCR(){
   } catch(e){status.textContent='Impossibile completare OCR: '+e.message+' — puoi comunque inserire manualmente tutte le righe.';btn.disabled=false;}
   finally{if(worker)await worker.terminate();}
 }
+if(new URLSearchParams(location.search).get('auto')==='1' && !{{ 'true' if has_data else 'false' }}) { window.addEventListener('load',runFreeOCR,{once:true}); }
 </script>
 {% endblock %}

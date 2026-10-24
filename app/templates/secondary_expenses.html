@@ -52,8 +52,8 @@
             <tr>
               <td><strong>{{ r.expense_date }}</strong></td>
               {% if active_store == 'ALL' %}<td>{{ stores.get(r.store, r.store) }}</td>{% endif %}
-              <td>{% if user.role=='admin' %}<a class="pill" href="/spese-secondarie/{{ r.id }}" target="_blank" style="text-decoration:none;color:var(--text)">Apri</a>{% endif %} <span class="muted">{{ r.filename or '' }}</span> <a class="pill" href="/documenti/spese-secondarie/{{ r.id }}">Dati digitali / correggi</a></td>
-              <td>{% set summary=doc_summaries.get(r.id,{}) %}<strong>{{ summary.get('supplier') or '' }}</strong>{% if summary.get('amount') is not none %} · {{ summary.get('amount') }} {{ summary.get('currency','EUR') }}{% endif %}<div>{{ summary.get('description') or 'Trascrizione automatica in attesa' }}</div><small>{{ summary.get('state','Da digitalizzare') }}</small><br>{{ r.uploaded_by }}</td>
+              <td>{% if user.role=='admin' %}<a class="pill" href="/spese-secondarie/{{ r.id }}" target="_blank" style="text-decoration:none;color:var(--text)">Apri</a>{% endif %} <span class="muted">{{ r.filename or '' }}</span> <a class="pill" href="/digitalizza/spese/{{ r.id }}">Dati digitali / correggi</a></td>
+              <td>{% set summary=doc_summaries.get(r.id,{}) %}<strong>{{ summary.get('supplier') or '' }}</strong>{% if summary.get('amount') is not none %} · {{ summary.get('amount') }} {{ summary.get('currency','EUR') }}{% endif %}<div>{{ summary.get('description') or 'Apri Dati digitali per avviare o verificare la trascrizione OCR' }}</div><small>{{ summary.get('state','Da digitalizzare') }}</small><br>{{ r.uploaded_by }}</td>
               <td class="muted">{{ r.ts }}</td>
               <td>
 {% if user.role=='admin' %}                <form method="post" action="/spese-secondarie/{{ r.id }}/delete" onsubmit="return confirm('Eliminare questa chiusura?');" style="display:inline;">
