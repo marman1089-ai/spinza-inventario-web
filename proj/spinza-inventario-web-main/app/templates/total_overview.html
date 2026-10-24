@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% set title = "Panoramica totale" %}
+{% block content %}
+<style>
+  .hero-total{border:1px solid var(--line-soft);border-radius:24px;padding:22px;background:linear-gradient(135deg,rgba(37,99,235,.16),rgba(14,165,233,.06));}
+  .kpi-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  .kpi{border:1px solid var(--line-soft);border-radius:18px;padding:14px;background:var(--panel)}
+  .mega{font-size:42px;font-weight:900;line-height:1.02}
+  .big{font-size:28px;font-weight:800;line-height:1.05}
+  .split-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:900px){.kpi-grid,.split-grid{grid-template-columns:1fr}.mega{font-size:34px}}
+</style>
+
+<div class="hero-total">
+  <div class="row" style="justify-content:space-between;align-items:center;">
+    <div>
+      <h2 style="margin:0 0 8px 0;">🌍 Panoramica totale</h2>
+      <div class="muted">Somma tutto: negozi attivi + negozi archiviati. È la visione generale di sempre.</div>
+    </div>
+    <div class="row">
+      <a class="btn2" href="/gestionale" style="text-decoration:none;display:inline-block;">Home gestionale</a>
+      <a class="btn2" href="/gestionale/archiviati" style="text-decoration:none;display:inline-block;">Negozi archiviati</a>
+    </div>
+  </div>
+  <div class="kpi-grid" style="margin-top:18px;">
+    <div class="kpi"><div class="muted">Guadagni / entrate totali</div><div class="mega">€ {{ '%.2f'|format(totals.income or 0) }}</div></div>
+    <div class="kpi"><div class="muted">Spese totali</div><div class="mega">€ {{ '%.2f'|format(totals.expense or 0) }}</div></div>
+    <div class="kpi"><div class="muted">Bilanciamento di sempre</div><div class="mega">€ {{ '%.2f'|format(totals.net or 0) }}</div><div class="muted">Entrate - uscite</div></div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Filtri</h3>
+  <form method="get" action="/gestionale/panoramica-totale" class="row">
+    <select name="year">
+      <option value="ALL" {% if selected_year=='ALL' %}selected{% endif %}>Tutti gli anni</option>
+      {% for y in years %}<option value="{{ y }}" {% if selected_year==y %}selected{% endif %}>{{ y }}</option>{% endfor %}
+    </select>
+    <select name="store">
+      <option value="ALL" {% if selected_store=='ALL' %}selected{% endif %}>Tutti i posti</option>
+      {% for key, label in store_options.items() %}<option value="{{ key }}" {% if selected_store==key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <button class="btn" type="submit">Aggiorna</button>
+    <a class="btn2" href="/gestionale/panoramica-totale" style="text-decoration:none;display:inline-block;">Reset</a>
+  </form>
+</div>
+
+<div class="split-grid" style="margin-top:14px;">
+  <div class="card">
+    <h3 style="margin-top:0;">Negozi attivi</h3>
+    <div class="kpi-grid" style="grid-template-columns:1fr;gap:10px;">
+      <div class="kpi"><div class="muted">Entrate attive</div><div class="big">€ {{ '%.2f'|format(split_totals.active_income or 0) }}</div></div>
+      <div class="kpi"><div class="muted">Spese attive</div><div class="big">€ {{ '%.2f'|format(split_totals.active_expense or 0) }}</div></div>
+      <div class="kpi"><div class="muted">Bilancio attivo</div><div class="big">€ {{ '%.2f'|format(split_totals.active_net or 0) }}</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0;">Negozi archiviati</h3>
+    <div class="kpi-grid" style="grid-template-columns:1fr;gap:10px;">
+      <div class="kpi"><div class="muted">Entrate archiviate</div><div class="big">€ {{ '%.2f'|format(split_totals.archived_income or 0) }}</div></div>
+      <div class="kpi"><div class="muted">Spese archiviate</div><div class="big">€ {{ '%.2f'|format(split_totals.archived_expense or 0) }}</div></div>
+      <div class="kpi"><div class="muted">Bilancio archiviato</div><div class="big">€ {{ '%.2f'|format(split_totals.archived_net or 0) }}</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Diviso per anno</h3>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Anno</th><th>Guadagni / entrate</th><th>Spese</th><th>Bilancio</th></tr></thead>
+      <tbody>
+        {% for row in by_year %}
+        <tr><td><strong>{{ row.year }}</strong></td><td>€ {{ '%.2f'|format(row.income or 0) }}</td><td>€ {{ '%.2f'|format(row.expense or 0) }}</td><td><strong>€ {{ '%.2f'|format(row.net or 0) }}</strong></td></tr>
+        {% else %}<tr><td colspan="4" class="muted">Ancora nessun dato.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Diviso per posto</h3>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Posto</th><th>Tipo</th><th>Entrate</th><th>Spese</th><th>Bilancio</th><th>Anni presenti</th><th>Righe</th></tr></thead>
+      <tbody>
+        {% for row in by_store %}
+        <tr>
+          <td><strong>{{ row.label }}</strong></td>
+          <td><span class="pill">{{ row.kind }}</span></td>
+          <td>€ {{ '%.2f'|format(row.income or 0) }}</td>
+          <td>€ {{ '%.2f'|format(row.expense or 0) }}</td>
+          <td><strong>€ {{ '%.2f'|format(row.net or 0) }}</strong></td>
+          <td>{{ row.years_text }}</td>
+          <td>{{ row.entries_count }} entrate · {{ row.expenses_count }} uscite</td>
+        </tr>
+        {% else %}<tr><td colspan="7" class="muted">Ancora nessun dato.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

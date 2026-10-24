@@ -1,0 +1,594 @@
+{% extends "base.html" %}
+{% set title = "Inventario" %}
+{% block content %}
+{% macro fmt_num(v) -%}
+  {%- set s = "%.1f"|format((v or 0)|float) -%}
+  {%- if s.endswith('.0') -%}
+    {{- s[:-2] -}}
+  {%- else -%}
+    {{- s|replace('.', ',') -}}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro fmt_input(v) -%}
+  {%- set s = "%.1f"|format((v or 0)|float) -%}
+  {%- if s.endswith('.0') -%}
+    {{- s[:-2] -}}
+  {%- else -%}
+    {{- s -}}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro render_total(g) -%}
+  {%- if g.disp and g.disp.conv_val is not none and g.disp.show_pieces -%}
+    {{ fmt_num(g.disp.pieces) }} pz · {{ fmt_num(g.disp.conv_val) }} {{ g.disp.conv_unit }}
+  {%- elif g.unit and g.disp and g.disp.conv_val is not none and (g.disp.conv_unit in ['kg','l']) -%}
+    {{ fmt_num(g.disp.conv_val) }} {{ g.disp.conv_unit }}
+  {%- else -%}
+    {{ fmt_num(g.total) }}{% if g.unit %} {{ g.unit }}{% endif %}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro jsq(v) -%}{{ (v or '')|replace('\\', '\\\\')|replace("'", "\\'") }}{%- endmacro %}
+{% macro color_value(v) -%}
+  {%- set c = (v or '#64748b')|string -%}
+  {%- if c.startswith('#') and c|length == 7 -%}{{ c }}{%- else -%}#64748b{%- endif -%}
+{%- endmacro %}
+
+  <div class="card inv-top-card">
+    <form method="get" action="/inventario" class="inv-filter-form">
+      <a class="pill inv-area-pill" href="/select-area" style="text-decoration:none;color:var(--text)">
+        🧭 {{ areas.get(area, area) }}
+      </a>
+      {% if admin %}
+        <select name="store" class="inv-filter-store">
+          <option value="ALL" {% if active_store=='ALL' %}selected{% endif %}>Tutti</option>
+          {% for code, label in stores.items() %}
+            <option value="{{ code }}" {% if active_store==code %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      {% endif %}
+      <input name="q" value="{{ q or '' }}" placeholder="Cerca prodotto…" class="inv-search" />
+      <select name="cat" class="inv-filter-cat">
+        <option value="ALL" {% if cat=='ALL' %}selected{% endif %}>Categorie</option>
+        {% for c in cats %}
+          <option value="{{ c }}" {% if cat==c %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+      <label class="pill inv-low-filter">
+        <input type="checkbox" name="only_low" value="1" {% if only_low %}checked{% endif %} />
+        Sotto min.
+      </label>
+      <button class="btn2" type="submit">Filtra</button>
+      {% if admin %}
+        <a class="pill inv-log-link" href="/logs" style="text-decoration:none;color:var(--text)">📜 Log</a>
+      {% endif %}
+    </form>
+  </div>
+
+  <div class="card inv-card">
+    <div class="inv-toolbar">
+      <div class="inv-heading">
+        <h2>Inventario</h2>
+        <span class="muted">
+          {% if admin %}
+            Vista: <strong>{% if active_store=='ALL' %}Tutti{% else %}{{ stores.get(active_store, active_store) }}{% endif %}</strong>
+          {% else %}
+            <strong>{{ user.store_label }}</strong>
+          {% endif %}
+          · vista compatta a posizione unica
+        </span>
+      </div>
+
+      <div class="inv-toolbar-actions">
+        <details class="inv-add-details inv-product-modal-details">
+          <summary class="pill">➕ Prodotto</summary>
+          <div class="inv-popover inv-modal-popover inv-add-popover">
+            {% if can_bulk_edit %}
+            <div class="inv-modal-head"><strong>➕ Aggiungi prodotto</strong><button class="mini" type="button" onclick="closeInventoryDetails(this)">✖</button></div>
+            <form method="post" action="/items/add" class="inv-add-form">
+              <input type="hidden" name="next_url" value="" />
+              <input type="hidden" name="location" value="MAGAZZINO" />
+              <input name="category" placeholder="Categoria" required />
+              <label class="inv-color-field" title="Colore del gruppo"><span>Colore gruppo</span><input name="category_color" type="color" value="#64748b" /></label>
+              <input name="name" placeholder="Prodotto" required />
+              <input name="unit" placeholder="Unità" />
+              <input name="qty" placeholder="Q.tà" type="number" step="0.1" inputmode="decimal" />
+              <input name="min_qty" placeholder="Min" type="number" step="0.1" inputmode="decimal" />
+              <button class="btn" type="submit">Salva</button>
+            </form>
+            {% else %}
+              <div class="muted">Seleziona un inventario singolo per aggiungere prodotti.</div>
+            {% endif %}
+          </div>
+        </details>
+
+        {% if can_bulk_edit %}
+        <details class="inv-add-details">
+          <summary class="pill">CSV</summary>
+          <div class="inv-popover inv-csv-popover">
+            <a class="pill" href="/export.csv" style="text-decoration:none;color:var(--text);">⬇️ Scarica CSV</a>
+            <form method="post" action="/import.csv" enctype="multipart/form-data" class="inv-csv-form">
+              <input type="file" name="file" accept=".csv,text/csv" required />
+              <button class="btn2" type="submit">⬆️ Importa</button>
+            </form>
+            <div class="muted">CSV: <strong>category,name,qty,min_qty</strong></div>
+          </div>
+        </details>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="inv-list">
+      {% for g in groups %}
+        {% set p = g.primary %}
+        {% if p %}
+        <article class="inv-row {% if g.any_low %}is-low{% endif %}" style="--cat-color: {{ color_value(g.category_color) }};">
+          <div class="inv-name-cell">
+            <div class="inv-line-1">
+              <span class="inv-cat">{{ g.category }}</span>
+              {% if g.unit %}<span class="inv-unit">{{ g.unit }}</span>{% endif %}
+              {% if g.any_low %}<span class="inv-low-dot">min</span>{% endif %}
+            </div>
+            <strong>{{ g.name }}</strong>
+          </div>
+
+          <div class="inv-total-cell">
+            <span>Totale</span>
+            <strong>{{ render_total(g) }}</strong>
+            <small>Min {{ fmt_num(g.min_total or 0) }}</small>
+            {% if g.missing_total and g.missing_total > 0 %}<small class="inv-missing">⚠ {{ fmt_num(g.missing_total) }}</small>{% endif %}
+          </div>
+
+          {% if can_edit %}
+          <div class="inv-action-cell">
+            <button class="mini inv-icon-btn" type="button" title="Calcolatrice" onclick="openCalc({{ p.id }}, {{ g.total }}, '{{ jsq(g.unit or '') }}', '{{ p.store }}')">🧮</button>
+
+            <form method="post" action="/items/{{ p.id }}/set" class="inv-set-form">
+              <input type="hidden" name="next_url" value="" />
+              <input type="hidden" name="store" value="{{ p.store }}" />
+              <input name="qty" type="number" step="0.1" value="{{ fmt_input(g.total) }}" inputmode="decimal" aria-label="Quantità" />
+              <button class="mini btn" type="submit" title="Imposta quantità">✓</button>
+            </form>
+
+            <details class="inv-edit-details">
+              <summary class="mini inv-icon-btn" title="Modifica">✏️</summary>
+              <div class="inv-popover inv-modal-popover inv-edit-popover">
+                <div class="inv-modal-head"><strong>✏️ Modifica prodotto</strong><button class="mini" type="button" onclick="closeInventoryDetails(this)">✖</button></div>
+                <form method="post" action="/items/{{ p.id }}/edit" class="inv-edit-form">
+                  <input type="hidden" name="next_url" value="" />
+                  <input type="hidden" name="store" value="{{ p.store }}" />
+                  <input type="hidden" name="location" value="MAGAZZINO" />
+                  <label>Categoria<input name="category" value="{{ p.category }}" required /></label>
+                  <label>Colore gruppo<input name="category_color" type="color" value="{{ color_value(g.category_color) }}" /></label>
+                  <label>Nome<input name="name" value="{{ p.name }}" required /></label>
+                  <label>Unità<input name="unit" value="{{ g.unit or '' }}" /></label>
+                  <label>Minimo<input name="min_qty" type="number" step="0.1" value="{{ fmt_input(g.min_total or 0) }}" inputmode="decimal" /></label>
+                  <button class="btn" type="submit">Salva modifica</button>
+                </form>
+              </div>
+            </details>
+
+            <button class="mini inv-icon-btn" type="button" title="Ordina" onclick="openOrderQty({{ p.id }}, {{ g.total }})">🛒</button>
+
+            <form method="post" action="/items/{{ p.id }}/delete" onsubmit="return confirm('Eliminare {{ jsq(g.name) }}?')" class="inv-delete-form">
+              <input type="hidden" name="next_url" value="" />
+              <input type="hidden" name="store" value="{{ p.store }}" />
+              <button class="mini inv-trash" type="submit" title="Elimina">🗑</button>
+            </form>
+          </div>
+          {% endif %}
+        </article>
+        {% endif %}
+      {% endfor %}
+      {% if not groups %}
+        <div class="muted">Nessun prodotto trovato.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Modal: Calcolatrice (+ / -) -->
+  <div id="calcModal" class="inv-modal" style="display:none;">
+    <div class="card inv-calc-card">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <strong>🧮 Modifica quantità</strong>
+        <button class="mini" type="button" onclick="closeCalc()">✖</button>
+      </div>
+      <div class="muted" id="calcInfo" style="margin-top:6px;"></div>
+      <div class="inv-calc-signs">
+        <button id="calcMinusBtn" class="btn2 is-active" type="button" onclick="calcSetSign(-1)">− Scarico</button>
+        <button id="calcPlusBtn" class="btn2" type="button" onclick="calcSetSign(1)">+ Aggiungo</button>
+      </div>
+      <input id="calcDelta" class="inv-calc-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0" />
+      <div class="muted" id="calcResult" style="margin-top:6px;min-height:18px;"></div>
+      <div class="inv-calc-grid">
+        <button class="btn2" type="button" onclick="calcAppend('1')">1</button>
+        <button class="btn2" type="button" onclick="calcAppend('2')">2</button>
+        <button class="btn2" type="button" onclick="calcAppend('3')">3</button>
+        <button class="btn2" type="button" onclick="calcAppend('4')">4</button>
+        <button class="btn2" type="button" onclick="calcAppend('5')">5</button>
+        <button class="btn2" type="button" onclick="calcAppend('6')">6</button>
+        <button class="btn2" type="button" onclick="calcAppend('7')">7</button>
+        <button class="btn2" type="button" onclick="calcAppend('8')">8</button>
+        <button class="btn2" type="button" onclick="calcAppend('9')">9</button>
+        <button class="btn2" type="button" onclick="calcClear()">C</button>
+        <button class="btn2" type="button" onclick="calcAppend('0')">0</button>
+        <button class="btn2" type="button" onclick="calcAppend(',')">,</button>
+        <button class="btn2" type="button" onclick="calcBack()">⌫</button>
+        <button class="btn" type="button" onclick="calcSubmit()">Applica</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Quantità ordine -->
+  <div id="orderModal" class="inv-modal" style="display:none;">
+    <div class="card inv-order-card">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <strong>🛒 Ordina</strong>
+        <button class="mini" type="button" onclick="closeOrderQty()">✖</button>
+      </div>
+      <div class="muted" id="orderInfo" style="margin-top:6px;"></div>
+      <div class="row" style="gap:8px;margin-top:10px;align-items:center;">
+        <input id="orderQty" class="mini" type="number" step="0.1" inputmode="decimal" placeholder="Quantità" style="flex:1;min-width:0;" />
+        <button class="mini btn2" type="button" onclick="orderQtySet(1)">+1</button>
+        <button class="mini btn2" type="button" onclick="orderQtySet(5)">+5</button>
+      </div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px;">
+        <button class="btn" type="button" onclick="orderQtySubmit()">Aggiungi</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- hidden forms -->
+  <form id="calcForm" method="post" style="display:none;"></form>
+  <form id="orderForm" method="post" action="/ordini/add_with_qty" style="display:none;">
+    <input type="hidden" name="next_url" value="" />
+    <input type="hidden" name="item_id" id="orderItemId" value="" />
+    <input type="hidden" name="qty_to_order" id="orderItemQty" value="" />
+  </form>
+
+  <script>
+    let _calcItemId = null;
+    let _calcCurrent = 0;
+    let _calcSign = -1;
+    let _calcUnit = '';
+    let _calcStore = '';
+    let _calcSubmitting = false;
+
+    function parseCalcNumber(value) {
+      const cleaned = String(value || '').trim().replace(/\s+/g, '').replace(',', '.');
+      const n = Number(cleaned);
+      return Number.isFinite(n) ? n : NaN;
+    }
+
+    function formatQty(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return '0';
+      const rounded = Math.round(n * 10) / 10;
+      if (Math.abs(rounded - Math.round(rounded)) < 0.0000001) return String(Math.round(rounded));
+      return rounded.toFixed(1).replace('.', ',');
+    }
+
+    function openCalc(id, currentQty, unitStr, storeCode) {
+      _calcItemId = id;
+      _calcCurrent = Number(currentQty) || 0;
+      _calcSign = -1;
+      _calcUnit = (unitStr || '');
+      _calcStore = (storeCode || '');
+      _calcSubmitting = false;
+      const input = document.getElementById('calcDelta');
+      input.value = '';
+      document.getElementById('calcInfo').textContent = `Quantità attuale: ${formatQty(_calcCurrent)}`;
+      document.getElementById('calcResult').textContent = '';
+      calcRefreshSignButtons();
+      const m = document.getElementById('calcModal');
+      m.style.display = 'flex';
+      document.documentElement.classList.add('modal-open');
+      setTimeout(()=>{
+        input.focus({preventScroll:true});
+        input.oninput = calcUpdateResult;
+      }, 80);
+    }
+    function closeCalc() {
+      document.getElementById('calcModal').style.display = 'none';
+      document.documentElement.classList.remove('modal-open');
+    }
+    function calcRefreshSignButtons(){
+      const minus = document.getElementById('calcMinusBtn');
+      const plus = document.getElementById('calcPlusBtn');
+      if(minus) minus.classList.toggle('is-active', _calcSign === -1);
+      if(plus) plus.classList.toggle('is-active', _calcSign === 1);
+    }
+    function calcSetSign(s) {
+      _calcSign = s === 1 ? 1 : -1;
+      calcRefreshSignButtons();
+      calcUpdateResult();
+    }
+    function calcAppend(ch) {
+      const el = document.getElementById('calcDelta');
+      let value = el.value || '';
+      if(ch === ',' || ch === '.') {
+        if(/[\.,]/.test(value)) return;
+        if(!value) value = '0';
+        el.value = value + ',';
+      } else {
+        el.value = value + ch;
+      }
+      calcUpdateResult();
+    }
+    function calcBack() {
+      const el = document.getElementById('calcDelta');
+      el.value = (el.value || '').slice(0, -1);
+      calcUpdateResult();
+    }
+    function calcClear() {
+      document.getElementById('calcDelta').value = '';
+      calcUpdateResult();
+    }
+    function calcUpdateResult() {
+      const raw = document.getElementById('calcDelta').value;
+      const n = raw ? parseCalcNumber(raw) : 0;
+      const safeN = Number.isFinite(n) ? n : 0;
+      const delta = (_calcSign * safeN);
+      const res = Math.max(0, _calcCurrent + delta);
+      const signChar = _calcSign === 1 ? '+' : '−';
+      const totalText = (window.computeTotalText ? window.computeTotalText(res, _calcUnit) : '');
+      document.getElementById('calcResult').textContent = `Risultato: ${formatQty(_calcCurrent)} ${signChar} ${formatQty(Math.abs(delta))} = ${formatQty(res)}${totalText ? (' • ' + totalText) : ''}`;
+    }
+    function calcSubmit() {
+      if (_calcSubmitting) return;
+      const raw = document.getElementById('calcDelta').value;
+      const n = raw ? parseCalcNumber(raw) : 0;
+      if (!Number.isFinite(n) || n <= 0) {
+        document.getElementById('calcResult').textContent = 'Scrivi una quantità maggiore di 0.';
+        return;
+      }
+      _calcSubmitting = true;
+      const delta = _calcSign * n;
+      const f = document.getElementById('calcForm');
+      f.action = `/items/${_calcItemId}/delta`;
+      f.innerHTML = '';
+      const next = document.createElement('input');
+      next.type = 'hidden'; next.name = 'next_url'; next.value = window.location.pathname + window.location.search;
+      const st = document.createElement('input');
+      st.type = 'hidden'; st.name = 'store'; st.value = (_calcStore || '');
+      const d = document.createElement('input');
+      d.type = 'hidden'; d.name = 'delta'; d.value = String(delta);
+      f.appendChild(next); f.appendChild(st); f.appendChild(d);
+      f.submit();
+    }
+
+
+
+    function closeInventoryDetails(el) {
+      const details = el && el.closest ? el.closest('details') : null;
+      if (details) details.removeAttribute('open');
+      refreshInventoryModalLock();
+    }
+
+    function refreshInventoryModalLock() {
+      const hasDetailsModal = !!document.querySelector('.inv-product-modal-details[open], .inv-edit-details[open]');
+      const calcOpen = document.getElementById('calcModal') && document.getElementById('calcModal').style.display !== 'none';
+      const orderOpen = document.getElementById('orderModal') && document.getElementById('orderModal').style.display !== 'none';
+      document.documentElement.classList.toggle('modal-open', hasDetailsModal || calcOpen || orderOpen);
+    }
+
+    function closeOtherInventoryDetails(current) {
+      document.querySelectorAll('.inv-product-modal-details[open], .inv-edit-details[open]').forEach(function(other){
+        if (other !== current) other.removeAttribute('open');
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', function(){
+      document.querySelectorAll('.inv-product-modal-details, .inv-edit-details').forEach(function(details){
+        details.addEventListener('toggle', function(){
+          if (details.open) {
+            closeOtherInventoryDetails(details);
+            refreshInventoryModalLock();
+            const first = details.querySelector('.inv-modal-popover input:not([type="hidden"]), .inv-modal-popover select, .inv-modal-popover textarea');
+            if (first) setTimeout(function(){ first.focus({preventScroll:true}); }, 80);
+          } else {
+            setTimeout(refreshInventoryModalLock, 0);
+          }
+        });
+      });
+
+      document.addEventListener('click', function(ev){
+        const openDetails = document.querySelector('.inv-product-modal-details[open], .inv-edit-details[open]');
+        if (!openDetails) return;
+        if (ev.target && ev.target.closest && ev.target.closest('.inv-modal-popover')) return;
+        if (ev.target && ev.target.closest && ev.target.closest('summary')) return;
+        openDetails.removeAttribute('open');
+        refreshInventoryModalLock();
+      });
+
+      document.addEventListener('keydown', function(ev){
+        if (ev.key !== 'Escape') return;
+        document.querySelectorAll('.inv-product-modal-details[open], .inv-edit-details[open]').forEach(function(details){
+          details.removeAttribute('open');
+        });
+        closeCalc();
+        closeOrderQty();
+        refreshInventoryModalLock();
+      });
+    });
+
+    let _orderItemId = null;
+    let _orderCurrent = 0;
+    function openOrderQty(id, currentQty) {
+      _orderItemId = id;
+      _orderCurrent = Number(currentQty) || 0;
+      document.getElementById('orderQty').value = '';
+      document.getElementById('orderInfo').textContent = `Ti sono rimasti: ${formatQty(_orderCurrent)}. Quanto vuoi ordinare?`;
+      document.getElementById('orderModal').style.display = 'flex';
+      document.documentElement.classList.add('modal-open');
+      setTimeout(()=>document.getElementById('orderQty').focus({preventScroll:true}), 50);
+    }
+    function closeOrderQty() {
+      document.getElementById('orderModal').style.display = 'none';
+      document.documentElement.classList.remove('modal-open');
+    }
+    function orderQtySet(add) {
+      const el = document.getElementById('orderQty');
+      const cur = parseCalcNumber(el.value || 0) || 0;
+      el.value = String(cur + add);
+    }
+    function orderQtySubmit() {
+      const el = document.getElementById('orderQty');
+      const n = parseCalcNumber(el.value);
+      if (!Number.isFinite(n) || n <= 0) { closeOrderQty(); return; }
+      document.getElementById('orderItemId').value = String(_orderItemId);
+      document.getElementById('orderItemQty').value = String(n);
+      document.getElementById('orderForm').querySelector('input[name=next_url]').value = window.location.pathname + window.location.search;
+      document.getElementById('orderForm').submit();
+    }
+  </script>
+
+<style>
+  .inv-top-card{margin-bottom:8px!important;padding:8px!important;}
+  .inv-filter-form{display:grid;grid-template-columns:auto auto minmax(150px,1fr) auto auto auto auto;gap:6px;align-items:center;}
+  .inv-filter-form input,.inv-filter-form select{min-width:0!important;}
+  .inv-low-filter{display:flex;gap:6px;align-items:center;white-space:nowrap;}
+  .inv-card{padding:8px!important;}
+  .inv-toolbar{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;}
+  .inv-heading h2{margin:0;font-size:20px;line-height:1.1;}
+  .inv-toolbar-actions{display:flex;gap:6px;align-items:center;}
+  .inv-add-details{position:relative;}
+  .inv-product-modal-details[open]::before,.inv-edit-details[open]::before{content:"";position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:6400;}
+  .inv-add-details > summary,.inv-edit-details > summary{list-style:none;cursor:pointer;}
+  .inv-add-details > summary::-webkit-details-marker,.inv-edit-details > summary::-webkit-details-marker{display:none;}
+  .inv-popover{position:absolute;right:0;top:calc(100% + 6px);z-index:2600;border:1px solid var(--line-soft);border-radius:14px;background:rgba(7,12,24,.98);box-shadow:var(--shadow);padding:10px;}
+  .inv-modal-popover{position:fixed!important;left:50%!important;top:50%!important;right:auto!important;transform:translate(-50%,-50%)!important;z-index:6500!important;max-width:calc(100vw - 18px);max-height:calc(100dvh - 18px);overflow:auto;box-sizing:border-box;}
+  .inv-modal-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid rgba(148,163,184,.18);}
+  .inv-modal-head .mini{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;padding:0!important;}
+  .inv-add-popover{width:min(94vw,620px);} 
+  .inv-csv-popover{width:min(92vw,360px);display:flex;flex-direction:column;gap:8px;}
+  .inv-add-form{display:grid;grid-template-columns:1fr .8fr 1.4fr .7fr .7fr .7fr auto;gap:6px;align-items:center;}
+  .inv-color-field{display:flex!important;align-items:center;gap:6px;font-size:10px;color:var(--muted);white-space:nowrap;}
+  .inv-color-field input[type="color"],.inv-edit-form input[type="color"]{height:34px!important;padding:2px!important;cursor:pointer;}
+  .inv-csv-form{display:flex;gap:6px;align-items:center;}
+  .inv-csv-form input{min-width:0;}
+
+  .inv-list{display:flex;flex-direction:column;gap:4px;}
+  .inv-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(78px,118px) auto;gap:6px;align-items:center;padding:5px 6px!important;border:1px solid color-mix(in srgb, var(--cat-color) 35%, rgba(148,163,184,.16));border-left:5px solid var(--cat-color);border-radius:12px;background:linear-gradient(90deg, color-mix(in srgb, var(--cat-color) 14%, rgba(15,23,42,.74)), rgba(15,23,42,.62) 48%);min-height:46px;}
+  .inv-row.is-low{border-color:rgba(248,113,113,.42)!important;background:linear-gradient(180deg, rgba(127,29,29,.16), rgba(15,23,42,.82))!important;}
+  .inv-name-cell{min-width:0;display:flex;flex-direction:column;gap:2px;}
+  .inv-line-1{display:flex;gap:4px;align-items:center;min-width:0;}
+  .inv-cat,.inv-unit,.inv-low-dot{display:inline-flex;align-items:center;max-width:100%;border:1px solid rgba(148,163,184,.22);border-radius:999px;padding:1px 6px;font-size:10px;line-height:1.25;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .inv-cat{border-color:color-mix(in srgb, var(--cat-color) 55%, rgba(148,163,184,.22));background:color-mix(in srgb, var(--cat-color) 18%, transparent);color:#e5e7eb;}
+  .inv-low-dot{color:#fecaca;border-color:rgba(248,113,113,.42);background:rgba(239,68,68,.12);}
+  .inv-name-cell strong{font-size:14px;line-height:1.12;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .inv-total-cell{min-width:0;text-align:right;display:flex;flex-direction:column;gap:0;line-height:1.05;}
+  .inv-total-cell span{font-size:9px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);}
+  .inv-total-cell strong{font-size:13px;white-space:normal;line-height:1.05;}
+  .inv-total-cell small{font-size:10px;color:var(--muted);}
+  .inv-missing{color:#fecaca!important;}
+  .inv-action-cell{display:flex;align-items:center;justify-content:flex-end;gap:3px;min-width:0;}
+  .inv-action-cell form{margin:0;}
+  .inv-icon-btn,.inv-trash{width:29px;height:29px;display:inline-flex;align-items:center;justify-content:center;padding:0!important;border-radius:9px!important;}
+  .inv-trash{background:rgba(239,68,68,.10)!important;border-color:rgba(248,113,113,.34)!important;}
+  .inv-set-form{display:flex;align-items:center;gap:3px;}
+  .inv-set-form input{width:54px!important;height:29px!important;text-align:center;padding:3px!important;font-size:12px!important;}
+  .inv-set-form button{width:29px;height:29px;display:inline-flex;align-items:center;justify-content:center;padding:0!important;border-radius:9px!important;}
+  .inv-edit-details{position:relative;}
+  .inv-edit-popover{width:min(94vw,390px);} 
+  .inv-edit-form{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .inv-edit-form label{font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:3px;}
+  .inv-edit-form input{width:100%;box-sizing:border-box;}
+  .inv-edit-form button{grid-column:1 / -1;}
+
+  .inv-modal{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:5000;align-items:center;justify-content:center;padding:14px;box-sizing:border-box;}
+  .modal-open{overflow:hidden;}
+  .inv-calc-card,.inv-order-card{max-width:380px;width:min(94vw,380px);padding:14px!important;}
+  .inv-calc-signs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;}
+  .inv-calc-signs .is-active{border-color:rgba(96,165,250,.75)!important;background:rgba(37,99,235,.22)!important;}
+  .inv-calc-input{width:100%;box-sizing:border-box;text-align:center;font-size:28px!important;font-weight:850;margin-top:10px;padding:12px!important;}
+  .inv-calc-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;}
+  .inv-calc-grid button{min-height:44px;font-size:17px!important;font-weight:800;touch-action:manipulation;}
+  .inv-calc-grid .btn{grid-column:span 2;}
+
+  @media(max-width:768px){
+    .card{padding:7px!important;}
+    input,select{font-size:13px!important;padding:6px!important;}
+    .btn,.btn2,.mini,.pill{font-size:12px!important;padding:5px 7px!important;}
+    .muted{font-size:11px!important;}
+    .inv-filter-form{grid-template-columns:1fr 1fr 1fr;gap:4px;}
+    .inv-area-pill,.inv-search{grid-column:span 2;}
+    .inv-search{width:100%;box-sizing:border-box;}
+    .inv-log-link{display:none;}
+    .inv-toolbar{align-items:flex-start;margin-bottom:6px;}
+    .inv-heading h2{font-size:16px;}
+    .inv-heading .muted{display:block;max-width:190px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .inv-toolbar-actions{gap:4px;}
+    .inv-popover:not(.inv-modal-popover){position:fixed;left:8px;right:8px;top:74px;width:auto!important;max-height:72vh;overflow:auto;}
+    .inv-modal-popover{width:calc(100vw - 18px)!important;max-height:calc(100dvh - 18px)!important;}
+    .inv-add-form{grid-template-columns:1fr 1fr;}
+    .inv-add-form input[name="name"]{grid-column:1 / -1;}
+    .inv-add-form button{grid-column:1 / -1;}
+    .inv-color-field{font-size:10px!important;}
+    .inv-list{gap:3px;}
+    .inv-row{grid-template-columns:minmax(0,1fr) 74px auto;gap:4px;padding:4px!important;border-radius:10px;min-height:42px;}
+    .inv-cat,.inv-unit,.inv-low-dot{font-size:9px;padding:1px 5px;max-width:78px;}
+    .inv-name-cell strong{font-size:13px;}
+    .inv-total-cell strong{font-size:12px;}
+    .inv-total-cell small{font-size:9px;}
+    .inv-action-cell{gap:2px;}
+    .inv-icon-btn,.inv-trash,.inv-set-form button{width:26px;height:26px;border-radius:8px!important;font-size:12px!important;}
+    .inv-set-form{gap:2px;}
+    .inv-set-form input{width:43px!important;height:26px!important;font-size:11px!important;padding:2px!important;}
+    .inv-calc-card,.inv-order-card{width:100%;max-width:420px;}
+    .inv-calc-grid button{min-height:48px;font-size:18px!important;}
+  }
+
+  @media(max-width:390px){
+    .inv-row{grid-template-columns:minmax(0,1fr) 66px auto;}
+    .inv-set-form input{width:38px!important;}
+    .inv-icon-btn,.inv-trash,.inv-set-form button{width:24px;height:24px;font-size:11px!important;}
+    .inv-total-cell strong{font-size:11px;}
+    .inv-name-cell strong{font-size:12px;}
+    .inv-cat,.inv-unit,.inv-low-dot{display:none;}
+  }
+
+  /* Calcolatrice sempre intera nello schermo, sia desktop che telefono */
+  .inv-modal{overflow:auto;align-items:center;justify-content:center;}
+  .inv-calc-card,.inv-order-card{
+    max-height:calc(100dvh - 28px);
+    overflow:auto;
+    box-sizing:border-box;
+  }
+  .inv-calc-card .row{flex-wrap:nowrap;}
+
+  @media(max-width:768px){
+    .inv-modal{padding:8px;}
+    .inv-calc-card,.inv-order-card{max-width:360px;width:100%;padding:10px!important;}
+    .inv-calc-signs{gap:6px;margin-top:8px;}
+    .inv-calc-input{font-size:22px!important;padding:8px!important;margin-top:8px;}
+    .inv-calc-grid{gap:6px;margin-top:8px;}
+    .inv-calc-grid button{min-height:38px;font-size:16px!important;}
+  }
+
+  @media(max-height:620px){
+    .inv-calc-card{padding:9px!important;}
+    .inv-calc-input{font-size:20px!important;padding:7px!important;margin-top:7px;}
+    .inv-calc-signs,.inv-calc-grid{gap:5px;margin-top:7px;}
+    .inv-calc-grid button{min-height:34px;font-size:15px!important;}
+  }
+
+  /* Finestre inventario sempre centrate */
+  .inv-product-modal-details[open] .inv-add-popover,
+  .inv-edit-details[open] .inv-edit-popover{
+    position:fixed!important;
+    left:50%!important;
+    top:50%!important;
+    right:auto!important;
+    transform:translate(-50%,-50%)!important;
+    z-index:6500!important;
+    width:min(94vw, 620px);
+    max-height:calc(100dvh - 18px);
+    overflow:auto;
+  }
+  .inv-edit-details[open] .inv-edit-popover{width:min(94vw,390px);}
+  .inv-product-modal-details[open]::before,.inv-edit-details[open]::before{content:"";position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:6400;}
+</style>
+
+{% endblock %}

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% set title = "Logistica - Ordini" %}
+{% block content %}
+  <div class="card" style="margin-bottom:12px;">
+    <h2 style="margin:0 0 6px 0;">🚚 Logistica — Ordini da fare</h2>
+    <div class="muted">Da inventario premi <strong>Ordina</strong> su un prodotto: finisce qui. Seleziona più righe e conferma per creare un ordine (stesso fornitore).</div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px;">
+    <form method="post" action="/ordini/confirm">
+      <div class="row" style="align-items:center;">
+        <input name="supplier" placeholder="Fornitore (es. Metro, Prinz...)" style="flex:1;min-width:220px" required />
+        <button class="btn" type="submit">Conferma ordine</button>
+      </div>
+
+      <div style="overflow:auto;margin-top:12px;">
+        <table>
+          <thead>
+            <tr>
+              <th>✓</th>
+              <th>Categoria</th>
+              <th>Prodotto</th>
+              <th>Rimasti</th>
+              <th>Q.tà da ordinare</th>
+              {% if active_store == 'ALL' %}<th>Negozio</th>{% endif %}
+              <th>Aggiunto da</th>
+              <th>Quando</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+              <tr>
+                <td>
+                  <input type="checkbox" name="queue_ids" value="{{ r.id }}" />
+                </td>
+                <td><span class="pill">{{ r.category }}</span></td>
+                <td><strong>{{ r.name }}</strong></td>
+                <td>
+                  {{ "%.2f"|format(r.qty_left or 0) }}{% if r.unit %} <span class="muted">({{ r.unit }})</span>{% endif %}
+                  <div class="muted total-auto" data-qty="{{ r.qty_left or 0 }}" data-unit="{{ r.unit or '' }}"></div>
+                </td>
+                <td style="white-space:nowrap;">
+                  <form method="post" action="/ordini/queue-update" class="row" style="gap:6px;align-items:center;">
+                    <input type="hidden" name="queue_id" value="{{ r.id }}" />
+                    <input class="mini" name="qty_to_order" type="number" step="0.01" inputmode="decimal" value="{{ r.qty_to_order }}" style="width:120px;" />
+                    <button class="mini btn2" type="submit">Salva</button>
+                  </form>
+                </td>
+                {% if active_store == 'ALL' %}<td>{{ stores.get(r.store, r.store) }}</td>{% endif %}
+                <td>{{ r.added_by }}</td>
+                <td class="muted">{{ r.ts }}</td>
+                <td style="white-space:nowrap;">
+                  <form method="post" action="/ordini/queue-delete" style="margin:0;display:inline;">
+                    <input type="hidden" name="queue_id" value="{{ r.id }}" />
+                    <button class="btn" type="submit" style="padding:6px 10px;">Elimina</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+            {% if not rows or rows|length == 0 %}
+              <tr><td colspan="{% if active_store == 'ALL' %}10{% else %}9{% endif %}" class="muted">Nessun ordine da fare.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Come aggiungere prodotti qui</h3>
+    <div class="muted">Vai in Inventario → sulla riga del prodotto premi <strong>Ordina</strong>.</div>
+  </div>
+{% endblock %}

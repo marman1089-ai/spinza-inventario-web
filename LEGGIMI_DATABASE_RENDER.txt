@@ -1,0 +1,32 @@
+QUESTA VERSIONE NON USA SQLITE COME FALLBACK ONLINE.
+Se DATABASE_URL è errata, il sito si ferma per evitare che i nuovi dati finiscano
+in un database locale temporaneo e vadano persi al riavvio di Render.
+
+ERRORE "tenant/user ... not found"
+Significa che la DATABASE_URL salvata su Render contiene un project ref / tenant
+Supabase non valido, non più esistente oppure copiato da un progetto diverso.
+Non è un errore del codice del sito.
+
+PER MANTENERE IL DATABASE ESISTENTE
+1. Apri il progetto corretto su Supabase.
+2. Premi Connect.
+3. Seleziona Session pooler, porta 5432.
+4. Copia l'intera connection string.
+5. Su Render: servizio > Environment > DATABASE_URL > incolla la stringa.
+6. Salva e fai Manual Deploy > Deploy latest commit.
+
+La forma deve essere simile a:
+postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-REGION.pooler.supabase.com:5432/postgres
+
+ATTENZIONE ALLA PASSWORD
+Se contiene caratteri speciali, usa esattamente la stringa generata da Supabase.
+Non inserire virgolette attorno al valore in Render.
+
+PROTEZIONE DEI DATI
+- Il programma non passa automaticamente a SQLite online.
+- Se il database PostgreSQL contiene già dati, il backup incluso non viene toccato
+  e non viene importato nulla.
+- Se colleghi un NUOVO database PostgreSQL completamente vuoto, al primo avvio il
+  programma importa automaticamente il backup spinza.db incluso nello ZIP.
+- Il backup incluso contiene: 3 utenti, 43 prodotti e 90 registrazioni di log.
+- Il file spinza.db resta incluso come copia di sicurezza.

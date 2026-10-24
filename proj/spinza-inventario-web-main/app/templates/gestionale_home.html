@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% set title = "Gestionale" %}
+{% block content %}
+<style>
+  body{background:#06070a;color:#eef2ff}
+  .wrap{max-width:1320px}
+  .card{background:linear-gradient(180deg,var(--text)31a 0%,#0b0d13 100%);border:1px solid rgba(255,255,255,.08);box-shadow:0 22px 50px rgba(0,0,0,.34);border-radius:24px;padding:16px}
+  .muted{color:#98a2b3}
+  .btn{background:linear-gradient(135deg,#3b82f6 0%,#7c3aed 100%);border:0;color:var(--panel);box-shadow:0 12px 26px rgba(59,130,246,.22)}
+  .btn2{background:#0f141d;border:1px solid rgba(255,255,255,.14);color:#eef2ff}
+  input,select,button{background:#0e1219;border:1px solid rgba(255,255,255,.1);color:#eef2ff;border-radius:14px;padding:10px 12px}
+  a.pill:hover{background:#151b24}
+  .hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:14px;margin-bottom:14px}
+  .hero-title{font-size:34px;font-weight:900;line-height:1.03;margin:0}
+  .hero-sub{font-size:14px;color:#98a2b3;margin-top:8px;max-width:62ch}
+  .hero-actions{display:flex;gap:8px;flex-wrap:wrap}
+  .controls{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;align-items:end}
+  .highlight-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:14px}
+  .highlight{padding:14px;border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.06) 0%,rgba(255,255,255,.025) 100%);border:1px solid rgba(255,255,255,.08)}
+  .hl-label{font-size:12px;color:#98a2b3;text-transform:uppercase;letter-spacing:.08em}
+  .hl-value{font-size:28px;font-weight:900;margin-top:8px;line-height:1.05}
+  .hl-note{font-size:12px;color:#7dd3fc;margin-top:6px}
+  .growth{font-size:24px;font-weight:900}
+  .growth.pos{color:#86efac}.growth.neg{color:#fca5a5}.growth.neu{color:#cbd5e1}
+  .section-title{font-size:18px;font-weight:800;margin:0}
+  .section-head{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .stores-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}
+  .store-box{border:1px solid rgba(255,255,255,.08);border-radius:22px;padding:14px;background:linear-gradient(180deg,rgba(255,255,255,.05) 0%,rgba(255,255,255,.025) 100%)}
+  .bars{display:flex;align-items:flex-end;gap:10px;height:190px;padding:14px 4px 0 4px;width:max-content;min-width:100%}
+  .bar-col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:8px;min-width:46px;flex:0 0 46px}
+  .bar{width:24px;border-radius:12px 12px 4px 4px;background:linear-gradient(180deg,#60a5fa 0%,#2563eb 100%);box-shadow:0 10px 18px rgba(37,99,235,.24)}
+  .bar.neg{background:linear-gradient(180deg,#fb7185 0%,#be123c 100%);box-shadow:0 10px 18px rgba(190,24,93,.24)}
+  .bar-label{font-size:12px;color:#98a2b3}
+  .chart-scroll{overflow-x:auto;overflow-y:hidden;padding-bottom:8px;margin-top:12px;scrollbar-width:thin;scrollbar-color:#334155 transparent}
+  .chart-scroll::-webkit-scrollbar{height:8px}.chart-scroll::-webkit-scrollbar-thumb{background:#334155;border-radius:999px}
+  .two-col{display:grid;grid-template-columns:1.05fr .95fr;gap:14px}
+  .stat-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+  .mini-stat{padding:14px;border-radius:18px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)}
+  .mini-value{font-size:24px;font-weight:900;line-height:1.05;margin-top:8px}
+  table{width:100%;border-collapse:collapse;background:rgba(255,255,255,.02);border-radius:18px;overflow:hidden}
+  th,td{padding:10px 8px;border-bottom:1px solid rgba(255,255,255,.08);vertical-align:middle}
+  th{font-size:11px;color:#98a2b3;text-transform:uppercase;letter-spacing:.08em;background:rgba(255,255,255,.03)}
+  td{color:#eef2ff}
+  .doc-pills{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .doc-pills a{background:#0f141d;border:1px solid rgba(255,255,255,.1);color:#eef2ff;text-decoration:none}
+  @media(max-width:1100px){.hero-grid,.two-col,.stores-grid,.highlight-grid,.controls,.stat-grid{grid-template-columns:1fr 1fr}}
+  @media(max-width:760px){.hero-grid,.two-col,.stores-grid,.highlight-grid,.controls,.stat-grid{grid-template-columns:1fr}.hero-title{font-size:28px}}
+</style>
+
+<div class="hero-grid">
+  <div class="card">
+    <div class="section-head">
+      <div>
+        <div class="pill" style="background:#0f172a;color:#dbeafe;">GESTIONALE</div>
+        <h2 class="hero-title">Numeri importanti subito in vista</h2>
+        {% if can_view_finance %}
+          <div class="hero-sub">Confronto {{ period_meta.label }} corrente ({{ period_meta.start }}) → {{ period_meta.end }} contro il periodo precedente. Vista più pulita, più seria e più leggibile.</div>
+        {% else %}
+          <div class="hero-sub">Area documentale per lo staff. La parte economica resta visibile solo all’admin.</div>
+        {% endif %}
+      </div>
+      <div class="hero-actions">
+        {% if can_view_finance %}
+          <a href="/gestionale/dashboard?period_type={{ period_meta.type }}&anchor_date={{ period_meta.anchor }}" class="btn">Dashboard pro</a>
+          <a href="/gestionale/incassi" class="btn2">+ Incasso</a>
+          <a href="/gestionale/uscite" class="btn2">+ Uscita</a>
+          <a href="/gestionale/report-vendite" class="btn2">Report vendite</a>
+        {% endif %}
+      </div>
+    </div>
+    {% if can_view_finance %}
+    <form method="get" action="/gestionale" class="controls">
+      <div>
+        <div class="muted" style="margin-bottom:6px;">Confronto</div>
+        <select name="period_type">
+          <option value="day" {% if period_meta.type=='day' %}selected{% endif %}>Giorno</option>
+          <option value="week" {% if period_meta.type=='week' %}selected{% endif %}>Settimana</option>
+          <option value="month" {% if period_meta.type=='month' %}selected{% endif %}>Mese</option>
+        </select>
+      </div>
+      <div>
+        <div class="muted" style="margin-bottom:6px;">Data di riferimento</div>
+        <input type="date" name="anchor_date" value="{{ period_meta.anchor }}">
+      </div>
+      <div style="display:flex;align-items:end;">
+        <button class="btn" type="submit">Aggiorna dashboard</button>
+      </div>
+      <div class="muted" style="display:flex;align-items:end;">Il confronto cambia subito numeri, crescita e andamento dei negozi.</div>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="section-head">
+      <h3 class="section-title">Stato rapido</h3>
+      <div class="muted">Home admin</div>
+    </div>
+    <div class="stat-grid">
+      <div class="mini-stat"><div class="muted">Fatture</div><div class="mini-value">{{ stats.fatture }}</div></div>
+      <div class="mini-stat"><div class="muted">Chiusure</div><div class="mini-value">{{ stats.chiusure }}</div></div>
+      <div class="mini-stat"><div class="muted">Spese secondarie</div><div class="mini-value">{{ stats.spese }}</div></div>
+      <div class="mini-stat"><div class="muted">Ordini aperti</div><div class="mini-value">{{ stats.ordini_aperti }}</div></div>
+    </div>
+  </div>
+</div>
+
+{% if can_view_finance %}
+<div class="highlight-grid">
+  <div class="highlight"><div class="hl-label">Incassi oggi</div><div class="hl-value">€ {{ '%.2f'|format(totals.income_today) }}</div><div class="hl-note">Entrate della giornata</div></div>
+  <div class="highlight"><div class="hl-label">Uscite oggi</div><div class="hl-value">€ {{ '%.2f'|format(totals.expense_today) }}</div><div class="hl-note">Costi della giornata</div></div>
+  <div class="highlight"><div class="hl-label">Saldo oggi</div><div class="hl-value">€ {{ '%.2f'|format(totals.net_today) }}</div><div class="hl-note">Entrate - uscite</div></div>
+  <div class="highlight"><div class="hl-label">Saldo {{ period_meta.label }}</div><div class="hl-value">€ {{ '%.2f'|format(totals.net_period) }}</div><div class="hl-note">Periodo selezionato</div></div>
+  <div class="highlight">
+    <div class="hl-label">Crescita incassi</div>
+    <div class="growth {% if totals.income_growth_pct > 0 %}pos{% elif totals.income_growth_pct < 0 %}neg{% else %}neu{% endif %}">{{ '%+.1f'|format(totals.income_growth_pct) }}%</div>
+    <div class="hl-note">Prima: € {{ '%.2f'|format(totals.income_previous_period) }}</div>
+  </div>
+  <div class="highlight">
+    <div class="hl-label">Crescita uscite</div>
+    <div class="growth {% if totals.expense_growth_pct > 0 %}neg{% elif totals.expense_growth_pct < 0 %}pos{% else %}neu{% endif %}">{{ '%+.1f'|format(totals.expense_growth_pct) }}%</div>
+    <div class="hl-note">Prima: € {{ '%.2f'|format(totals.expense_previous_period) }}</div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:14px;">
+  <div class="section-head">
+    <div>
+      <h3 class="section-title">Confronto {{ period_meta.label }} dei negozi</h3>
+      <div class="muted">Ogni colonna rappresenta il saldo giornaliero del periodo selezionato.</div>
+    </div>
+  </div>
+  <div class="stores-grid">
+    {% for s in compare %}
+    <div class="store-box">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+        <div>
+          <div style="font-weight:900;font-size:18px;">{{ s.label }}</div>
+          <div class="muted">Incassi € {{ '%.2f'|format(s.income_total) }} · Uscite € {{ '%.2f'|format(s.expense_total) }}</div>
+        </div>
+        <div class="pill" style="background:#0f172a;color:#dbeafe;">Saldo € {{ '%.2f'|format(s.net_total) }}</div>
+      </div>
+      <div class="chart-scroll">
+        <div class="bars">
+          {% for d in s.days %}
+          <div class="bar-col">
+            <div class="bar {% if not d.positive %}neg{% endif %}" style="height:{{ d.height }}px" title="{{ d.label }} | Incassi € {{ '%.2f'|format(d.income) }} | Uscite € {{ '%.2f'|format(d.expense) }} | Saldo € {{ '%.2f'|format(d.net) }}"></div>
+            <div class="bar-label">{{ d.label }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="two-col">
+  <div class="stack">
+    <div class="card" style="margin-bottom:14px;">
+      <div class="section-head">
+        <div>
+          <h3 class="section-title">Documenti e archivio</h3>
+          <div class="muted">Area veloce per documenti e operatività.</div>
+        </div>
+      </div>
+      <div class="doc-pills">
+        <a href="/fatture" class="pill">🧾 Fatture</a>
+        <a href="/chiusure" class="pill">📸 Chiusure</a>
+        <a href="/spese-secondarie" class="pill">💸 Spese secondarie</a>
+      </div>
+      <div class="stat-grid">
+        <div class="mini-stat"><div class="muted">Fatture archiviate</div><div class="mini-value">{{ stats.fatture }}</div></div>
+        <div class="mini-stat"><div class="muted">Chiusure archiviate</div><div class="mini-value">{{ stats.chiusure }}</div></div>
+        <div class="mini-stat"><div class="muted">Spese secondarie</div><div class="mini-value">{{ stats.spese }}</div></div>
+        <div class="mini-stat"><div class="muted">Ordini aperti</div><div class="mini-value">{{ stats.ordini_aperti }}</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-head"><h3 class="section-title">Ultimi documenti caricati</h3></div>
+      {% if recent_docs %}
+      <table>
+        <thead><tr><th>Tipo</th><th>Dettaglio</th><th>Data</th><th>Caricato da</th></tr></thead>
+        <tbody>
+          {% for r in recent_docs %}
+          <tr>
+            <td>{{ r.tipo }}</td>
+            <td>{{ r.descrizione or '-' }}</td>
+            <td>{{ r.data_doc }}</td>
+            <td>{{ r.uploaded_by }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="muted">Ancora nessun documento caricato.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="card" style="margin-bottom:14px;">
+      <div class="section-head"><h3 class="section-title">Ultimi incassi inseriti</h3></div>
+      {% if recent_entries %}
+      <table>
+        <thead><tr><th>Data</th><th>Sede</th><th>Metodo</th><th>Importo</th></tr></thead>
+        <tbody>
+          {% for r in recent_entries %}
+          <tr><td>{{ r.flow_date }}</td><td>{{ r.store }}</td><td>{{ r.payment_method }}</td><td>€ {{ '%.2f'|format(r.amount or 0) }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="muted">Non hai ancora inserito incassi.</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div class="section-head"><h3 class="section-title">Ultime uscite inserite</h3></div>
+      {% if recent_expenses %}
+      <table>
+        <thead><tr><th>Data</th><th>Sede</th><th>Categoria</th><th>Importo</th></tr></thead>
+        <tbody>
+          {% for r in recent_expenses %}
+          <tr><td>{{ r.flow_date }}</td><td>{{ r.store }}</td><td>{{ r.category }}</td><td>€ {{ '%.2f'|format(r.amount or 0) }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="muted">Non hai ancora inserito uscite.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

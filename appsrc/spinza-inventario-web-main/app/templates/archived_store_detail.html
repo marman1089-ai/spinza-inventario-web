@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% set title = store.name %}
+{% block content %}
+<style>
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+  .kpi{border:1px solid var(--line-soft);border-radius:18px;padding:14px;background:var(--panel)}
+  .big{font-size:30px;font-weight:800;line-height:1.05}
+  .split-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .entry-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  .method-card{border:1px solid var(--line-soft);border-radius:14px;padding:12px;background:var(--panel-2)}
+  .custom-row{display:grid;grid-template-columns:1.2fr .8fr;gap:10px;margin-top:10px}
+  .ok-box,.err-box{padding:12px 14px;border-radius:14px;margin-top:14px}
+  .ok-box{background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.34);color:var(--accent-emerald-2)}
+  .err-box{background:rgba(239,68,68,.12);border:1px solid rgba(248,113,113,.34);color:var(--accent-red-2)}
+  @media(max-width:900px){.kpi-grid,.split-grid,.entry-grid,.custom-row{grid-template-columns:1fr}}
+</style>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between;align-items:center;">
+    <div>
+      <div class="pill" style="width:max-content;margin-bottom:8px;">Negozio archiviato</div>
+      <h2 style="margin:0 0 6px 0;">{{ store.name }}</h2>
+      <div class="muted">
+        {% if store.opened_at %}Apertura: {{ store.opened_at }}{% endif %}
+        {% if store.closed_at %}{% if store.opened_at %} · {% endif %}Chiusura: {{ store.closed_at }}{% endif %}
+        {% if not store.opened_at and not store.closed_at %}Storico senza date di apertura/chiusura{% endif %}
+      </div>
+      {% if store.notes %}<div class="tiny" style="margin-top:8px;">{{ store.notes }}</div>{% endif %}
+    </div>
+    <div class="row">
+      <a class="btn2" href="/gestionale/archiviati" style="text-decoration:none;display:inline-block;">Tutti gli archiviati</a>
+      <a class="btn2" href="/gestionale/panoramica-totale?store={{ store_key }}" style="text-decoration:none;display:inline-block;">Vedi in panoramica</a>
+    </div>
+  </div>
+</div>
+
+{% if created %}<div class="ok-box">Negozio archiviato creato. Ora puoi inserire entrate, uscite o incollare le note.</div>{% endif %}
+{% if import_error %}<div class="err-box">{{ import_error }}</div>{% endif %}
+{% if imported_entries or imported_expenses %}<div class="ok-box">Import completato: <strong>{{ imported_entries }}</strong> entrate{% if imported_expenses %} e <strong>{{ imported_expenses }}</strong> uscite{% endif %} salvate.</div>{% endif %}
+
+<div class="kpi-grid" style="margin-top:14px;">
+  <div class="kpi"><div class="muted">Entrate di sempre</div><div class="big">€ {{ '%.2f'|format(totals.income or 0) }}</div></div>
+  <div class="kpi"><div class="muted">Uscite di sempre</div><div class="big">€ {{ '%.2f'|format(totals.expense or 0) }}</div></div>
+  <div class="kpi"><div class="muted">Bilancio storico</div><div class="big">€ {{ '%.2f'|format(totals.net or 0) }}</div></div>
+  <div class="kpi"><div class="muted">Righe salvate</div><div class="big">{{ totals.entries_count + totals.expenses_count }}</div><div class="muted">{{ totals.entries_count }} entrate · {{ totals.expenses_count }} uscite</div></div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Riepilogo per anno</h3>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Anno</th><th>Entrate</th><th>Uscite</th><th>Bilancio</th><th>Righe</th></tr></thead>
+      <tbody>
+        {% for row in by_year %}
+        <tr><td><strong>{{ row.year }}</strong></td><td>€ {{ '%.2f'|format(row.income or 0) }}</td><td>€ {{ '%.2f'|format(row.expense or 0) }}</td><td><strong>€ {{ '%.2f'|format(row.net or 0) }}</strong></td><td>{{ row.entries_count }} + {{ row.expenses_count }}</td></tr>
+        {% else %}
+        <tr><td colspan="5" class="muted">Ancora nessun dato.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="split-grid" style="margin-top:14px;">
+  <div class="card">
+    <h3 style="margin-top:0;">Aggiungi entrata</h3>
+    <form method="post" action="/gestionale/archiviati/{{ store_key }}/incasso">
+      <div class="row" style="margin-bottom:12px;">
+        <input type="date" name="flow_date" value="{{ today }}" required>
+        <input name="notes" placeholder="Note entrata" style="min-width:220px;flex:1;">
+      </div>
+      <div class="entry-grid">
+        {% for method in available_payment_methods %}
+        <div class="method-card">
+          <div style="font-weight:700;text-transform:capitalize;">{{ method }}</div>
+          <input type="hidden" name="method_name" value="{{ method }}">
+          <input type="number" step="0.01" min="0" name="amount_value" value="0" style="margin-top:8px;">
+        </div>
+        {% endfor %}
+      </div>
+      <div class="custom-row">
+        <input name="custom_method_name" placeholder="Nuovo metodo facoltativo">
+        <input type="number" step="0.01" min="0" name="custom_method_amount" placeholder="Importo €">
+      </div>
+      <button class="btn" type="submit" style="margin-top:14px;">Salva entrata</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Aggiungi uscita</h3>
+    <form method="post" action="/gestionale/archiviati/{{ store_key }}/uscita">
+      <div class="row">
+        <input type="date" name="flow_date" value="{{ today }}" required>
+        <select name="category">
+          {% for cat in categories %}<option value="{{ cat }}">{{ cat }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <input name="supplier" placeholder="Fornitore / voce" style="min-width:220px;flex:1;">
+        <input name="payment_method" placeholder="Metodo pagamento">
+        <input type="number" step="0.01" min="0" name="amount" placeholder="Importo €" required>
+      </div>
+      <textarea name="notes" rows="4" placeholder="Note uscita" style="width:100%;margin-top:10px;resize:vertical;"></textarea>
+      <button class="btn" type="submit" style="margin-top:14px;">Salva uscita</button>
+    </form>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Incolla dalle note</h3>
+  <div class="muted" style="margin-bottom:10px;">Funziona come l'import degli altri negozi: incolli il testo, controlli il riepilogo, correggi le categorie delle uscite e poi confermi. Tutto viene salvato dentro <strong>{{ store.name }}</strong>.</div>
+  <form method="post" action="/gestionale/archiviati/{{ store_key }}/import-txt" enctype="multipart/form-data">
+    <div class="row">
+      <input type="file" name="import_file" accept=".txt,.csv">
+      <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="replace_existing_dates" checked> Sovrascrivi stessi giorni</label>
+      <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="import_expenses" checked> Importa anche uscite</label>
+    </div>
+    <textarea name="import_text" rows="10" placeholder="Incolla qui le note del vecchio negozio con date, Pos, Cash, Deliveroo, Glovo, Just Eat, spese, totali..." style="width:100%;margin-top:12px;min-height:180px;resize:vertical;"></textarea>
+    <button class="btn" type="submit" style="margin-top:14px;">Controlla prima di salvare</button>
+  </form>
+
+  {% if import_preview %}
+  <div class="card" style="margin-top:16px;background:rgba(14,165,233,.06);border-color:rgba(56,189,248,.26);">
+    <h3 style="margin-top:0;">Controllo prima del salvataggio</h3>
+    <div class="kpi-grid" style="margin-bottom:12px;">
+      <div class="kpi"><div class="muted">Giorni letti</div><div class="big">{{ import_preview.days_count }}</div></div>
+      <div class="kpi"><div class="muted">Entrate estratte</div><div class="big">€ {{ '%.2f'|format(import_preview.income_total or 0) }}</div><div class="muted">{{ import_preview.income_count }} righe</div></div>
+      <div class="kpi"><div class="muted">Uscite estratte</div><div class="big">€ {{ '%.2f'|format(import_preview.expense_total or 0) }}</div><div class="muted">{{ import_preview.expense_count }} righe</div></div>
+      <div class="kpi"><div class="muted">Destinazione</div><div style="font-weight:800;margin-top:8px;">{{ store.name }}</div></div>
+    </div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Data</th><th>Entrate lette</th><th>Uscite lette</th><th>Metodi / note</th></tr></thead>
+        <tbody>
+          {% for row in import_preview.rows %}
+          <tr>
+            <td><strong>{{ row.date }}</strong></td>
+            <td><strong>€ {{ '%.2f'|format(row.income_total or 0) }}</strong><br><span class="muted">{{ row.income_count }} righe</span></td>
+            <td><strong>€ {{ '%.2f'|format(row.expense_total or 0) }}</strong><br><span class="muted">{{ row.expense_count }} righe</span></td>
+            <td>
+              {% for method in row.methods %}<div><strong style="text-transform:capitalize;">{{ method.name }}</strong> € {{ '%.2f'|format(method.amount or 0) }}</div>{% endfor %}
+              {% if row.expense_samples %}<div class="tiny" style="margin-top:6px;">Prime uscite:{% for ex in row.expense_samples %}<div>{{ ex.name }} · € {{ '%.2f'|format(ex.amount or 0) }} → {{ ex.category }}</div>{% endfor %}</div>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <form method="post" action="/gestionale/archiviati/{{ store_key }}/import-txt" style="margin-top:14px;">
+      <input type="hidden" name="confirm_import" value="1">
+      {% if import_preview.replace_existing_dates %}<input type="hidden" name="replace_existing_dates" value="on">{% endif %}
+      {% if import_preview.include_expenses %}<input type="hidden" name="import_expenses" value="on">{% endif %}
+      <textarea name="import_text" style="display:none;">{{ import_preview.raw_text }}</textarea>
+      {% if import_preview.include_expenses and import_preview.expense_rows %}
+      <div class="card" style="margin:14px 0;background:rgba(15,23,42,.58);border-color:rgba(148,163,184,.22);">
+        <h4 style="margin:0 0 8px 0;">Correggi le categorie delle uscite</h4>
+        <div style="overflow-x:auto;">
+          <table>
+            <thead><tr><th>Data</th><th>Spesa letta</th><th>Importo</th><th>Categoria da salvare</th></tr></thead>
+            <tbody>
+              {% for ex in import_preview.expense_rows %}
+              <tr>
+                <td><strong>{{ ex.date }}</strong></td>
+                <td><strong>{{ ex.name }}</strong>{% if ex.raw and ex.raw != ex.name %}<div class="tiny">{{ ex.raw }}</div>{% endif %}</td>
+                <td><strong>€ {{ '%.2f'|format(ex.amount or 0) }}</strong></td>
+                <td>
+                  <input type="hidden" name="expense_key" value="{{ ex.key }}">
+                  <select name="expense_category" style="min-width:230px;">
+                    {% for cat in import_preview.category_options %}<option value="{{ cat }}" {% if cat == ex.category %}selected{% endif %}>{{ cat }}</option>{% endfor %}
+                  </select>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
+      <div class="row">
+        <button class="btn" type="submit">Conferma e salva tutto</button>
+        <a class="btn2" href="/gestionale/archiviati/{{ store_key }}" style="text-decoration:none;display:inline-block;">Annulla</a>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+</div>
+
+<div class="split-grid" style="margin-top:14px;">
+  <div class="card">
+    <h3 style="margin-top:0;">Storico entrate</h3>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Data</th><th>Metodo</th><th>Importo</th><th>Note</th><th></th></tr></thead>
+        <tbody>
+          {% for row in entries %}
+          <tr><td>{{ row.flow_date }}</td><td style="text-transform:capitalize;">{{ row.payment_method }}</td><td><strong>€ {{ '%.2f'|format(row.amount or 0) }}</strong></td><td>{{ row.notes }}</td><td><form method="post" action="/gestionale/archiviati/{{ store_key }}/incassi/{{ row.id }}/delete" onsubmit="return confirm('Eliminare questa entrata?');"><button class="btn2" type="submit">Elimina</button></form></td></tr>
+          {% else %}<tr><td colspan="5" class="muted">Ancora nessuna entrata.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0;">Storico uscite</h3>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Data</th><th>Categoria</th><th>Fornitore</th><th>Importo</th><th></th></tr></thead>
+        <tbody>
+          {% for row in expenses %}
+          <tr><td>{{ row.flow_date }}</td><td>{{ row.category }}</td><td>{{ row.supplier }}</td><td><strong>€ {{ '%.2f'|format(row.amount or 0) }}</strong></td><td><form method="post" action="/gestionale/archiviati/{{ store_key }}/uscite/{{ row.id }}/delete" onsubmit="return confirm('Eliminare questa uscita?');"><button class="btn2" type="submit">Elimina</button></form></td></tr>
+          {% else %}<tr><td colspan="5" class="muted">Ancora nessuna uscita.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

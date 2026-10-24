@@ -1,0 +1,534 @@
+{% extends "base.html" %}
+{% set title = "Report vendite" %}
+{% block content %}
+<style>
+  body{background:#06070a;color:#eef2ff}
+  .wrap{max-width:1320px}
+  .card{background:linear-gradient(180deg,var(--text)31a 0%,#0b0d13 100%);border:1px solid rgba(255,255,255,.08);box-shadow:0 22px 50px rgba(0,0,0,.34);border-radius:24px;padding:16px}
+  .muted{color:#98a2b3}
+  input,select,button{background:#0e1219;border:1px solid rgba(255,255,255,.1);color:#eef2ff;border-radius:14px;padding:10px 12px}
+  input::placeholder{color:#667085}
+  .btn{background:linear-gradient(135deg,#3b82f6 0%,#7c3aed 100%);border:0;color:var(--panel);box-shadow:0 12px 26px rgba(59,130,246,.22)}
+  .btn2{background:#0f141d;border:1px solid rgba(255,255,255,.14);color:#eef2ff}
+  .btn-danger{background:linear-gradient(135deg,var(--accent-red) 0%,#7f1d1d 100%);border:0;color:var(--panel);box-shadow:0 12px 26px rgba(185,28,28,.18)}
+  .btn-soft{background:linear-gradient(135deg,var(--text)827 0%,#1f2937 100%);border:1px solid rgba(255,255,255,.08);color:#e5e7eb}
+  .top-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:14px;margin-bottom:14px}
+  .hero-title{font-size:34px;font-weight:900;line-height:1.02;margin:0}
+  .hero-sub{font-size:14px;color:#9aa4b2;margin-top:8px;max-width:62ch}
+  .filters{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;margin-top:14px}
+  .summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+  .summary-box{padding:14px;border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.06) 0%,rgba(255,255,255,.03) 100%);border:1px solid rgba(255,255,255,.08)}
+  .summary-label{font-size:12px;color:#98a2b3;text-transform:uppercase;letter-spacing:.08em}
+  .summary-value{font-size:28px;font-weight:900;margin-top:8px;line-height:1.05}
+  .summary-note{font-size:12px;color:#7dd3fc;margin-top:6px}
+  .quick-actions{display:flex;gap:8px;flex-wrap:wrap}
+  .quick-actions a{text-decoration:none;display:inline-flex;align-items:center}
+  .section-title{font-size:18px;font-weight:800;margin:0}
+  .section-head{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .mode-switch{display:flex;gap:8px;flex-wrap:wrap}
+  .report-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+  .report-card{position:relative;background:linear-gradient(180deg,rgba(255,255,255,.06) 0%,rgba(255,255,255,.025) 100%);border:1px solid rgba(255,255,255,.08);border-radius:24px;padding:16px;display:flex;flex-direction:column;gap:12px;min-height:286px;cursor:pointer;transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;overflow:hidden}
+  .report-card:hover{transform:translateY(-2px);box-shadow:0 22px 40px rgba(0,0,0,.24);border-color:rgba(255,255,255,.16)}
+  .report-card.disabled{cursor:default}
+  .report-card::after{content:"";position:absolute;inset:auto -20% -40% auto;width:150px;height:150px;background:radial-gradient(circle,var(--accentGlow,rgba(59,130,246,.24)) 0%,transparent 68%);pointer-events:none}
+  .ring-wrap{display:flex;justify-content:center;align-items:center;padding-top:4px}
+  .ring{width:146px;height:146px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--accent,#3b82f6) calc(var(--pct,0) * 1%), rgba(255,255,255,.08) 0);box-shadow:inset 0 0 0 1px rgba(255,255,255,.04)}
+  .ring::before{content:"";width:100px;height:100px;border-radius:50%;background:#090b10;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+  .ring-center{position:absolute;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:90px}
+  .ring-value{font-size:24px;font-weight:900;line-height:1}
+  .ring-sub{font-size:12px;color:#98a2b3}
+  .card-name{font-size:20px;font-weight:900;line-height:1.08;text-align:center}
+  .card-meta{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+  .meta-chip{padding:7px 10px;border-radius:999px;background:rgba(255,255,255,.06);font-size:12px;color:#dbe4ff;border:1px solid rgba(255,255,255,.08)}
+  .meta-chip strong{font-weight:900}
+  .growth{font-size:13px;font-weight:900;padding:7px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.08)}
+  .growth.pos{color:#86efac;background:rgba(20,83,45,.35)}
+  .growth.neg{color:#fca5a5;background:rgba(127,29,29,.35)}
+  .growth.neutral{color:#cbd5e1;background:rgba(30,41,59,.45)}
+  .crumbs{display:flex;gap:8px;flex-wrap:wrap}
+  .crumb{background:#0f141d;border:1px solid rgba(255,255,255,.1);color:#eef2ff;border-radius:999px;padding:8px 12px;cursor:pointer}
+  .actions-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:14px;margin-top:14px}
+  .stack{display:grid;gap:12px}
+  .mini-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  .field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .tiny{font-size:12px;color:#98a2b3}
+  .row-line{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .pill-dark{display:inline-flex;align-items:center;padding:7px 10px;border-radius:999px;background:#0c1017;border:1px solid rgba(255,255,255,.08);font-size:12px;color:#dbe4ff}
+  .alert-ok,.alert-err{padding:11px 13px;border-radius:16px;border:1px solid transparent;font-size:13px}
+  .alert-ok{background:rgba(20,83,45,.35);border-color:rgba(74,222,128,.35);color:rgba(34,197,94,.32)}
+  .alert-err{background:rgba(127,29,29,.35);border-color:rgba(252,165,165,.35);color:rgba(248,113,113,.34)}
+  .table-wrap{overflow:auto;border-radius:18px;border:1px solid rgba(255,255,255,.08)}
+  table{width:100%;border-collapse:collapse;background:rgba(255,255,255,.02)}
+  th,td{border-bottom:1px solid rgba(255,255,255,.08);padding:10px 10px;vertical-align:top}
+  th{font-size:11px;color:#98a2b3;text-transform:uppercase;letter-spacing:.08em;background:rgba(255,255,255,.03)}
+  td{color:#edf2ff}
+  .name-cell{min-width:220px}
+  .money{font-weight:800}
+  .tree-indent{display:block}
+  .level-dot{display:inline-block;width:8px;height:8px;border-radius:999px;background:var(--dot,#3b82f6);margin-right:8px}
+  .action-col{min-width:260px}
+  .action-stack{display:grid;gap:8px}
+  .action-stack form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .subtle{color:#667085}
+  .empty-state{padding:28px 16px;border-radius:22px;background:rgba(255,255,255,.03);border:1px dashed rgba(255,255,255,.14);text-align:center;color:#98a2b3}
+  .month-list{display:flex;gap:8px;flex-wrap:wrap}
+  .month-list a{text-decoration:none;color:#eef2ff}
+  @media(max-width:1100px){.top-grid,.actions-grid,.mini-grid,.summary-grid{grid-template-columns:1fr 1fr}.filters{grid-template-columns:1fr 1fr}.filters .full{grid-column:1 / -1}}
+  @media(max-width:760px){
+    .top-grid,.actions-grid,.mini-grid,.summary-grid,.filters,.field-grid{grid-template-columns:1fr}
+    .hero-title{font-size:28px}
+    .report-grid{grid-template-columns:1fr}
+    .report-card{min-height:272px}
+    .ring{width:132px;height:132px}
+    .ring::before{width:90px;height:90px}
+    .ring-value{font-size:22px}
+    th:nth-child(3),td:nth-child(3),th:nth-child(4),td:nth-child(4){display:none}
+  }
+</style>
+
+<div class="top-grid">
+  <div class="card">
+    <div class="row" style="justify-content:space-between;align-items:flex-start;gap:14px;">
+      <div>
+        <div class="pill-dark" style="margin-bottom:10px;">REPORT VENDITE</div>
+        <h2 class="hero-title">Vista premium del mese</h2>
+        <div class="hero-sub">Grafici prima, gestione dopo. Meno testo inutile, più numeri leggibili, più controllo sul mese attivo e sui sottogruppi.</div>
+      </div>
+      <div class="quick-actions">
+        <a href="/gestionale" class="btn2">Gestionale</a>
+        <a href="/gestionale/incassi" class="btn2">Incassi</a>
+      </div>
+    </div>
+    <form method="get" action="/gestionale/report-vendite" class="filters">
+      <div>
+        <div class="tiny" style="margin-bottom:6px;">Mese</div>
+        <input type="month" name="month_key" value="{{ selected_month }}">
+      </div>
+      <div>
+        <div class="tiny" style="margin-bottom:6px;">Negozio</div>
+        <select name="store">
+          {% for key, label in stores.items() %}
+            {% if brand == 'ALL' or brand == key %}
+            <option value="{{ key }}" {% if selected_store==key %}selected{% endif %}>{{ label }}</option>
+            {% endif %}
+          {% endfor %}
+        </select>
+      </div>
+      <div style="display:flex;align-items:end;gap:8px;">
+        <button class="btn" type="submit">Apri report</button>
+      </div>
+    </form>
+    <div id="crumbs" class="crumbs" style="margin-top:12px;"></div>
+    {% if import_error %}<div class="alert-err" style="margin-top:12px;">{{ import_error.replace('+', ' ') }}</div>{% endif %}
+    {% if import_ok %}<div class="alert-ok" style="margin-top:12px;">Import completato: {{ import_ok }} voci aggiunte.</div>{% endif %}
+  </div>
+
+  <div class="card">
+    <div class="summary-grid">
+      <div class="summary-box">
+        <div class="summary-label">Periodo</div>
+        <div class="summary-value">{{ selected_month_label }}</div>
+        <div class="summary-note">{{ stores[selected_store] }}</div>
+      </div>
+      <div class="summary-box">
+        <div class="summary-label">Totale €</div>
+        <div class="summary-value">€ {{ '%.2f'|format(totals.amount or 0) }}</div>
+        <div class="summary-note">Valore totale del mese</div>
+      </div>
+      <div class="summary-box">
+        <div class="summary-label">Totale quantità</div>
+        <div class="summary-value">{{ '%.2f'|format(totals.quantity or 0) }}</div>
+        <div class="summary-note">Prodotti venduti</div>
+      </div>
+      <div class="summary-box">
+        <div class="summary-label">Gruppi fissi</div>
+        <div class="summary-value">{{ model_groups|length }}</div>
+        <div class="summary-note">Pronti per ogni mese</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="section-head">
+    <div>
+      <h3 class="section-title">Grafici ad anello</h3>
+      <div class="tiny">Le card mostrano crescita, peso nel livello attuale e peso sul mese. Nei sottogruppi i totali usano anche i figli.</div>
+    </div>
+    <div class="mode-switch">
+      <button type="button" class="btn2" id="toggleMoneyTop" onclick="setMode('amount')">€ Prezzo</button>
+      <button type="button" class="btn2" id="toggleQtyTop" onclick="setMode('quantity')">Quantità</button>
+    </div>
+  </div>
+  <div id="emptyState" class="empty-state" style="display:none;">Non hai ancora dati in questo mese.</div>
+  <div id="reportCards" class="report-grid"></div>
+</div>
+
+<div class="actions-grid">
+  <div class="stack">
+    <div class="card">
+      <div class="section-head">
+        <h3 class="section-title">Importa CSV</h3>
+        <div class="tiny">Mantiene il mese selezionato.</div>
+      </div>
+      <form method="post" action="/gestionale/report-vendite/import" enctype="multipart/form-data" class="field-grid">
+        <input type="hidden" name="month_key" value="{{ selected_month }}">
+        <input type="hidden" name="store" value="{{ selected_store }}">
+        <div>
+          <div class="tiny" style="margin-bottom:6px;">File</div>
+          <input type="file" name="upload_file" accept=".csv,.xls,.xlsx" required>
+        </div>
+        <div>
+          <div class="tiny" style="margin-bottom:6px;">Inserimento iniziale</div>
+          <select name="parent_id">
+            <option value="">Automatico</option>
+            {% for opt in parent_options %}<option value="{{ opt.id }}">{{ opt.label }}</option>{% endfor %}
+          </select>
+        </div>
+        <div style="display:flex;align-items:end;">
+          <button class="btn" type="submit">Importa file</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="section-head">
+        <h3 class="section-title">Aggiungi voce</h3>
+        <div class="tiny">Gruppo o sottogruppo</div>
+      </div>
+      <form method="post" action="/gestionale/report-vendite/voce" class="field-grid">
+        <input type="hidden" name="month_key" value="{{ selected_month }}">
+        <input type="hidden" name="store" value="{{ selected_store }}">
+        <div>
+          <div class="tiny" style="margin-bottom:6px;">Nome</div>
+          <input name="name" placeholder="Es. Coca Cola, Pinze classiche" required>
+        </div>
+        <div>
+          <div class="tiny" style="margin-bottom:6px;">Padre</div>
+          <select name="parent_id">
+            <option value="">Nessun gruppo padre</option>
+            {% for opt in parent_options %}
+            <option value="{{ opt.id }}">{{ opt.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <div class="tiny" style="margin-bottom:6px;">Valore €</div>
+          <input type="number" step="0.01" min="0" name="amount" value="0">
+        </div>
+        <div>
+          <div class="tiny" style="margin-bottom:6px;">Quantità</div>
+          <input type="number" step="0.01" min="0" name="quantity" value="0">
+        </div>
+        <div class="full row-line" style="justify-content:space-between;grid-column:1 / -1;">
+          <label class="tiny row-line"><input type="checkbox" name="persist_model" value="1" checked>Salva come gruppo fisso</label>
+          <button class="btn" type="submit">Salva voce</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="card">
+      <div class="section-head">
+        <h3 class="section-title">Pulizia veloce</h3>
+        <div class="tiny">Riparti da zero nel mese attuale</div>
+      </div>
+      <form method="post" action="/gestionale/report-vendite/clear-month" onsubmit="return confirm('Svuotare questo mese? I gruppi fissi rimangono.');" class="row-line" style="justify-content:space-between;">
+        <input type="hidden" name="month_key" value="{{ selected_month }}">
+        <input type="hidden" name="store" value="{{ selected_store }}">
+        <div>
+          <div class="pill-dark">{{ selected_month_label }}</div>
+          <div class="tiny" style="margin-top:8px;">Cancella le voci del mese e ricrea i gruppi principali a zero.</div>
+        </div>
+        <button class="btn-danger" type="submit">Svuota mese</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="section-head">
+        <h3 class="section-title">Gruppi principali</h3>
+        <div class="tiny">Sempre pronti</div>
+      </div>
+      <div class="row-line">
+        {% for g in model_groups %}
+          <span class="pill-dark">{{ g.name }}</span>
+        {% endfor %}
+        {% if not model_groups %}<span class="tiny">Ancora nessun gruppo fisso.</span>{% endif %}
+      </div>
+    </div>
+
+    {% if periods %}
+    <div class="card">
+      <div class="section-head">
+        <h3 class="section-title">Mesi creati</h3>
+        <div class="tiny">Salto rapido</div>
+      </div>
+      <div class="month-list">
+        {% for p in periods %}
+          <a class="pill-dark" href="/gestionale/report-vendite?store={{ p.store }}&month_key={{ p.month_key }}">{{ p.label_full }}</a>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px;">
+  <div class="section-head">
+    <div>
+      <h3 class="section-title">Struttura salvata</h3>
+      <div class="tiny">Sposta, rinomina o elimina senza perdere il mese selezionato.</div>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="name-cell">Voce</th>
+          <th>Totale €</th>
+          <th>Quantità</th>
+          <th>% livello</th>
+          <th>% mese</th>
+          <th>Crescita</th>
+          <th class="action-col">Azioni</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% macro render_rows(nodes, depth=0) %}
+        {% for n in nodes %}
+          <tr>
+            <td class="name-cell">
+              <div class="tree-indent" style="padding-left:{{ depth * 18 }}px;">
+                <span class="level-dot" style="--dot:{% if depth == 0 %}#3b82f6{% elif depth == 1 %}#8b5cf6{% else %}#14b8a6{% endif %};"></span><strong>{{ n.name }}</strong>
+              </div>
+              <div class="tiny" style="padding-left:{{ depth * 18 + 16 }}px;">{% if n.has_children %}Gruppo con {{ n.children|length }} voci{% else %}Voce finale{% endif %}</div>
+            </td>
+            <td class="money">€ {{ '%.2f'|format(n.display_amount or n.total_amount or 0) }}</td>
+            <td>{{ '%.2f'|format(n.display_quantity or n.total_quantity or 0) }}</td>
+            <td>{{ '%.1f'|format(n.share_amount or 0) }}%</td>
+            <td>{{ '%.1f'|format(n.month_share_amount or 0) }}%</td>
+            <td>
+              {% set g = n.growth_amount_pct %}
+              {% if g is none %}
+                <span class="growth neutral">Nuovo</span>
+              {% elif g >= 0 %}
+                <span class="growth pos">+{{ '%.1f'|format(g) }}%</span>
+              {% else %}
+                <span class="growth neg">{{ '%.1f'|format(g) }}%</span>
+              {% endif %}
+            </td>
+            <td class="action-col">
+              <div class="action-stack">
+                <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/move">
+                  <input type="hidden" name="month_key" value="{{ selected_month }}">
+                  <input type="hidden" name="store" value="{{ selected_store }}">
+                  <select name="parent_id">
+                    <option value="">Fuori dai gruppi</option>
+                    {% for opt in parent_options %}
+                      {% if opt.id != n.id %}
+                      <option value="{{ opt.id }}">{{ opt.label }}</option>
+                      {% endif %}
+                    {% endfor %}
+                  </select>
+                  <button class="btn2" type="submit">Sposta</button>
+                </form>
+                <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/rename">
+                  <input type="hidden" name="month_key" value="{{ selected_month }}">
+                  <input type="hidden" name="store" value="{{ selected_store }}">
+                  <input type="text" name="name" value="{{ n.name }}" placeholder="Nuovo nome" style="min-width:140px;">
+                  <button class="btn2" type="submit">Rinomina</button>
+                </form>
+                <form method="post" action="/gestionale/report-vendite/voce/{{ n.id }}/delete" onsubmit="return confirm('Eliminare questa voce?');">
+                  <input type="hidden" name="month_key" value="{{ selected_month }}">
+                  <input type="hidden" name="store" value="{{ selected_store }}">
+                  <button class="btn-danger" type="submit">Elimina</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {{ render_rows(n.children, depth + 1) }}
+        {% endfor %}
+      {% endmacro %}
+      {{ render_rows(tree) }}
+      </tbody>
+    </table>
+  </div>
+  {% if not tree %}
+    <div class="empty-state" style="margin-top:12px;">Ancora nessun gruppo creato.</div>
+  {% endif %}
+</div>
+
+<script>
+const reportTree = {{ chart_tree_json|safe }};
+const storageKey = 'sales-report::{{ selected_store }}::{{ selected_month }}';
+const palette = [
+  {accent:'#3b82f6', glow:'rgba(59,130,246,.22)'},
+  {accent:'#8b5cf6', glow:'rgba(139,92,246,.22)'},
+  {accent:'#14b8a6', glow:'rgba(20,184,166,.22)'},
+  {accent:'#f59e0b', glow:'rgba(245,158,11,.20)'},
+  {accent:'#ef4444', glow:'rgba(239,68,68,.20)'},
+  {accent:'#22c55e', glow:'rgba(34,197,94,.22)'}
+];
+let currentMode = 'amount';
+let currentPath = [];
+
+function fmt(value){
+  const num = Number(value || 0);
+  return currentMode === 'amount' ? ('€ ' + num.toFixed(2)) : num.toFixed(2);
+}
+
+function displayValue(node){
+  return currentMode === 'amount'
+    ? Number(node.display_amount ?? node.total_amount ?? node.amount ?? 0)
+    : Number(node.display_quantity ?? node.total_quantity ?? node.quantity ?? 0);
+}
+
+function visibleShare(node){
+  return currentMode === 'amount' ? Number(node.share_amount || 0) : Number(node.share_quantity || 0);
+}
+
+function monthShare(node){
+  return currentMode === 'amount' ? Number(node.month_share_amount || 0) : Number(node.month_share_quantity || 0);
+}
+
+function growthValue(node){
+  return currentMode === 'amount' ? node.growth_amount_pct : node.growth_quantity_pct;
+}
+
+function growthHtml(node){
+  const value = growthValue(node);
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '<span class="growth neutral">Nuovo</span>';
+  const num = Number(value);
+  const cls = num >= 0 ? 'pos' : 'neg';
+  const sign = num > 0 ? '+' : '';
+  return `<span class="growth ${cls}">${sign}${num.toFixed(1)}%</span>`;
+}
+
+function nodesAtPath(){
+  let nodes = reportTree;
+  for (const id of currentPath){
+    const found = (nodes || []).find(n => Number(n.id) === Number(id));
+    if (!found) return [];
+    nodes = found.children || [];
+  }
+  return nodes || [];
+}
+
+function breadcrumbNodes(){
+  const crumbs = [];
+  let nodes = reportTree;
+  for (const id of currentPath){
+    const found = (nodes || []).find(n => Number(n.id) === Number(id));
+    if (!found) break;
+    crumbs.push(found);
+    nodes = found.children || [];
+  }
+  return crumbs;
+}
+
+function renderCrumbs(){
+  const wrap = document.getElementById('crumbs');
+  wrap.innerHTML = '';
+  const home = document.createElement('button');
+  home.type = 'button';
+  home.className = 'crumb';
+  home.textContent = 'Mese';
+  home.onclick = () => { currentPath = []; renderCards(); };
+  wrap.appendChild(home);
+  breadcrumbNodes().forEach((node, idx) => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'crumb';
+    el.textContent = node.name;
+    el.onclick = () => { currentPath = currentPath.slice(0, idx + 1); renderCards(); };
+    wrap.appendChild(el);
+  });
+}
+
+function saveState(){
+  try {
+    localStorage.setItem(storageKey, JSON.stringify({mode: currentMode, path: currentPath}));
+  } catch (e) {}
+}
+
+function pathExists(path){
+  let nodes = reportTree;
+  for (const id of path || []){
+    const found = (nodes || []).find(n => Number(n.id) === Number(id));
+    if (!found) return false;
+    nodes = found.children || [];
+  }
+  return true;
+}
+
+function restoreState(){
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (parsed.mode === 'amount' || parsed.mode === 'quantity') currentMode = parsed.mode;
+    if (Array.isArray(parsed.path) && pathExists(parsed.path)) currentPath = parsed.path.map(Number);
+  } catch (e) {}
+}
+
+function renderCards(){
+  if (!pathExists(currentPath)) currentPath = [];
+  renderCrumbs();
+  const box = document.getElementById('reportCards');
+  const empty = document.getElementById('emptyState');
+  const nodes = nodesAtPath();
+  box.innerHTML = '';
+  if (!nodes.length){
+    empty.style.display = 'block';
+    saveState();
+    return;
+  }
+  empty.style.display = 'none';
+  const showBothShares = currentPath.length > 0;
+  nodes.forEach((node, idx) => {
+    const tone = palette[idx % palette.length];
+    const card = document.createElement('div');
+    card.className = 'report-card' + (!node.has_children ? ' disabled' : '');
+    card.style.setProperty('--accent', tone.accent);
+    card.style.setProperty('--accentGlow', tone.glow);
+    const levelLabel = currentPath.length ? 'nel gruppo' : 'del mese';
+    card.innerHTML = `
+      <div class="ring-wrap">
+        <div class="ring" style="--pct:${Math.max(0, Math.min(100, visibleShare(node)))}"></div>
+        <div class="ring-center">
+          <div class="ring-value">${fmt(displayValue(node))}</div>
+          <div class="ring-sub">${visibleShare(node).toFixed(1)}% ${levelLabel}</div>
+        </div>
+      </div>
+      <div class="card-name">${node.name}</div>
+      <div class="card-meta">
+        ${growthHtml(node)}
+        ${showBothShares ? `<span class="meta-chip"><strong>${visibleShare(node).toFixed(1)}%</strong> nel gruppo</span>` : ''}
+        <span class="meta-chip"><strong>${monthShare(node).toFixed(1)}%</strong> sul mese</span>
+      </div>
+      <div class="card-meta">
+        <span class="meta-chip">${currentMode === 'amount' ? 'Qtà ' + Number(node.display_quantity || 0).toFixed(2) : '€ ' + Number(node.display_amount || 0).toFixed(2)}</span>
+        <span class="meta-chip">${node.has_children ? 'Apri dettaglio' : 'Voce finale'}</span>
+      </div>`;
+    if (node.has_children){
+      card.onclick = () => { currentPath.push(Number(node.id)); renderCards(); };
+    }
+    box.appendChild(card);
+  });
+  const moneyBtn = document.getElementById('toggleMoneyTop');
+  const qtyBtn = document.getElementById('toggleQtyTop');
+  if (moneyBtn){ moneyBtn.className = currentMode === 'amount' ? 'btn' : 'btn2'; }
+  if (qtyBtn){ qtyBtn.className = currentMode === 'quantity' ? 'btn' : 'btn2'; }
+  saveState();
+}
+
+function setMode(mode){
+  currentMode = mode;
+  renderCards();
+}
+
+restoreState();
+renderCards();
+</script>
+{% endblock %}

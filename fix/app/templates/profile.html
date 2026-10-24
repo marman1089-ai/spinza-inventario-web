@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% set title = "Profilo" %}
+{% block content %}
+  <div class="card" style="max-width:520px;margin:20px auto;">
+    <h2 style="margin:0 0 6px 0;">Profilo</h2>
+    <p class="muted" style="margin:0;">Gestisci le tue credenziali.</p>
+
+    {% if msg %}
+      <div style="padding:10px 12px;border-radius:12px;margin:12px 0;background:#eef7ff;border:1px solid #b9dcff;">{{ msg }}</div>
+    {% endif %}
+    {% if error %}
+      <div class="danger" style="padding:10px 12px;border-radius:12px;margin:12px 0;">{{ error }}</div>
+    {% endif %}
+
+    <details open>
+      <summary class="pill" style="cursor:pointer;">🔒 Cambia password</summary>
+      <div style="margin-top:10px;">
+        <form method="post" action="/profile/password">
+          <div style="display:grid;gap:10px;">
+            <input name="current_password" type="password" placeholder="Password attuale" autocomplete="current-password" required />
+            <input name="new_password" type="password" placeholder="Nuova password" autocomplete="new-password" required />
+            <input name="confirm_password" type="password" placeholder="Conferma nuova password" autocomplete="new-password" required />
+            <button class="btn" type="submit">Salva</button>
+          </div>
+        </form>
+      </div>
+    </details>
+
+    {% if user and user.role == 'admin' %}
+    <details style="margin-top:12px;">
+      <summary class="pill" style="cursor:pointer;">✏️ Cambia username (solo admin)</summary>
+      <div style="margin-top:10px;">
+        <form method="post" action="/profile/username">
+          <div class="row">
+            <input name="new_username" placeholder="Nuovo username" required />
+            <button class="btn2" type="submit">Aggiorna</button>
+          </div>
+          <div class="muted" style="margin-top:8px;">Per lo staff lo username lo cambia solo l’admin dal pannello utenti.</div>
+        </form>
+      </div>
+    </details>
+    {% endif %}
+  </div>
+{% endblock %}

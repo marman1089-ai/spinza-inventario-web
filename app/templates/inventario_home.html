@@ -1,11 +1,7 @@
 
 {% extends "base.html" %}
 {% set title = "Inventario" %}
-{% block content %}
-<div class="card" style="margin-bottom:12px;display:flex;gap:12px;flex-wrap:wrap;align-items:center">
-  <a class="btn2" href="/inventario/conteggio?area={{ area if area is defined else 'prodotti' }}&store={{ active_store if active_store is defined and active_store != 'ALL' else 'spinza' }}">📋 Conferma conteggio e genera report</a>
-  <a class="btn2" href="/inventario/report?area={{ area if area is defined else 'prodotti' }}&store={{ active_store if active_store is defined and active_store != 'ALL' else 'spinza' }}">📊 Report consumi per periodo</a>
-</div>
+{% block content %}<div class="card" style="margin-bottom:14px"><a class="pill" href="/inventario-controllo?area=bibite">Sala · conteggio giornaliero e spostamenti</a> <a class="pill" href="/inventario-controllo?area=prodotti">Cucina · conteggio e fatture del periodo</a></div>
   <div class="card" style="margin-bottom:14px;">
     <h2 style="margin:0 0 6px 0;">Inventario</h2>
     <div class="muted">Questa area è dedicata a <strong>giacenze, prodotti, ordini e logistica</strong>. La contabilità resta separata dentro il Gestionale.</div>

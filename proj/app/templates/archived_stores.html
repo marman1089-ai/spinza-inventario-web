@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% set title = "Negozi archiviati" %}
+{% block content %}
+<style>
+  .arch-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+  .arch-card{border:1px solid var(--line-soft);border-radius:18px;padding:16px;background:var(--panel)}
+  .big{font-size:28px;font-weight:800;line-height:1.05}
+  .kpi-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  .ok-box,.err-box{padding:12px 14px;border-radius:14px;margin-top:14px}
+  .ok-box{background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.34);color:var(--accent-emerald-2)}
+  .err-box{background:rgba(239,68,68,.12);border:1px solid rgba(248,113,113,.34);color:var(--accent-red-2)}
+  @media(max-width:900px){.arch-grid,.kpi-grid{grid-template-columns:1fr}}
+</style>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between;align-items:center;">
+    <div>
+      <h2 style="margin:0 0 6px 0;">🗂️ Negozi archiviati</h2>
+      <div class="muted">Qui metti i negozi che non sono più attivi, ma che devono restare nello storico generale.</div>
+    </div>
+    <div class="row">
+      <a class="btn2" href="/gestionale" style="text-decoration:none;display:inline-block;">Home gestionale</a>
+      <a class="btn2" href="/gestionale/panoramica-totale" style="text-decoration:none;display:inline-block;">Panoramica totale</a>
+    </div>
+  </div>
+</div>
+
+{% if created %}<div class="ok-box">Negozio archiviato creato.</div>{% endif %}
+{% if error %}<div class="err-box">{{ error }}</div>{% endif %}
+
+<div class="card" style="margin-top:14px;">
+  <h3 style="margin-top:0;">Aggiungi negozio archiviato</h3>
+  <form method="post" action="/gestionale/archiviati" class="row">
+    <input name="name" placeholder="Nome negozio, es. Le Cure vecchio" required style="min-width:260px;flex:1;">
+    <input type="date" name="opened_at" title="Data apertura facoltativa">
+    <input type="date" name="closed_at" title="Data chiusura facoltativa">
+    <input name="notes" placeholder="Note facoltative" style="min-width:220px;flex:1;">
+    <button class="btn" type="submit">Crea negozio</button>
+  </form>
+</div>
+
+<div class="arch-grid" style="margin-top:14px;">
+  {% for row in archived_stores %}
+  <div class="arch-card">
+    <div class="pill" style="width:max-content;margin-bottom:10px;">Archiviato</div>
+    <h3 style="margin:0 0 8px 0;">{{ row.name }}</h3>
+    <div class="muted">
+      {% if row.opened_at %}Apertura: {{ row.opened_at }}{% endif %}
+      {% if row.closed_at %}{% if row.opened_at %} · {% endif %}Chiusura: {{ row.closed_at }}{% endif %}
+      {% if not row.opened_at and not row.closed_at %}Date non impostate{% endif %}
+    </div>
+    {% if row.notes %}<div class="tiny" style="margin-top:8px;">{{ row.notes }}</div>{% endif %}
+    <div class="kpi-grid" style="grid-template-columns:1fr;gap:8px;margin-top:12px;">
+      <div class="kpi"><div class="muted">Entrate</div><div class="big">€ {{ '%.2f'|format(row.income_total or 0) }}</div></div>
+      <div class="kpi"><div class="muted">Uscite</div><div class="big">€ {{ '%.2f'|format(row.expense_total or 0) }}</div></div>
+      <div class="kpi"><div class="muted">Bilancio</div><div class="big">€ {{ '%.2f'|format(row.net_total or 0) }}</div></div>
+    </div>
+    <a class="btn" href="/gestionale/archiviati/{{ row.store_key }}" style="text-decoration:none;display:inline-block;margin-top:14px;">Apri storico</a>
+  </div>
+  {% else %}
+  <div class="card" style="grid-column:1/-1;">
+    <div class="muted">Ancora nessun negozio archiviato. Crea il primo qui sopra e poi incolla i dati storici.</div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

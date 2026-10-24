@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% set title = "Logistica - Ordini in corso" %}
+{% block content %}
+  <div class="card" style="margin-bottom:12px;">
+    <h2 style="margin:0 0 6px 0;">📦 Logistica — Ordini in corso</h2>
+    <div class="muted">Qui vedi gli ordini confermati (raggruppati per fornitore).</div>
+  </div>
+
+  {% for o in orders %}
+    <div class="card" style="margin-bottom:12px;">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <div>
+          <div class="pill">Fornitore: <strong>{{ o.supplier }}</strong></div>
+          <div class="muted" style="margin-top:6px;">Creato da {{ o.created_by }} • {{ o.ts }}{% if active_store == 'ALL' %} • {{ stores.get(o.store, o.store) }}{% endif %}</div>
+        </div>
+        <div>
+          <form method="post" action="/ordinati/arrivato" style="margin:0;">
+            <input type="hidden" name="order_id" value="{{ o.id }}" />
+            <button class="btn" type="submit">Arrivato ✔</button>
+          </form>
+        </div>
+      </div>
+
+      <div style="overflow:auto;margin-top:10px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Categoria</th>
+              <th>Prodotto</th>
+              <th>Q.tà</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for l in o.lines %}
+              <tr>
+                <td><span class="pill">{{ l.category }}</span></td>
+                <td><strong>{{ l.name }}</strong></td>
+                <td>{{ "%.2f"|format(l.qty) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% endfor %}
+
+  {% if not orders or orders|length == 0 %}
+    <div class="card"><div class="muted">Nessun ordine in corso.</div></div>
+  {% endif %}
+{% endblock %}

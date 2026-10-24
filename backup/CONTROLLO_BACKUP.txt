@@ -1,0 +1,14 @@
+Backup database originale
+
+File originale nello ZIP ricevuto: spinza.db
+Dimensione: 172032 byte
+SHA-256 originale: daef474b5d35d82cc49c31af9d2d49d967c608495ed71b457b10a559e0fe9789
+SHA-256 copia root: daef474b5d35d82cc49c31af9d2d49d967c608495ed71b457b10a559e0fe9789
+SHA-256 copia protetta: daef474b5d35d82cc49c31af9d2d49d967c608495ed71b457b10a559e0fe9789
+
+Conteggi verificati:
+- users: 3
+- products: 43
+- logs: 90
+
+Le tre impronte devono coincidere. Il dump SQL è in spinza_originale_dump.sql.

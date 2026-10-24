@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% set title = "Importa prodotti da fattura" %}
+{% block content %}
+  <div class="card" style="margin-bottom:12px;">
+    <h2 style="margin-top:0">📸 Importa prodotti da foto fattura</h2>
+    <div class="muted">
+      Carica (o scatta) una foto della fattura, poi nella schermata successiva inserisci/correggi le righe e confermi:
+      il magazzino viene aggiornato e la fattura viene salvata nell'archivio.
+    </div>
+  </div>
+
+  <div class="card">
+    <form method="post" action="/fatture/importa-prodotti/upload" enctype="multipart/form-data">
+      <div class="row" style="align-items:flex-end">
+        <div style="display:flex;flex-direction:column;gap:6px;min-width:220px;flex:1">
+          <label class="muted">Fornitore</label>
+          <input name="supplier" placeholder="Es. Metro" required />
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;min-width:200px;">
+          <label class="muted">Data fattura</label>
+          <input type="date" name="doc_date" required />
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;min-width:200px;">
+          <label class="muted">Sezione</label>
+          <select name="area" required>
+            <option value="bibite" {% if default_area == 'bibite' %}selected{% endif %}>🥤 Bibite (Sala)</option>
+            <option value="prodotti" {% if default_area != 'bibite' %}selected{% endif %}>🍽️ Prodotti (Cucina)</option>
+          </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;min-width:260px;flex:2">
+          <label class="muted">Foto fattura</label>
+          <input type="file" name="file" accept="image/*" capture="environment" required />
+        </div>
+        <button class="btn" type="submit">Avanti</button>
+      </div>
+    </form>
+
+    <div class="muted" style="margin-top:10px;">
+      Consiglio: scatta la foto ben dritta, in buona luce, e includi tutta la tabella dei prodotti.
+    </div>
+  </div>
+{% endblock %}

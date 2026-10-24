@@ -9,10 +9,10 @@ except ImportError:
 from pypdf import PdfReader, PdfWriter
 
 # Impostazioni consigliate per fatture/chiusure:
-# - max_side: 1400px (leggibile ma molto più leggero delle foto originali)
-# - jpeg_quality: 55 (qualità minima ma leggibile, ottimo rapporto peso/qualità)
-DEFAULT_MAX_SIDE = 1400
-DEFAULT_JPEG_QUALITY = 55
+# - max_side: 2400px (leggibile ma molto più leggero delle foto originali)
+# - jpeg_quality: 85 (più dettaglio per la lettura dei documenti)
+DEFAULT_MAX_SIDE = 2400
+DEFAULT_JPEG_QUALITY = 85
 
 def _image_bytes_to_pdf(image_bytes: bytes, max_side: int, jpeg_quality: int) -> bytes:
     img = Image.open(io.BytesIO(image_bytes))

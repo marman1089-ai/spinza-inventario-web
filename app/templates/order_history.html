@@ -19,7 +19,7 @@
             <option value="transfer" {% if kind=='transfer' %}selected{% endif %}>Solo scambi</option>
           </select>
         </label>
-        <div style="flex:1;min-width:220px;display:flex;align-items:center;gap:6px;">
+        <label>Dal <input type="date" name="start" value="{{ start or '' }}"></label><label>Al <input type="date" name="end" value="{{ end or '' }}"></label><button type="submit">Filtra periodo</button><div style="flex:1;min-width:220px;display:flex;align-items:center;gap:6px;">
           <span class="pill" style="background:var(--panel);border-color:var(--line);">🔎</span>
           <input id="histSearch" type="text" placeholder="Cerca fornitore, prodotto, negozio…" style="flex:1;min-width:160px;" oninput="filterHistory()" />
         </div>
@@ -43,7 +43,7 @@
             {% if (o.kind or 'ordine') == 'transfer' %}
               <div class="pill">🔁 <strong>SCAMBIO</strong>{% if o.from_store and o.to_store %} • {{ stores.get(o.from_store, o.from_store) }} → {{ stores.get(o.to_store, o.to_store) }}{% endif %}</div>
             {% endif %}
-            <div class="pill">#{{ o.id }}</div>
+            <div class="pill">#{{ o.id }} · {{ o.status }}</div>
           </div>
           <div class="muted" style="margin-top:6px;">
             Creato da {{ o.created_by }} • {{ o.ts }}
@@ -72,8 +72,8 @@
                 <td>{{ "%.2f"|format(l.qty) }}</td>
                 <td>{{ "%.2f"|format(l.received_qty or 0) }}</td>
                 <td>
-                  {% if l.is_missing %}
-                    <span class="pill">❌ Mancante</span>
+                  {% if o.status=='annullato' %}<span class="pill">Ordine annullato</span>{% elif l.is_missing %}
+                    <span class="pill">{{ 'Consegna parziale' if (l.received_qty or 0)>0 else 'Non ricevuto' }} · {{ '%g'|format([0,l.qty-(l.received_qty or 0)]|max) }} da ricevere</span>
                   {% else %}
                     <span class="pill">✅ OK</span>
                   {% endif %}
