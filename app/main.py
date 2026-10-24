@@ -9,7 +9,7 @@ import re
 import mimetypes
 from urllib.parse import quote, quote_plus, unquote_plus, urlencode
 
-from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException
+from fastapi import FastAPI, Request, Form, UploadFile, File
 from .pdf_tools import ensure_pdf, merge_pdfs
 from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -6624,7 +6624,11 @@ def inventario(request: Request, q: str = "", cat: str = "ALL", loc: str = "ALL"
 def _collapse_product_rows_for_single_position(cur, *, row, effective_store, new_qty=None,
                                                new_category=None, new_name=None,
                                                new_unit=None, new_min_qty=None, new_category_color=None, new_subgroup=None):
-    """Aggiorna soltanto la posizione selezionata, preservando tutte le altre."""
+    """Compatta eventuali vecchie posizioni multiple in una sola riga prodotto.
+
+    La nuova UI non usa più posizioni: ogni prodotto resta unico con location MAGAZZINO.
+    Se esistono righe vecchie tipo SALA/MAGAZZINO, il totale viene preservato e le righe extra rimosse.
+    """
     ph = _ph()
     now = _now()
     area = (row.get("area") or "prodotti")
@@ -6632,9 +6636,14 @@ def _collapse_product_rows_for_single_position(cur, *, row, effective_store, new
     old_name = (row.get("name") or "").strip()
     base_id = int(row.get("id"))
 
-    total_qty = float(row.get("qty") or 0)
-    total_min = float(row.get("min_qty") or 0)
-    total_missing = float(row.get("missing_qty") or 0)
+    siblings = cur.execute(
+        f"SELECT * FROM products WHERE store={ph} AND area={ph} AND category={ph} AND name={ph} ORDER BY id",
+        (effective_store, area, old_category, old_name),
+    ).fetchall()
+
+    total_qty = sum(float(r.get("qty") or 0) for r in siblings) if siblings else float(row.get("qty") or 0)
+    total_min = sum(float(r.get("min_qty") or 0) for r in siblings) if siblings else float(row.get("min_qty") or 0)
+    total_missing = sum(float(r.get("missing_qty") or 0) for r in siblings) if siblings else float(row.get("missing_qty") or 0)
 
     final_qty = float(total_qty if new_qty is None else new_qty)
     if final_qty < 0:
@@ -6646,11 +6655,16 @@ def _collapse_product_rows_for_single_position(cur, *, row, effective_store, new
     final_min = float(total_min if new_min_qty is None else new_min_qty)
     final_category_color = _clean_category_color(new_category_color if new_category_color is not None else (row.get("category_color") or _default_category_color(final_name)))
 
+    # Prima elimina le altre posizioni: evita conflitti con l'indice unico su MAGAZZINO.
+    cur.execute(
+        f"DELETE FROM products WHERE store={ph} AND area={ph} AND category={ph} AND name={ph} AND id<>{ph}",
+        (effective_store, area, old_category, old_name, base_id),
+    )
     cur.execute(
         f"""UPDATE products
             SET category={ph}, name={ph}, subgroup={ph}, location={ph}, unit={ph}, qty={ph}, min_qty={ph}, missing_qty={ph}, category_color={ph}, updated_at={now}
             WHERE id={ph} AND store={ph}""",
-        (final_category, final_name, final_subgroup, row.get("location") or "MAGAZZINO", final_unit, final_qty, final_min, total_missing, final_category_color, base_id, effective_store),
+        (final_category, final_name, final_subgroup, "MAGAZZINO", final_unit, final_qty, final_min, total_missing, final_category_color, base_id, effective_store),
     )
     return {
         "qty": final_qty,
@@ -6699,7 +6713,14 @@ def item_delta(request: Request, item_id: int, delta: float = Form(...), store: 
         if not row:
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
-        current_total = float(row.get("qty") or 0)
+        # La UI ora è a posizione unica: se trova vecchie righe SALA/MAGAZZINO,
+        # usa il totale complessivo e compatta tutto in una sola riga.
+        area_row = (row.get("area") or "prodotti")
+        siblings = cur.execute(
+            f"SELECT qty FROM products WHERE store={ph} AND area={ph} AND category={ph} AND name={ph}",
+            (effective_store, area_row, row["category"], row["name"]),
+        ).fetchall()
+        current_total = sum(float(r.get("qty") or 0) for r in siblings) if siblings else float(row["qty"] or 0)
         new_qty = current_total + float(delta)
         info = _collapse_product_rows_for_single_position(cur, row=row, effective_store=effective_store, new_qty=new_qty)
         cur.execute(
@@ -7300,8 +7321,6 @@ def closures_page(request: Request, q: str = ""):
 
     store = _effective_store(request, user)
     brand = "ALL" if store == "ALL" else store
-    from .document_jobs import ensure_archive
-    archive_state = ensure_archive(store, "chiusure")
 
     q = (q or "").strip()
     ph = _ph()
@@ -7322,30 +7341,18 @@ def closures_page(request: Request, q: str = ""):
         sql += " ORDER BY store, closure_date DESC, id DESC" if store == "ALL" else " ORDER BY closure_date DESC, id DESC"
         rows = cur.execute(sql, tuple(params)).fetchall()
 
-    with connect() as digital_conn:
-        digital_rows = digital_conn.cursor().execute(f"SELECT * FROM digital_documents WHERE kind={_ph()}", ("chiusure",)).fetchall()
-        allowed_ids = {r['id'] for r in rows}
-        doc_summaries = {r['doc_id']:r for r in digital_rows if r['doc_id'] in allowed_ids}
-        for summary in doc_summaries.values():
-            summary['lines'] = json.loads(summary.get('lines_json') or '[]')
-        jobs_sql = f"SELECT * FROM document_ai_jobs WHERE kind={_ph()}"
-        jobs = digital_conn.cursor().execute(jobs_sql, ('chiusure',)).fetchall()
-        job_map = {r['doc_id']:r for r in jobs if r['doc_id'] in allowed_ids}
     active_store = request.session.get("active_store") if is_admin(request) else None
-    return render("closures.html", user=user, rows=rows, doc_summaries=doc_summaries, archive_state=archive_state, job_map=job_map, q=q, stores=STORES, brand=brand, active_store=active_store)
+    return render("closures.html", user=user, rows=rows, q=q, stores=STORES, brand=brand, active_store=active_store)
 
 
 @app.post("/chiusure/upload")
-async def closures_upload(request: Request, closure_date: str = Form(""), files: list[UploadFile] = File(...)):
+async def closures_upload(request: Request, closure_date: str = Form(...), files: list[UploadFile] = File(...)):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
     store = _effective_store(request, user)
-    if store not in STORES:
-        raise HTTPException(422, "Seleziona un singolo negozio prima di caricare documenti.")
 
-    closure_date = closure_date or _today_str()
     pdfs: list[bytes] = []
     base_name = "chiusura"
     for f in files:
@@ -7375,10 +7382,9 @@ async def closures_upload(request: Request, closure_date: str = Form(""), files:
     with connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            f"INSERT INTO closures(store, closure_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{now},{ph},{ph},{ph}) RETURNING id",
+            f"INSERT INTO closures(store, closure_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{now},{ph},{ph},{ph})",
             (store, closure_date, user["username"], filename, content_type, content),
         )
-        new_doc_id = cur.fetchone()["id"]
         _log(
             cur,
             store=store,
@@ -7389,9 +7395,7 @@ async def closures_upload(request: Request, closure_date: str = Form(""), files:
             delta=0.0,
         )
 
-    from .document_jobs import enqueue
-    enqueue("chiusure", new_doc_id, store, user["username"])
-    return RedirectResponse(f"/documenti/chiusure/{new_doc_id}", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse("/chiusure", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/chiusure/{doc_id}")
@@ -7432,9 +7436,6 @@ def closures_delete(request: Request, doc_id: int):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-
-    if not is_admin(request):
-        return PlainTextResponse("Solo amministratore", status_code=403)
 
     store = _effective_store(request, user)
     ph = _ph()
@@ -7504,25 +7505,18 @@ def secondary_expenses_page(request: Request, q: str = ""):
         sql += " ORDER BY store, expense_date DESC, id DESC" if store == "ALL" else " ORDER BY expense_date DESC, id DESC"
         rows = cur.execute(sql, tuple(params)).fetchall()
 
-    with connect() as digital_conn:
-        digital_rows = digital_conn.cursor().execute(f"SELECT * FROM digital_documents WHERE kind={_ph()}", ("spese-secondarie",)).fetchall()
-        allowed_ids = {r['id'] for r in rows}
-        doc_summaries = {r['doc_id']:r for r in digital_rows if r['doc_id'] in allowed_ids}
     active_store = request.session.get("active_store") if is_admin(request) else None
-    return render("secondary_expenses.html", user=user, rows=rows, doc_summaries=doc_summaries, q=q, stores=STORES, brand=brand, active_store=active_store)
+    return render("secondary_expenses.html", user=user, rows=rows, q=q, stores=STORES, brand=brand, active_store=active_store)
 
 
 @app.post("/spese-secondarie/upload")
-async def secondary_expenses_upload(request: Request, expense_date: str = Form(""), files: list[UploadFile] = File(...)):
+async def secondary_expenses_upload(request: Request, expense_date: str = Form(...), files: list[UploadFile] = File(...)):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
     store = _effective_store(request, user)
-    if store not in STORES:
-        raise HTTPException(422, "Seleziona un singolo negozio prima di caricare documenti.")
 
-    expense_date = expense_date or _today_str()
     pdfs: list[bytes] = []
     base_name = "spesa"
     for f in files:
@@ -7550,10 +7544,9 @@ async def secondary_expenses_upload(request: Request, expense_date: str = Form("
     with connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            f"INSERT INTO secondary_expenses(store, expense_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{now},{ph},{ph},{ph}) RETURNING id",
+            f"INSERT INTO secondary_expenses(store, expense_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{now},{ph},{ph},{ph})",
             (store, expense_date, user["username"], filename, content_type, content),
         )
-        new_doc_id = cur.fetchone()["id"]
         _log(
             cur,
             store=store,
@@ -7564,9 +7557,7 @@ async def secondary_expenses_upload(request: Request, expense_date: str = Form("
             delta=0.0,
         )
 
-    from .document_jobs import enqueue
-    enqueue("spese-secondarie", new_doc_id, store, user["username"])
-    return RedirectResponse(f"/documenti/spese-secondarie/{new_doc_id}", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse("/spese-secondarie", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/spese-secondarie/{doc_id}")
@@ -7607,9 +7598,6 @@ def secondary_expenses_delete(request: Request, doc_id: int):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-
-    if not is_admin(request):
-        return PlainTextResponse("Solo amministratore", status_code=403)
 
     store = _effective_store(request, user)
     ph = _ph()
@@ -7655,12 +7643,6 @@ def orders_add_from_inventory(request: Request, item_id: int = Form(...), next_u
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
     store = _effective_store(request, user)
-    if store == "ALL" and is_admin(request):
-        with connect() as lookup:
-            found = lookup.cursor().execute(f"SELECT store FROM products WHERE id={_ph()}", (item_id,)).fetchone()
-        if not found:
-            return PlainTextResponse("Prodotto non trovato", status_code=404)
-        store = found["store"]
     ph = _ph()
     now = _now()
 
@@ -7720,12 +7702,6 @@ def orders_add_from_inventory_with_qty(
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
     store = _effective_store(request, user)
-    if store == "ALL" and is_admin(request):
-        with connect() as lookup:
-            found = lookup.cursor().execute(f"SELECT store FROM products WHERE id={_ph()}", (item_id,)).fetchone()
-        if not found:
-            return PlainTextResponse("Prodotto non trovato", status_code=404)
-        store = found["store"]
     if qty_to_order is None:
         return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
@@ -7930,8 +7906,92 @@ def orders_queue_delete(request: Request, queue_id: int = Form(...)):
 
 @app.post("/ordini/confirm")
 def orders_confirm(request: Request, supplier: str = Form(...), queue_ids: list[int] = Form(None)):
-    from .order_service import confirm_order
-    return confirm_order(request, supplier, queue_ids, globals())
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    if not is_admin(request):
+        return RedirectResponse("/ordini", status_code=HTTP_303_SEE_OTHER)
+    supplier = (supplier or "").strip()
+    if not supplier:
+        return RedirectResponse("/ordini", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    ph = _ph()
+    now = _now()
+
+    # niente selezione => niente
+    if not queue_ids:
+        return RedirectResponse("/ordini", status_code=HTTP_303_SEE_OTHER)
+
+    with connect() as conn:
+        cur = conn.cursor()
+
+        # carico righe selezionate rispettando lo store corrente
+        if is_admin(request):
+            placeholders = ",".join([ph] * len(queue_ids))
+            sel = cur.execute(
+                f"SELECT id, store, product_id, category, name, qty_to_order FROM order_queue WHERE id IN ({placeholders})",
+                tuple(int(x) for x in queue_ids),
+            ).fetchall()
+            # in ALL, se selezioni righe di store diversi, creo un ordine per ogni store
+            by_store = {}
+            for r in sel:
+                by_store.setdefault(r["store"], []).append(r)
+        else:
+            placeholders = ",".join([ph] * len(queue_ids))
+            sel = cur.execute(
+                f"SELECT id, store, product_id, category, name, qty_to_order FROM order_queue WHERE store={ph} AND id IN ({placeholders})",
+                (store, *[int(x) for x in queue_ids]),
+            ).fetchall()
+            by_store = {store: sel}
+
+        for st, items in by_store.items():
+            if not items:
+                continue
+            # Non mischiare prodotti di fornitori diversi nello stesso ordine.
+            check_ids = [int(x["product_id"]) for x in items]
+            product_suppliers = cur.execute(
+                f"SELECT id, COALESCE(supplier, '') AS supplier FROM products WHERE id IN ({','.join([ph] * len(check_ids))})",
+                tuple(check_ids),
+            ).fetchall()
+            mapping = {int(x["id"]): (x["supplier"] or "").strip() for x in product_suppliers}
+            if any(mapping.get(int(x["product_id"]), "") != supplier for x in items):
+                continue
+            # crea ordine
+            cur.execute(
+                f"INSERT INTO orders(store, supplier, status, created_by, ts) VALUES({ph},{ph},{ph},{ph},{now}) RETURNING id" if using_postgres() else
+                f"INSERT INTO orders(store, supplier, status, created_by, ts) VALUES({ph},{ph},{ph},{ph},{now})",
+                (st, supplier, "in_corso", user["username"]),
+            )
+            if using_postgres():
+                order_id = cur.fetchone()["id"]
+            else:
+                order_id = cur.lastrowid
+
+            # LOG: ordine confermato (ordinato)
+            _log(
+                cur,
+                store=st,
+                username=user["username"],
+                action="ORDER_ORDINATO",
+                category=supplier,
+                name=f"Ordine #{order_id} ({len(items)} righe)",
+                delta=float(len(items)),
+            )
+
+            # inserisce linee + rimuove dalla coda
+            for r in items:
+                cur.execute(
+                    f"INSERT INTO order_lines(order_id, product_id, category, name, qty) VALUES({ph},{ph},{ph},{ph},{ph})",
+                    (int(order_id), int(r["product_id"]), r["category"], r["name"], float(r["qty_to_order"])),
+                )
+                cur.execute(
+                    f"DELETE FROM order_queue WHERE id={ph}",
+                    (int(r["id"]),),
+                )
+
+    return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/ordinati", response_class=HTMLResponse)
@@ -7987,12 +8047,237 @@ def orders_in_progress_page(request: Request):
 
 @app.post("/ordinati/arrivato")
 async def orders_mark_arrived(request: Request, order_id: int = Form(...)):
-    from .order_service import receive_order
-    return await receive_order(request, order_id, globals())
+    """Conferma arrivo: aggiorna inventario (+ quantità ricevute), gestisce mancanti e chiude l'ordine."""
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    store = _effective_store(request, user)
+    ph = _ph()
+
+    delivered_date = _today_str()
+
+    with connect() as conn:
+        cur = conn.cursor()
+
+        # carico ordine + store reale
+        if store == "ALL" and is_admin(request):
+            info = cur.execute(
+                f"SELECT store, supplier, ts, kind, from_store, to_store, transfer_id FROM orders WHERE id={ph} AND status='in_corso'",
+                (int(order_id),),
+            ).fetchone()
+        else:
+            info = cur.execute(
+                f"SELECT store, supplier, ts, kind, from_store, to_store, transfer_id FROM orders WHERE id={ph} AND status='in_corso' AND store={ph}",
+                (int(order_id), store),
+            ).fetchone()
+
+        if not info:
+            return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
+
+        real_store = info["store"]
+        supplier = info["supplier"]
+        order_ts = str(info.get("ts") or "")
+        order_date = order_ts[:10] if len(order_ts) >= 10 else delivered_date
+
+        lines = cur.execute(
+            f"SELECT id, product_id, category, name, qty, area, unit FROM order_lines WHERE order_id={ph}",
+            (int(order_id),),
+        ).fetchall()
+
+        form = await request.form()
+        missing_ids = set()
+        try:
+            missing_ids = {int(x) for x in form.getlist("missing_ids")}
+        except Exception:
+            missing_ids = set()
+
+        now = _now()
+
+        kind = str(info.get("kind") or "ordine").lower()
+        is_transfer = kind in ("transfer", "scambio")
+        src_store = info.get("from_store")
+        dst_store = info.get("to_store")
+
+        for ln in lines:
+            lid = int(ln["id"])
+            pid = ln.get("product_id")
+            base_qty = float(ln.get("qty") or 0)
+            cat = ln.get("category")
+            nm = ln.get("name")
+
+            # quantità ricevuta (default = quantità ordinata)
+            recv_key = f"received_{lid}"
+            recv_raw = form.get(recv_key)
+            try:
+                received_qty = float(recv_raw) if recv_raw is not None else base_qty
+            except Exception:
+                received_qty = base_qty
+            if received_qty < 0:
+                received_qty = 0.0
+
+            is_missing = lid in missing_ids
+            # salvo esito riga (storico)
+            try:
+                cur.execute(
+                    f"UPDATE order_lines SET received_qty={ph}, is_missing={ph} WHERE id={ph}",
+                    (float(received_qty), 1 if is_missing else 0, int(lid)),
+                )
+            except Exception:
+                # non bloccare la consegna se la migrazione non è ancora stata applicata
+                pass
+            if is_missing or received_qty == 0:
+                if is_transfer:
+                    # Scambio: NON reinserisco in "ordini da fare" e non segno mancanti sul prodotto.
+
+                    _log(
+                        cur,
+                        store=real_store,
+                        username=user["username"],
+                        action="TRANSFER_MANCANTE",
+                        category=cat,
+                        name=f"{nm} (scambio da {STORES.get(src_store, src_store)})" if src_store else f"{nm} (scambio)",
+                        delta=float(base_qty),
+                    )
+                else:
+                    # NON va in inventario: metto "mancante" + reinserisco in coda ordini
+                    if pid:
+                        cur.execute(
+                            f"UPDATE products SET missing_order_date={ph}, missing_delivery_date={ph}, missing_qty={ph}, updated_at={now} WHERE id={ph} AND store={ph}",
+                            (order_date, delivered_date, float(base_qty), int(pid), real_store),
+                        )
+
+                    # reinserisci/aggiorna in coda per riordino
+                    if pid:
+                        ex = cur.execute(
+                            f"SELECT id FROM order_queue WHERE store={ph} AND product_id={ph}",
+                            (real_store, int(pid)),
+                        ).fetchone()
+                        if ex:
+                            cur.execute(
+                                f"UPDATE order_queue SET qty_to_order={ph}, added_by={ph}, ts={now} WHERE id={ph}",
+                                (float(base_qty), user["username"], int(ex["id"])),
+                            )
+                        else:
+                            cur.execute(
+                                f"INSERT INTO order_queue(store, product_id, category, name, qty_to_order, added_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now})",
+                                (real_store, int(pid), cat, nm, float(base_qty), user["username"]),
+                            )
+
+                    _log(
+                        cur,
+                        store=real_store,
+                        username=user["username"],
+                        action="ORDER_MANCANTE",
+                        category=cat,
+                        name=f"{nm} (ordine {order_date})",
+                        delta=float(base_qty),
+                    )
+            else:
+                # Va in inventario
+                line_area = (ln.get("area") or (get_selected_area(request) or "prodotti") or "prodotti")
+                if line_area not in AREAS:
+                    line_area = "prodotti"
+                line_unit = (ln.get("unit") or "").strip()
+
+                if pid:
+                    cur.execute(
+                        f"UPDATE products SET qty=qty+{ph}, missing_order_date=NULL, missing_delivery_date=NULL, missing_qty={ph}, updated_at={now} WHERE id={ph} AND store={ph}",
+                        (float(received_qty), 0.0, int(pid), real_store),
+                    )
+                else:
+                    # Ordine senza product_id (es. scambio): cerco per nome/categoria/area e se non esiste lo creo.
+                    existing = cur.execute(
+                        f"SELECT id, unit FROM products WHERE store={ph} AND category={ph} AND name={ph} AND area={ph}",
+                        (real_store, cat, nm, line_area),
+                    ).fetchone()
+                    if existing:
+                        cur.execute(
+                            f"UPDATE products SET qty=qty+{ph}, unit=COALESCE(NULLIF(unit,''), {ph}), updated_at={now} WHERE id={ph} AND store={ph}",
+                            (float(received_qty), line_unit, int(existing["id"]), real_store),
+                        )
+                    else:
+                        cur.execute(
+                            f"INSERT INTO products(store, category, name, area, location, unit, qty, min_qty, updated_at) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{now})",
+                            (real_store, cat, nm, line_area, line_unit, float(received_qty), 0.0),
+                        )
+                # --- SCAMBIO: aggiorno il mittente SOLO alla conferma del ricevente ---
+                if is_transfer and src_store and dst_store and src_store in STORES and dst_store in STORES:
+                    src_prod = cur.execute(
+                        f"SELECT id, qty FROM products WHERE store={ph} AND category={ph} AND name={ph} AND area={ph}",
+                        (src_store, cat, nm, line_area),
+                    ).fetchone()
+                    if src_prod:
+                        avail_src = float(src_prod.get("qty") or 0)
+                        new_qty = max(0.0, avail_src - float(received_qty))
+                        cur.execute(
+                            f"UPDATE products SET qty={ph}, updated_at={now} WHERE id={ph} AND store={ph}",
+                            (new_qty, int(src_prod["id"]), src_store),
+                        )
+                        _log(
+                            cur,
+                            store=src_store,
+                            username=user["username"],
+                            action="TRANSFER_OUT_CONFERMATO",
+                            category=cat,
+                            name=f"{nm} → {STORES.get(dst_store, dst_store)} (confermato)",
+                            delta=-float(received_qty),
+                        )
+                        if avail_src < float(received_qty):
+                            _log(
+                                cur,
+                                store=src_store,
+                                username=user["username"],
+                                action="TRANSFER_WARNING",
+                                category=cat,
+                                name=f"{nm}: richiesto/scaricato {received_qty} ma disponibili {avail_src}",
+                                delta=0.0,
+                            )
+                    else:
+                        _log(
+                            cur,
+                            store=src_store,
+                            username=user["username"],
+                            action="TRANSFER_WARNING",
+                            category=cat,
+                            name=f"{nm}: prodotto non trovato nel negozio sorgente (scambio confermato)",
+                            delta=0.0,
+                        )
+
+
+
+                _log(
+                    cur,
+                    store=real_store,
+                    username=user["username"],
+                    action=("TRANSFER_CARICATO_INVENTARIO" if is_transfer else "ORDER_CARICATO_INVENTARIO"),
+                    category=cat,
+                    name=nm,
+                    delta=float(received_qty),
+                )
+
+
+        # chiudo ordine (NON cancellare: serve lo storico)
+        cur.execute(
+            f"UPDATE orders SET status='chiuso', closed_at={now} WHERE id={ph}",
+            (int(order_id),),
+        )
+
+        _log(
+            cur,
+            store=real_store,
+            username=user["username"],
+            action=("TRANSFER_ARRIVATO" if is_transfer else "ORDER_ARRIVATO"),
+            category=supplier,
+            name=(f"Scambio #{int(order_id)} ricevuto ({delivered_date})" if is_transfer else f"Ordine #{int(order_id)} arrivato ({delivered_date})"),
+            delta=0.0,
+        )
+
+    return RedirectResponse("/ordinati", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/storico-ordini", response_class=HTMLResponse)
-def orders_history_page(request: Request, kind: str = "", start: str = "", end: str = ""):
+def orders_history_page(request: Request, kind: str = ""):
     """Storico (archivio) di ordini e scambi."""
     user = require_login(request)
     if not user:
@@ -8019,20 +8304,9 @@ def orders_history_page(request: Request, kind: str = "", start: str = "", end: 
             params.extend([store, store])
 
         if kind:
-            where += (f" AND COALESCE(kind,'ordine')={ph}" if kind == "ordine" else f" AND kind IN ({ph},'scambio')")
+            where += f" AND kind={ph}"
             params.append(kind)
 
-        from .control import iso
-        if start:
-            start = iso(start)
-            where += f" AND SUBSTR(CAST(COALESCE(closed_at,ts) AS TEXT),1,10)>={ph}"
-            params.append(start)
-        if end:
-            end = iso(end)
-            where += f" AND SUBSTR(CAST(COALESCE(closed_at,ts) AS TEXT),1,10)<={ph}"
-            params.append(end)
-        if start and end and start > end:
-            raise HTTPException(422,"La data iniziale deve precedere quella finale.")
         rows = cur.execute(
             f"""
             SELECT id, store, supplier, status, created_by, ts, kind, from_store, to_store, transfer_id, closed_at
@@ -8064,8 +8338,6 @@ def orders_history_page(request: Request, kind: str = "", start: str = "", end: 
         user=user,
         orders=orders,
         kind=kind,
-        start=start,
-        end=end,
         stores=STORES,
         areas=AREAS,
         brand=brand,
@@ -8107,7 +8379,7 @@ def transfers_page(request: Request, from_store: str = "", to_store: str = ""):
     with connect() as conn:
         cur = conn.cursor()
         products = cur.execute(
-            f"SELECT id, category, name, location, qty, unit FROM products WHERE store={ph} AND area={ph} ORDER BY category, name, location",
+            f"SELECT id, category, name, qty, unit FROM products WHERE store={ph} AND area={ph} ORDER BY category, name",
             (from_store, area),
         ).fetchall()
 
@@ -8158,20 +8430,19 @@ def transfers_edit_page(request: Request, order_id: int):
 
         # Carico tutti i prodotti del negozio sorgente (tutte le aree) per poter aggiungere righe liberamente
         products = cur.execute(
-            f"SELECT id, category, name, area, location, qty, unit FROM products WHERE store={ph} ORDER BY area, category, name",
+            f"SELECT id, category, name, area, qty, unit FROM products WHERE store={ph} ORDER BY area, category, name",
             (from_store,),
         ).fetchall()
 
         selected = {}
-        tls = cur.execute(f"SELECT category,name,area,qty,source_product_id FROM order_lines WHERE order_id={ph}", (order_id,)).fetchall()
-        for tl in tls:
-            pid = tl.get("source_product_id")
-            if pid:
-                selected[int(pid)] = selected.get(int(pid), 0) + float(tl.get("qty") or 0)
-            else:
-                matches = [p for p in products if p['category']==tl['category'] and p['name']==tl['name'] and p['area']==(tl.get('area') or 'prodotti')]
-                if len(matches)==1:
-                    selected[matches[0]['id']] = float(tl.get('qty') or 0)
+        if transfer_id:
+            tls = cur.execute(
+                f"SELECT category, name, area, qty FROM transfer_lines WHERE transfer_id={ph}",
+                (int(transfer_id),),
+            ).fetchall()
+            for tl in tls:
+                k = f"{tl['category']}||{tl['name']}||{(tl.get('area') or 'prodotti')}"
+                selected[k] = float(tl.get("qty") or 0)
 
     return render(
         "transfers_edit.html",
@@ -8201,11 +8472,9 @@ async def transfers_edit_submit(request: Request, order_id: int = Form(...)):
     form = await request.form()
 
     with connect() as conn:
-        from .control import lock, suffix
-        lock(conn)
         cur = conn.cursor()
         o = cur.execute(
-            f"SELECT id, store, kind, status, from_store, to_store, transfer_id FROM orders WHERE id={ph}" + suffix(),
+            f"SELECT id, store, kind, status, from_store, to_store, transfer_id FROM orders WHERE id={ph}",
             (int(order_id),),
         ).fetchone()
         if not o:
@@ -8265,12 +8534,10 @@ async def transfers_edit_submit(request: Request, order_id: int = Form(...)):
 
             # righe ordine (per negozio ricevente)
             cur.execute(
-                f"INSERT INTO order_lines(order_id, product_id, category, name, qty, area, unit, source_product_id) VALUES({ph},NULL,{ph},{ph},{ph},{ph},{ph},{ph})",
-                (int(order_id), src["category"], src["name"], float(qty_move), (src.get("area") or "prodotti"), (src.get("unit") or ""), int(src["id"])),
+                f"INSERT INTO order_lines(order_id, product_id, category, name, qty, area, unit) VALUES({ph},NULL,{ph},{ph},{ph},{ph},{ph})",
+                (int(order_id), src["category"], src["name"], float(qty_move), (src.get("area") or "prodotti"), (src.get("unit") or "")),
             )
 
-        if not cur.execute(f"SELECT id FROM order_lines WHERE order_id={ph}", (order_id,)).fetchone():
-            raise HTTPException(422, "Lo scambio deve contenere almeno un prodotto disponibile.")
         # aggiorno timestamp ordine (così sale in cima)
         try:
             cur.execute(f"UPDATE orders SET ts={now} WHERE id={ph}", (int(order_id),))
@@ -8395,8 +8662,8 @@ async def transfers_submit(request: Request):
 
             # righe "ordine" per ricevente
             cur.execute(
-                f"INSERT INTO order_lines(order_id, product_id, category, name, qty, area, unit, source_product_id) VALUES({ph},NULL,{ph},{ph},{ph},{ph},{ph},{ph})",
-                (int(order_id), src["category"], src["name"], float(qty_move), (src.get("area") or area), (src.get("unit") or ""), int(src["id"])),
+                f"INSERT INTO order_lines(order_id, product_id, category, name, qty, area, unit) VALUES({ph},NULL,{ph},{ph},{ph},{ph},{ph})",
+                (int(order_id), src["category"], src["name"], float(qty_move), (src.get("area") or area), (src.get("unit") or "")),
             )
 
             _log(
@@ -8417,9 +8684,6 @@ async def transfers_submit(request: Request):
                 name=f"{src['name']} ← {STORES.get(from_store, from_store)}",
                 delta=0.0,
             )
-        if not cur.execute(f"SELECT id FROM order_lines WHERE order_id={ph}", (order_id,)).fetchone():
-            raise HTTPException(422, "Nessuna riga disponibile per questo scambio.")
-
     return RedirectResponse(f"/scambi?from_store={from_store}&to_store={to_store}", status_code=HTTP_303_SEE_OTHER)
 
 
@@ -8455,27 +8719,18 @@ def invoices_page(request: Request, supplier: str = "", q_date: str = ""):
         sql += " ORDER BY store, doc_date DESC, id DESC" if store == "ALL" else " ORDER BY doc_date DESC, id DESC"
         rows = cur.execute(sql, tuple(params)).fetchall()
 
-    with connect() as digital_conn:
-        digital_rows = digital_conn.cursor().execute(f"SELECT * FROM digital_documents WHERE kind={_ph()}", ("fatture",)).fetchall()
-        allowed_ids = {r['id'] for r in rows}
-        doc_summaries = {r['doc_id']:r for r in digital_rows if r['doc_id'] in allowed_ids}
     active_store = request.session.get("active_store") if is_admin(request) else None
-    return render("invoices.html", user=user, rows=rows, doc_summaries=doc_summaries, supplier=supplier, q_date=q_date, stores=STORES, brand=brand, active_store=active_store)
+    return render("invoices.html", user=user, rows=rows, supplier=supplier, q_date=q_date, stores=STORES, brand=brand, active_store=active_store)
 
 
 @app.post("/fatture/upload")
-async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: str = Form(""), files: list[UploadFile] = File(...)):
+async def invoices_upload(request: Request, supplier: str = Form(...), doc_date: str = Form(...), files: list[UploadFile] = File(...)):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
     store = _effective_store(request, user)
-    if store not in STORES:
-        raise HTTPException(422, "Seleziona un singolo negozio prima di caricare documenti.")
 
-    from .control import iso
-    doc_date = iso(doc_date or _today_str())
-    doc_date = doc_date or _today_str()
     pdfs: list[bytes] = []
     base_name = "fattura"
     for f in files:
@@ -8499,10 +8754,9 @@ async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: 
     with connect() as conn:
         cur = conn.cursor()
         cur.execute(
-            f"INSERT INTO invoices_docs(store, supplier, doc_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{ph},{now},{ph},{ph},{ph}) RETURNING id",
+            f"INSERT INTO invoices_docs(store, supplier, doc_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{ph},{now},{ph},{ph},{ph})",
             (store, supplier, doc_date, user["username"], filename, content_type, content),
         )
-        new_doc_id = cur.fetchone()["id"]
         _log(
             cur,
             store=store,
@@ -8513,10 +8767,12 @@ async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: 
             delta=0.0,
         )
 
-    from .document_jobs import enqueue
-    enqueue("fatture", new_doc_id, store, user["username"])
-    return RedirectResponse(f"/documenti/fatture/{new_doc_id}", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
 
+
+# =========================
+# IMPORT PRODOTTI DA FOTO FATTURA (GUIDATO)
+# =========================
 
 @app.get("/fatture/importa-prodotti", response_class=HTMLResponse)
 def invoice_import_upload_page(request: Request):
@@ -8525,9 +8781,6 @@ def invoice_import_upload_page(request: Request):
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
     default_area = get_selected_area(request) or "prodotti"
-    if not is_admin(request):
-        return PlainTextResponse("Solo amministratore", status_code=403)
-
     store = _effective_store(request, user)
     return render(
         "invoice_import_upload.html",
@@ -8543,12 +8796,7 @@ async def invoice_import_upload(request: Request, supplier: str = Form(...), doc
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
-    if not is_admin(request):
-        return PlainTextResponse("Solo amministratore", status_code=403)
-
     store = _effective_store(request, user)
-    if store not in STORES:
-        raise HTTPException(422, "Seleziona un singolo negozio prima di caricare documenti.")
     supplier = (supplier or "").strip()
     area = (area or "prodotti").strip().lower()
     if area not in ("bibite", "prodotti"):
@@ -8574,7 +8822,7 @@ async def invoice_import_upload(request: Request, supplier: str = Form(...), doc
             f"INSERT INTO invoice_import_drafts(store, supplier, doc_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{ph},{now},{ph},{ph},{ph}) RETURNING id",
             (store, supplier, doc_date, user["username"], filename, content_type, content),
         )
-        draft_id = cur.fetchone()["id"]
+        draft_id = cur.fetchone()[0]
 
     # Salvo l'area in sessione (comodo)
     set_selected_area(request, area)
@@ -8587,9 +8835,6 @@ def invoice_import_draft_image(request: Request, draft_id: int):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    if not is_admin(request):
-        return PlainTextResponse("Solo amministratore", status_code=403)
-
     store = _effective_store(request, user)
     ph = _ph()
     with connect() as conn:
@@ -8610,9 +8855,6 @@ def invoice_import_review_page(request: Request, draft_id: int, area: str = ""):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-
-    if not is_admin(request):
-        return PlainTextResponse("Solo amministratore", status_code=403)
 
     store = _effective_store(request, user)
     area = (area or get_selected_area(request) or "prodotti").strip().lower()
@@ -8660,9 +8902,6 @@ async def invoice_import_cancel(request: Request, draft_id: int):
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
-    if not is_admin(request):
-        return PlainTextResponse("Solo amministratore", status_code=403)
-
     store = _effective_store(request, user)
     ph = _ph()
     with connect() as conn:
@@ -8680,12 +8919,7 @@ async def invoice_import_confirm(request: Request, draft_id: int):
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
-    if not is_admin(request):
-        return PlainTextResponse("Solo amministratore", status_code=403)
-
     store = _effective_store(request, user)
-    if store not in STORES:
-        raise HTTPException(422, "Seleziona un singolo negozio prima di caricare documenti.")
     form = await request.form()
 
     supplier = str(form.get("supplier") or "").strip()
@@ -8728,14 +8962,14 @@ async def invoice_import_confirm(request: Request, draft_id: int):
             f"INSERT INTO invoices_docs(store, supplier, doc_date, uploaded_by, ts, filename, content_type, data) VALUES({ph},{ph},{ph},{ph},{now},{ph},{ph},{ph}) RETURNING id",
             (store, supplier or draft["supplier"], doc_date or str(draft["doc_date"]), user["username"], draft["filename"], draft["content_type"], draft["data"]),
         )
-        invoice_doc_id = cur.fetchone()["id"]
+        invoice_doc_id = cur.fetchone()[0]
 
         # 3) creo import
         cur.execute(
             f"INSERT INTO invoice_imports(store, invoice_doc_id, supplier, doc_date, area, created_by, ts) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{now}) RETURNING id",
             (store, invoice_doc_id, supplier or draft["supplier"], doc_date or str(draft["doc_date"]), area, user["username"]),
         )
-        import_id = cur.fetchone()["id"]
+        import_id = cur.fetchone()[0]
 
         # 4) applico righe: aggiorno/creo prodotti + scrivo log + salvo linee
         for i in range(len(raw_names)):
@@ -8746,8 +8980,8 @@ async def invoice_import_confirm(request: Request, draft_id: int):
                 q = float(str(qtys[i] or "0").replace(",", "."))
             except Exception:
                 q = 0.0
-            if not __import__("math").isfinite(q) or q <= 0:
-                raise HTTPException(422, "Inserisci quantità positive e finite per le righe fattura.")
+            if q == 0:
+                continue
             unit = str(units[i] or "").strip() if i < len(units) else ""
             cat = str(cats[i] or "").strip() or ("BEVERAGE" if area == "bibite" else "PRODOTTI")
             pid = str(prod_ids[i] or "").strip()
@@ -8763,11 +8997,9 @@ async def invoice_import_confirm(request: Request, draft_id: int):
                     product_id = None
                 if product_id:
                     rowp = cur.execute(
-                        f"SELECT id, category, name, qty FROM products WHERE id={ph} AND store={ph} AND area={ph}",
-                        (product_id, store, area),
+                        f"SELECT id, category, name, qty FROM products WHERE id={ph} AND store={ph}",
+                        (product_id, store),
                     ).fetchone()
-                    if not rowp:
-                        raise HTTPException(422, "Prodotto non disponibile in questo negozio e area.")
                     if rowp:
                         product_name = rowp["name"]
                         cur.execute(
@@ -8779,8 +9011,8 @@ async def invoice_import_confirm(request: Request, draft_id: int):
                 # unique index: (store, category, name)
                 # 1) prova select
                 rowx = cur.execute(
-                    f"SELECT id FROM products WHERE store={ph} AND category={ph} AND name={ph} AND area={ph} AND location='MAGAZZINO'",
-                    (store, cat, rn, area),
+                    f"SELECT id FROM products WHERE store={ph} AND category={ph} AND name={ph}",
+                    (store, cat, rn),
                 ).fetchone()
                 if rowx:
                     product_id = rowx["id"]
@@ -8793,7 +9025,7 @@ async def invoice_import_confirm(request: Request, draft_id: int):
                         f"INSERT INTO products(store, category, name, area, qty, min_qty, updated_at) VALUES({ph},{ph},{ph},{ph},{ph},{ph},{_now()}) RETURNING id",
                         (store, cat, rn, area, q, 0),
                     )
-                    product_id = cur.fetchone()["id"]
+                    product_id = cur.fetchone()[0]
 
             # salva line
             cur.execute(
@@ -8854,9 +9086,6 @@ def invoices_delete(request: Request, doc_id: int):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-
-    if not is_admin(request):
-        return PlainTextResponse("Solo amministratore", status_code=403)
 
     store = _effective_store(request, user)
     ph = _ph()
@@ -8926,17 +9155,12 @@ def admin_order_preparation(request: Request):
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
     if not is_admin(request):
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
-    selected_store = _effective_store(request, user)
     with connect() as conn:
         cur = conn.cursor()
-        sql = """SELECT q.id,q.store,q.name,q.qty_to_order,q.category,
-            COALESCE(p.supplier,'') AS supplier,COALESCE(p.unit,'') AS unit
-            FROM order_queue q LEFT JOIN products p ON p.id=q.product_id AND p.store=q.store WHERE 1=1"""
-        params = []
-        if selected_store != 'ALL':
-            sql += f" AND q.store={_ph()}"
-            params.append(selected_store)
-        rows = cur.execute(sql + " ORDER BY q.store,p.supplier,q.name", tuple(params)).fetchall()
+        rows = cur.execute("""SELECT q.id, q.store, q.name, q.qty_to_order, q.category,
+                             COALESCE(p.supplier, '') AS supplier, COALESCE(p.unit, '') AS unit
+                             FROM order_queue q LEFT JOIN products p ON p.id=q.product_id
+                             ORDER BY q.store, p.supplier, q.name""").fetchall()
     groups = {}
     unassigned = []
     for row in rows:
@@ -8953,12 +9177,121 @@ def admin_order_preparation(request: Request):
             lines.append(f'- {item["name"]}: {qty} {item["unit"]}'.rstrip())
         lines.append("Grazie!")
         batches.append({"store":store,"supplier":supplier,"items":items,"message":"\n".join(lines)})
-    return render("order_preparation.html", user=user, batches=batches, unassigned=unassigned, stores=STORES, brand=selected_store, active_store=selected_store)
+    return render("order_preparation.html", user=user, batches=batches, unassigned=unassigned, stores=STORES, brand="ALL", active_store="ALL")
 
 
-# Additive document / inventory control routes.
-from .control import install as install_control
-install_control(app, globals())
+# =========================
+# DIGITALIZZAZIONE DOCUMENTI (con conferma umana)
+# =========================
+from .document_digitizer import extract_document
 
-from .pos_reports import install as install_pos_reports
-install_pos_reports(app, globals())
+_DOC_KINDS = {
+    'fatture': ('invoices_docs','/fatture'),
+    'chiusure': ('closures','/chiusure'),
+    'spese': ('secondary_expenses','/spese-secondarie'),
+}
+
+def _document_store(request, user):
+    store = _effective_store(request, user)
+    # Un admin in visione globale non può modificare un documento senza indicare negozio.
+    return store
+
+def _ensure_digitized_table(cur):
+    pk = 'SERIAL PRIMARY KEY' if using_postgres() else 'INTEGER PRIMARY KEY AUTOINCREMENT'
+    cur.execute(f"""CREATE TABLE IF NOT EXISTS document_digital_data (
+       id {pk}, kind TEXT NOT NULL, document_id INTEGER NOT NULL, store TEXT NOT NULL,
+       payload TEXT NOT NULL, reviewed INTEGER NOT NULL DEFAULT 0,
+       updated_at TEXT NOT NULL,
+       UNIQUE(kind, document_id, store))""")
+
+@app.get('/digitalizza/{kind}/{document_id}', response_class=HTMLResponse)
+def document_digital_page(request: Request, kind: str, document_id: int):
+    user = require_login(request)
+    if not user: return RedirectResponse('/', status_code=303)
+    if kind not in _DOC_KINDS: return PlainTextResponse('Documento non valido',status_code=404)
+    table, back = _DOC_KINDS[kind]
+    store = _document_store(request,user)
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        _ensure_digitized_table(cur)
+        if store == 'ALL':
+            if not is_admin(request): return RedirectResponse(back,status_code=303)
+            doc = cur.execute(f'SELECT id, store, data FROM {table} WHERE id={ph}',(document_id,)).fetchone()
+        else:
+            doc = cur.execute(f'SELECT id, store, data FROM {table} WHERE id={ph} AND store={ph}',(document_id,store)).fetchone()
+        if not doc: return PlainTextResponse('Documento non trovato',status_code=404)
+        digital = cur.execute(f'SELECT payload, reviewed FROM document_digital_data WHERE kind={ph} AND document_id={ph} AND store={ph}',(kind,document_id,doc['store'])).fetchone()
+    payload = json.loads(digital['payload']) if digital else None
+    return render('document_digital.html',kind=kind,document_id=document_id,back=back,payload=payload,reviewed=bool(digital['reviewed']) if digital else False, store=doc['store'], user=user, brand=doc['store'])
+
+@app.post('/digitalizza/{kind}/{document_id}/estrai')
+def document_digital_extract(request: Request,kind: str, document_id:int):
+    user=require_login(request)
+    if not user:return RedirectResponse('/',status_code=303)
+    if kind not in _DOC_KIN:return PlainTextResponse('Documento non valido',status_code=404)
+    table,back=_DOC_KINDS[kind]; store=_document_store(request,user); ph=_ph()
+    with connect() as conn:
+        cur=conn.cursor();_ensure_digitized_table(cur)
+        if store=='ALL':
+            if not is_admin(request):return RedirectResponse(back,status_code=303)
+            doc=cur.execute(f'SELECT store,data FROM {table} WHERE id={ph}',(document_id,)).fetchone()
+        else:doc=cur.execute(f'SELECT store,data FROM {table} WHERE id={ph} AND store={ph}',(document_id,store)).fetchone()
+    if not doc:return PlainTextResponse('Documento non trovato',status_code=404)
+    try:result=extract_document(bytes(doc['data']),kind)
+    except Exception as exc:return HTMLResponse('<h2>Impossibile elaborare il documento</h2><p>'+__import__('html').escape(str(exc))+'</p><a href="/digitalizza/'+kind+'/'+str(document_id)+'">Torna indietro</a>',status_code=422)
+    with connect() as conn:
+        cur=conn.cursor();_ensure_digitized_table(cur)
+        cur.execute(f'DELETE FROM document_digital_data WHERE kind={ph} AND document_id={ph} AND store={ph}',(kind,document_id,doc['store']))
+        cur.execute(f'INSERT INTO document_digital_data(kind,document_id,store,payload,reviewed,updated_at) VALUES({ph},{ph},{ph},{ph},0,{ph})',(kind,document_id,doc['store'],json.dumps(result,ensure_ascii=False),datetime.now().isoformat()))
+    return RedirectResponse(f'/digitalizza/{kind}/{document_id}',status_code=303)
+
+@app.post('/digitalizza/{kind}/{document_id}/salva')
+async def document_digital_save(request: Request, kind: str, document_id:int):
+    user=require_login(request)
+    if not user:return RedirectResponse('/',status_code=303)
+    if kind not in _DOC_KIN:return PlainTextResponse('Documento non valido',status_code=404)
+    form=await request.form()
+    try: lines=json.loads(str(form.get('righe_json','[]')))
+    except Exception:return PlainTextResponse('Righe non valide',status_code=400)
+    if not isinstance(lines,list) or len(lines)>500:return PlainTextResponse('Righe non valide',status_code=400)
+    cleaned=[]
+    for line in lines:
+        if not isinstance(line,dict):continue
+        cleaned.append({key:str(line.get(key,'') or '')[:300] for key in ('descrizione','quantita','prezzo_unitario','totale','iva')})
+    payload={key:str(form.get(key,'') or '')[:3000] for key in ('fornitore','numero_documento','data','totale','imponibile','iva','pagamento','note')}
+    payload['righe']=cleaned
+    payload['metodo']='Revisionato manualmente'
+    store=_document_store(request,user);table,back=_DOC_KINDS[kind];ph=_ph()
+    with connect() as conn:
+        cur=conn.cursor();_ensure_digitized_table(cur)
+        if store=='ALL':
+            if not is_admin(request):return RedirectResponse(back,status_code=303)
+            doc=cur.execute(f'SELECT store FROM {table} WHERE id={ph}',(document_id,)).fetchone()
+        else:doc=cur.execute(f'SELECT store FROM {table} WHERE id={ph} AND store={ph}',(document_id,store)).fetchone()
+        if not doc:return PlainTextResponse('Documento non trovato',status_code=404)
+        cur.execute(f'DELETE FROM document_digital_data WHERE kind={ph} AND document_id={ph} AND store={ph}',(kind,document_id,doc['store']))
+        cur.execute(f'INSERT INTO document_digital_data(kind,document_id,store,payload,reviewed,updated_at) VALUES({ph},{ph},{ph},{ph},1,{ph})',(kind,document_id,doc['store'],json.dumps(payload,ensure_ascii=False),datetime.now().isoformat()))
+    return RedirectResponse(f'/digitalizza/{kind}/{document_id}',status_code=303)
+
+@app.get('/digitalizza/{kind}/{document_id}/csv')
+def document_digital_csv(request: Request,kind:str,document_id:int):
+    user=require_login(request)
+    if not user:return RedirectResponse('/',status_code=303)
+    if kind not in _DOC_KIN:return PlainTextResponse('Documento non valido',status_code=404)
+    store=_document_store(request,user);ph=_ph()
+    with connect() as conn:
+        cur=conn.cursor();_ensure_digitized_table(cur)
+        if store=='ALL':
+            if not is_admin(request):return PlainTextResponse('Accesso negato',status_code=403)
+            doc=cur.execute(f'SELECT d.payload FROM document_digital_data d JOIN {_DOC_KINDS[kind][0]} s ON s.id=d.document_id AND s.store=d.store WHERE d.kind={ph} AND d.document_id={ph}',(kind,document_id)).fetchone()
+        else:doc=cur.execute(f'SELECT payload FROM document_digital_data WHERE kind={ph} AND document_id={ph} AND store={ph}',(kind,document_id,store)).fetchone()
+    if not doc:return PlainTextResponse('Dati digitali mancanti',status_code=404)
+    data=json.loads(doc['payload']);output=io.StringIO();writer=csv.writer(output,delimiter=';')
+    writer.writerow(['Fornitore','Numero documento','Data','Totale documento','Descrizione','Quantità','Prezzo unitario','Totale riga','IVA'])
+    for row in data.get('righe',[]):
+        def safe(v):
+            v=str(v or '')
+            return "'"+v if v.lstrip().startswith(('=','+','-','@')) else v
+        writer.writerow([safe(data.get(k)) for k in ('fornitore','numero_documento','data','totale')]+[safe(row.get(k)) for k in ('descrizione','quantita','prezzo_unitario','totale','iva')])
+    return Response(content='\ufeff'+output.getvalue(),media_type='text/csv; charset=utf-8',headers={'Content-Disposition':f'attachment; filename="{kind}_{document_id}.csv"'})

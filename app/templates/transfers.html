@@ -3,7 +3,7 @@
 {% block content %}
   <div class="card" style="margin-bottom:12px;">
     <h2 style="margin:0 0 6px 0;">🔁 Scambi tra negozi</h2>
-    <div class="muted">Sposta quantità da un negozio ad un altro: seleziona sorgente/destinazione, poi inserisci le quantità da trasferire. Le quantità vengono scalate dalla posizione sorgente e aggiunte al magazzino del destinatario solo quando il ricevente conferma l’arrivo.</div>
+    <div class="muted">Sposta quantità da un negozio ad un altro: seleziona sorgente/destinazione, poi inserisci le quantità da trasferire. Le quantità vengono scalate dalla sorgente e aggiunte alla destinazione.</div>
   </div>
 
   <div class="card" style="margin-bottom:12px;">
@@ -52,13 +52,13 @@
             {% for p in products %}
               <tr data-search="{{ (p.category ~ ' ' ~ p.name)|lower }}">
                 <td><span class="pill">{{ p.category }}</span></td>
-                <td><strong>{{ p.name }}</strong> <span class="pill">{{ p.location }}</span> {% if p.unit %}<span class="muted">({{ p.unit }})</span>{% endif %}</td>
+                <td><strong>{{ p.name }}</strong> {% if p.unit %}<span class="muted">({{ p.unit }})</span>{% endif %}</td>
                 <td>
                   {{ "%.2f"|format(p.qty) }}
                   <div class="muted total-auto" data-qty="{{ p.qty }}" data-unit="{{ p.unit or '' }}"></div>
                 </td>
                 <td>
-                  <input class="mini" name="qty_{{ p.id }}" type="number" min="0" max="{{ p.qty }}" step="any" inputmode="decimal" placeholder="0" style="width:140px;" />
+                  <input class="mini" name="qty_{{ p.id }}" type="number" step="0.01" inputmode="decimal" placeholder="0" style="width:140px;" />
                 </td>
               </tr>
             {% endfor %}

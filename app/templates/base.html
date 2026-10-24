@@ -335,7 +335,7 @@
         <div class="nav-dd-panel">
           <a href="/gestionale">📊 Dashboard gestionale</a>
           {% if user.role == 'admin' %}
-            <a href="/admin/controllo">Centro di controllo</a><a href="/admin/cassa">Carica CSV cassa</a><a href="/admin/cassa/report">Vendite e consumi</a><a href="/admin/digitalizzazione">Digitalizzazione archivio</a><a href="/report-documenti">Report documenti</a><a href="/gestionale/incassi">💶 Incassi</a>
+            <a href="/gestionale/incassi">💶 Incassi</a>
             <a href="/gestionale/uscite">💸 Uscite</a>
             <a href="/gestionale/storico-mensile">🗓️ Storico mensile</a>
             <a href="/gestionale/report-vendite">📈 Report vendite</a>
@@ -350,7 +350,7 @@
       <details class="nav-dd" id="navInventario">
         <summary class="pill" style="text-decoration:none;color:var(--text)">📦 Inventario</summary>
         <div class="nav-dd-panel">
-          <a href="/inventario-controllo?area=bibite">Conteggi e movimenti sala</a><a href="/inventario-controllo?area=prodotti">Conteggi cucina</a><a href="/select-area?area=bibite">🥤 Bibite</a>
+          <a href="/select-area?area=bibite">🥤 Bibite</a>
           <a href="/select-area?area=prodotti">🍽️ Prodotti</a>
           <a href="/ordini">🚚 Ordini da fare</a>
           {% if user and (user.role == "admin" or user.get("role") == "admin") %}<a href="/ordini/preparazione">📋 Preparazione fornitori</a>{% endif %}
@@ -400,7 +400,7 @@
       <div class="sub">
         <a href="/gestionale" onclick="closeMobileMenu()">📊 Dashboard gestionale</a>
         {% if user.role == 'admin' %}
-          <a href="/admin/controllo">Centro di controllo</a><a href="/admin/cassa">Carica CSV cassa</a><a href="/admin/cassa/report">Vendite e consumi</a><a href="/admin/digitalizzazione">Digitalizzazione archivio</a><a href="/report-documenti">Report documenti</a><a href="/gestionale/incassi" onclick="closeMobileMenu()">💶 Incassi</a>
+          <a href="/gestionale/incassi" onclick="closeMobileMenu()">💶 Incassi</a>
           <a href="/gestionale/uscite" onclick="closeMobileMenu()">💸 Uscite</a>
           <a href="/gestionale/storico-mensile" onclick="closeMobileMenu()">🗓️ Storico mensile</a>
           <a href="/gestionale/report-vendite" onclick="closeMobileMenu()">📈 Report vendite</a>
@@ -414,7 +414,7 @@
 
       <div class="section">Inventario</div>
       <div class="sub">
-        <a href="/inventario-controllo?area=bibite">Conteggi e movimenti sala</a><a href="/inventario-controllo?area=prodotti">Conteggi cucina</a><a href="/select-area?area=bibite" onclick="closeMobileMenu()">🥤 Bibite</a>
+        <a href="/select-area?area=bibite" onclick="closeMobileMenu()">🥤 Bibite</a>
         <a href="/select-area?area=prodotti" onclick="closeMobileMenu()">🍽️ Prodotti</a>
         <a href="/ordini" onclick="closeMobileMenu()">🚚 Ordini da fare</a>
         {% if user and (user.role == "admin" or user.get("role") == "admin") %}<a href="/ordini/preparazione" onclick="closeMobileMenu()">📋 Preparazione fornitori</a>{% endif %}
