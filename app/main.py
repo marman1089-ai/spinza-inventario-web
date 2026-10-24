@@ -9155,17 +9155,17 @@ def _ensure_inventory_report_tables():
     pk = "BIGSERIAL PRIMARY KEY" if using_postgres() else "INTEGER PRIMARY KEY AUTOINCREMENT"
     with connect() as conn:
         cur=conn.cursor()
-        cur.execute(f"""CREATE TABLE IF NOT EXISTS stock_count_headers (
+        cur.execute(f"""CREATE TABLE IF NOT EXISTS inventory_period_count_headers (
             id {pk}, store TEXT NOT NULL, area TEXT NOT NULL,
             counted_at TEXT NOT NULL, username TEXT NOT NULL,
             created_at TEXT NOT NULL)""")
-        cur.execute(f"""CREATE TABLE IF NOT EXISTS stock_count_lines (
+        cur.execute(f"""CREATE TABLE IF NOT EXISTS inventory_period_count_lines (
             id {pk}, count_id BIGINT NOT NULL, product_id BIGINT NOT NULL,
             category TEXT NOT NULL, name TEXT NOT NULL, unit TEXT NOT NULL,
             observed DOUBLE PRECISION NOT NULL, previous DOUBLE PRECISION,
             received DOUBLE PRECISION, outgoing DOUBLE PRECISION)""")
-        cur.execute("CREATE INDEX IF NOT EXISTS ix_stock_counts_lookup ON stock_count_headers(store, area, counted_at)")
-        cur.execute("CREATE INDEX IF NOT EXISTS ix_stock_lines_lookup ON stock_count_lines(count_id, product_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS ix_stock_counts_lookup ON inventory_period_count_headers(store, area, counted_at)")
+        cur.execute("CREATE INDEX IF NOT EXISTS ix_stock_lines_lookup ON inventory_period_count_lines(count_id, product_id)")
 
 
 def _stock_context(request):
@@ -9200,7 +9200,7 @@ def stock_count_form(request: Request):
         cur=conn.cursor()
         rows=cur.execute(f"SELECT id,name,category,unit,qty FROM products WHERE store={ph} AND area={ph} ORDER BY category,name",(store,area)).fetchall()
         # Gli eventuali duplicati storici sono visualizzati come righe separate e mantengono ID diversi.
-        latest=cur.execute(f"SELECT counted_at FROM stock_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC,id DESC LIMIT 1",(store,area)).fetchone()
+        latest=cur.execute(f"SELECT counted_at FROM inventory_period_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC,id DESC LIMIT 1",(store,area)).fetchone()
     return render('stock_count_form.html', user=user,area=area,store=store,stores=STORES,
         products=rows,latest=latest, today=date.today().isoformat())
 
@@ -9224,7 +9224,7 @@ async def stock_count_submit(request: Request):
     ph=_ph()
     with connect() as conn:
         cur=conn.cursor()
-        latest=cur.execute(f"SELECT id,counted_at FROM stock_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC,id DESC LIMIT 1",(store,area)).fetchone()
+        latest=cur.execute(f"SELECT id,counted_at FROM inventory_period_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC,id DESC LIMIT 1",(store,area)).fetchone()
         if latest and str(latest['counted_at'])[:10] >= counted.isoformat():
             return PlainTextResponse('Data già conteggiata o precedente all’ultimo conteggio; modificare la data per evitare doppi report.',status_code=409)
         products=cur.execute(f"SELECT id,name,category,unit,qty FROM products WHERE store={ph} AND area={ph} ORDER BY id",(store,area)).fetchall()
@@ -9242,20 +9242,20 @@ async def stock_count_submit(request: Request):
             values.append((product,qty))
         count_end=counted.isoformat()+' 23:59:59'
         if using_postgres():
-            head=cur.execute(f"INSERT INTO stock_count_headers(store,area,counted_at,username,created_at) VALUES({ph},{ph},{ph},{ph},CURRENT_TIMESTAMP) RETURNING id",(store,area,count_end,user['username'])).fetchone()
+            head=cur.execute(f"INSERT INTO inventory_period_count_headers(store,area,counted_at,username,created_at) VALUES({ph},{ph},{ph},{ph},CURRENT_TIMESTAMP) RETURNING id",(store,area,count_end,user['username'])).fetchone()
             count_id=head['id']
         else:
-            cur.execute(f"INSERT INTO stock_count_headers(store,area,counted_at,username,created_at) VALUES({ph},{ph},{ph},{ph},CURRENT_TIMESTAMP)",(store,area,count_end,user['username']))
+            cur.execute(f"INSERT INTO inventory_period_count_headers(store,area,counted_at,username,created_at) VALUES({ph},{ph},{ph},{ph},CURRENT_TIMESTAMP)",(store,area,count_end,user['username']))
             count_id=cur.lastrowid
         for product,qty in values:
             prev=None; arrivals=None; outgoing=None
             if latest:
-                old=cur.execute(f"SELECT observed FROM stock_count_lines WHERE count_id={ph} AND product_id={ph}",(latest['id'],product['id'])).fetchone()
+                old=cur.execute(f"SELECT observed FROM inventory_period_count_lines WHERE count_id={ph} AND product_id={ph}",(latest['id'],product['id'])).fetchone()
                 if old:
                     prev=float(old['observed'])
                     arrivals=_stock_arrivals(cur,store,area,product,str(latest['counted_at']),count_end)
                     outgoing=prev+arrivals-qty
-            cur.execute(f"""INSERT INTO stock_count_lines(count_id,product_id,category,name,unit,observed,previous,received,outgoing)
+            cur.execute(f"""INSERT INTO inventory_period_count_lines(count_id,product_id,category,name,unit,observed,previous,received,outgoing)
                  VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})""",(count_id,product['id'],product['category'],product['name'],product['unit'] or '',qty,prev,arrivals,outgoing))
             # Il conteggio è la nuova quantità fisica ufficiale. Lo storico non viene riscritto.
             cur.execute(f"UPDATE products SET qty={ph},updated_at={_now()} WHERE id={ph} AND store={ph} AND area={ph}",(qty,product['id'],store,area))
@@ -9281,19 +9281,19 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
     with connect() as conn:
         cur=conn.cursor()
         if id:
-            selected=cur.execute(f"SELECT * FROM stock_count_headers WHERE id={ph} AND area={ph} AND store={ph}",(id,area,store)).fetchone()
+            selected=cur.execute(f"SELECT * FROM inventory_period_count_headers WHERE id={ph} AND area={ph} AND store={ph}",(id,area,store)).fetchone()
             if selected:
                 end_day=date.fromisoformat(str(selected['counted_at'])[:10])
-                previous=cur.execute(f"SELECT counted_at FROM stock_count_headers WHERE store={ph} AND area={ph} AND (counted_at < {ph} OR (counted_at={ph} AND id<{ph})) ORDER BY counted_at DESC,id DESC LIMIT 1",(store,area,selected['counted_at'],selected['counted_at'],id)).fetchone()
+                previous=cur.execute(f"SELECT counted_at FROM inventory_period_count_headers WHERE store={ph} AND area={ph} AND (counted_at < {ph} OR (counted_at={ph} AND id<{ph})) ORDER BY counted_at DESC,id DESC LIMIT 1",(store,area,selected['counted_at'],selected['counted_at'],id)).fetchone()
                 start_day=date.fromisoformat(str(previous['counted_at'])[:10]) if previous else end_day
-        headers=cur.execute(f"SELECT * FROM stock_count_headers WHERE store={ph} AND area={ph} AND counted_at>={ph} AND counted_at<={ph} ORDER BY counted_at,id",(store,area,start_day.isoformat(),end_day.isoformat()+' 23:59:59')).fetchall()
+        headers=cur.execute(f"SELECT * FROM inventory_period_count_headers WHERE store={ph} AND area={ph} AND counted_at>={ph} AND counted_at<={ph} ORDER BY counted_at,id",(store,area,start_day.isoformat(),end_day.isoformat()+' 23:59:59')).fetchall()
         # Include l'ultimo punto di partenza prima dell'intervallo, se necessario.
-        baseline=cur.execute(f"SELECT * FROM stock_count_headers WHERE store={ph} AND area={ph} AND counted_at<{ph} ORDER BY counted_at DESC,id DESC LIMIT 1",(store,area,start_day.isoformat())).fetchone()
+        baseline=cur.execute(f"SELECT * FROM inventory_period_count_headers WHERE store={ph} AND area={ph} AND counted_at<{ph} ORDER BY counted_at DESC,id DESC LIMIT 1",(store,area,start_day.isoformat())).fetchone()
         if baseline: headers=[baseline]+headers
         periods=[]; totals={}
         for before,after in zip(headers,headers[1:]):
-            before_lines={r['product_id']:r for r in cur.execute(f"SELECT * FROM stock_count_lines WHERE count_id={ph}",(before['id'],)).fetchall()}
-            after_lines=cur.execute(f"SELECT * FROM stock_count_lines WHERE count_id={ph}",(after['id'],)).fetchall()
+            before_lines={r['product_id']:r for r in cur.execute(f"SELECT * FROM inventory_period_count_lines WHERE count_id={ph}",(before['id'],)).fetchall()}
+            after_lines=cur.execute(f"SELECT * FROM inventory_period_count_lines WHERE count_id={ph}",(after['id'],)).fetchall()
             detail=[]
             for line in after_lines:
                 if line['product_id'] not in before_lines or line['outgoing'] is None: continue
@@ -9307,7 +9307,7 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
             if detail:
                 periods.append({'from':str(before['counted_at'])[:10],'to':str(after['counted_at'])[:10],'detail':detail})
         summaries=[{'name':k[0],'unit':k[1],'outgoing':v} for k,v in sorted(totals.items())]
-        known=cur.execute(f"SELECT counted_at FROM stock_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC LIMIT 1",(store,area)).fetchone()
+        known=cur.execute(f"SELECT counted_at FROM inventory_period_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC LIMIT 1",(store,area)).fetchone()
     return render('stock_report.html',user=user,area=area,store=store,stores=STORES,
         start=start_day.isoformat(),end=end_day.isoformat(),periods=periods,totals=summaries,
         known=known,generated=id>0)

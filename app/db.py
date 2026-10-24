@@ -182,7 +182,7 @@ def init_db():
 
         # ensure 'last_seen' column exists on older DBs
         try:
-            _safe_exec(cur, "ALTER TABLE users ADD COLUMN last_seen TIMESTAMP" if pg else "ALTER TABLE users ADD COLUMN last_seen TEXT")
+            _safe_exec(cur, "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP" if pg else "ALTER TABLE users ADD COLUMN last_seen TEXT")
         except Exception:
             pass
 
@@ -771,7 +771,7 @@ def init_db():
         try:
             _safe_exec(cur, "UPDATE sales_report_groups SET base_name=name WHERE COALESCE(base_name,'')=''")
             _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_name_rules_store_source ON sales_report_name_rules(store, source_name_norm)")
-            _safe_exec(cur, "CREATE TABLE IF NOT EXISTS sales_report_group_models (id INTEGER PRIMARY KEY AUTOINCREMENT, store TEXT NOT NULL, name TEXT NOT NULL, name_norm TEXT NOT NULL DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL DEFAULT 'system', ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            _safe_exec(cur, f"CREATE TABLE IF NOT EXISTS sales_report_group_models (id {id_col}, store TEXT NOT NULL, name TEXT NOT NULL, name_norm TEXT NOT NULL DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL DEFAULT 'system', ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
             _safe_exec(cur, "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_report_group_models_store_name ON sales_report_group_models(store, name_norm)")
             _safe_exec(cur, "UPDATE sales_report_group_models SET name_norm=LOWER(TRIM(name)) WHERE COALESCE(name_norm,'')=''")
         except Exception:
