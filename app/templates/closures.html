@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% set title = "Chiusure" %}
 {% block content %}
+<div class="card" style="margin-bottom:12px"><a class="btn" href="/digitalizza/archivio/tutti">🆓 Digitalizza automaticamente tutti i documenti già caricati</a></div>
   <div class="card" style="margin-bottom:12px;">
     <form method="get" action="/chiusure">
       <div class="row">
@@ -12,9 +13,7 @@
 
   <div class="card" style="margin-bottom:12px;">
     <h2 style="margin-top:0">📸 Foto chiusure</h2>
-    <div class="muted">Carica la foto della chiusura, imposta la data e la ritrovi subito con la ricerca.</div>
-
-    <a class="pill" href="/digitalizza/chiusure/{{ r.id }}" style="text-decoration:none;color:var(--text)">📋 Digitalizza</a> <form method="post" action="/chiusure/upload" enctype="multipart/form-data" style="margin-top:12px;">
+    <div class="muted">Carica la foto della chiusura, imposta la data e la ritrovi subito con la ricerca.</div> <form method="post" action="/chiusure/upload" enctype="multipart/form-data" style="margin-top:12px;">
       <div class="row">
         <input type="date" name="closure_date" required />
         <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-width:260px">
@@ -53,7 +52,7 @@
               <td>{{ r.uploaded_by }}</td>
               <td class="muted">{{ r.ts }}</td>
               <td>
-                <form method="post" action="/chiusure/{{ r.id }}/delete" onsubmit="return confirm('Eliminare questa chiusura?');" style="display:inline;">
+                <a class="pill" href="/digitalizza/chiusure/{{ r.id }}" style="text-decoration:none;color:var(--text)">📋 Digitalizza</a> <form method="post" action="/chiusure/{{ r.id }}/delete" onsubmit="return confirm('Eliminare questa chiusura?');" style="display:inline;">
                   <button class="btn2" type="submit">Elimina</button>
                 </form>
               </td>

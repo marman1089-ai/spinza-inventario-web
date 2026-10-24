@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% set title = "Fatture" %}
 {% block content %}
+<div class="card" style="margin-bottom:12px"><a class="btn" href="/digitalizza/archivio/tutti">🆓 Digitalizza automaticamente tutti i documenti già caricati</a></div>
   <div class="card" style="margin-bottom:12px;">
     <form method="get" action="/fatture">
       <div class="row">
@@ -17,9 +18,7 @@
 
     <div class="row" style="margin-top:10px;">
       <a class="pill" href="/fatture/importa-prodotti" style="text-decoration:none;color:var(--text)">➕ Aggiungi prodotti da foto fattura</a>
-    </div>
-
-    <a class="pill" href="/digitalizza/fatture/{{ r.id }}" style="text-decoration:none;color:var(--text)">📋 Digitalizza</a> <form method="post" action="/fatture/upload" enctype="multipart/form-data" style="margin-top:12px;">
+    </div> <form method="post" action="/fatture/upload" enctype="multipart/form-data" style="margin-top:12px;">
       <div class="row">
         <input name="supplier" placeholder="Fornitore" required />
         <input type="date" name="doc_date" required />
@@ -62,7 +61,7 @@
               <td>{{ r.uploaded_by }}</td>
               <td class="muted">{{ r.ts }}</td>
               <td>
-                <form method="post" action="/fatture/{{ r.id }}/delete" onsubmit="return confirm('Eliminare questa fattura?');" style="display:inline;">
+                <a class="pill" href="/digitalizza/fatture/{{ r.id }}" style="text-decoration:none;color:var(--text)">📋 Digitalizza</a> <form method="post" action="/fatture/{{ r.id }}/delete" onsubmit="return confirm('Eliminare questa fattura?');" style="display:inline;">
                   <button class="btn2" type="submit">Elimina</button>
                 </form>
               </td>

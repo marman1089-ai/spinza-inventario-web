@@ -9204,6 +9204,31 @@ def _ensure_digitized_table(cur):
        updated_at TEXT NOT NULL,
        UNIQUE(kind, document_id, store))""")
 
+@app.get('/digitalizza/archivio/tutti', response_class=HTMLResponse)
+def digital_bulk_page(request: Request):
+    user = require_login(request)
+    if not user: return RedirectResponse('/',status_code=303)
+    return render('digital_bulk.html', user=user, brand=_document_store(request,user), active_store=_document_store(request,user))
+
+@app.get('/digitalizza/archivio/da-elaborare')
+def digital_bulk_pending(request: Request):
+    user=require_login(request)
+    if not user: return PlainTextResponse('Accesso richiesto',status_code=401)
+    store=_document_store(request,user)
+    if store=='ALL' and not is_admin(request):return PlainTextResponse('Accesso negato',status_code=403)
+    ph=_ph()
+    items=[]
+    with connect() as conn:
+        cur=conn.cursor();_ensure_digitized_table(cur)
+        for kind,(table,_) in _DOC_KINDS.items():
+            where='' if store=='ALL' else f' AND d.store={ph}'
+            params=() if store=='ALL' else (store,)
+            rows=cur.execute(f"""SELECT d.id,d.store FROM {table} d
+                LEFT JOIN document_digital_data x ON x.kind='{kind}' AND x.document_id=d.id AND x.store=d.store
+                WHERE x.id IS NULL {where} ORDER BY d.id""",params).fetchall()
+            items.extend({'kind':kind,'id':int(row['id']),'store':row['store']} for row in rows)
+    return {'items':items,'total':len(items)}
+
 @app.get('/digitalizza/{kind}/{document_id}', response_class=HTMLResponse)
 def document_digital_page(request: Request, kind: str, document_id: int):
     user = require_login(request)
@@ -9223,7 +9248,7 @@ def document_digital_page(request: Request, kind: str, document_id: int):
         if not doc: return PlainTextResponse('Documento non trovato',status_code=404)
         digital = cur.execute(f'SELECT payload, reviewed FROM document_digital_data WHERE kind={ph} AND document_id={ph} AND store={ph}',(kind,document_id,doc['store'])).fetchone()
     payload = json.loads(digital['payload']) if digital else None
-    return render('document_digital.html',kind=kind,document_id=document_id,back=back,payload=payload,reviewed=bool(digital['reviewed']) if digital else False, store=doc['store'], user=user, brand=doc['store'])
+    return render('document_digital.html',kind=kind,document_id=document_id,back=back,payload=payload or {'righe':[]},has_data=bool(digital),reviewed=bool(digital['reviewed']) if digital else False, store=doc['store'], user=user, brand=doc['store'])
 
 @app.post('/digitalizza/{kind}/{document_id}/estrai')
 def document_digital_extract(request: Request,kind: str, document_id:int):
@@ -9242,6 +9267,46 @@ def document_digital_extract(request: Request,kind: str, document_id:int):
     except Exception as exc:return HTMLResponse('<h2>Impossibile elaborare il documento</h2><p>'+__import__('html').escape(str(exc))+'</p><a href="/digitalizza/'+kind+'/'+str(document_id)+'">Torna indietro</a>',status_code=422)
     with connect() as conn:
         cur=conn.cursor();_ensure_digitized_table(cur)
+        cur.execute(f'DELETE FROM document_digital_data WHERE kind={ph} AND document_id={ph} AND store={ph}',(kind,document_id,doc['store']))
+        cur.execute(f'INSERT INTO document_digital_data(kind,document_id,store,payload,reviewed,updated_at) VALUES({ph},{ph},{ph},{ph},0,{ph})',(kind,document_id,doc['store'],json.dumps(result,ensure_ascii=False),datetime.now().isoformat()))
+    return RedirectResponse(f'/digitalizza/{kind}/{document_id}',status_code=303)
+
+@app.get('/digitalizza/{kind}/{document_id}/originale')
+def digital_original_file(request: Request, kind: str, document_id: int):
+    user=require_login(request)
+    if not user:return PlainTextResponse('Accesso richiesto',status_code=401)
+    if kind not in _DOC_KINDS:return PlainTextResponse('Documento non valido',status_code=404)
+    store=_document_store(request,user); table,_=_DOC_KINDS[kind]; ph=_ph()
+    with connect() as conn:
+        cur=conn.cursor()
+        if store=='ALL':
+            if not is_admin(request):return PlainTextResponse('Accesso negato',status_code=403)
+            doc=cur.execute(f'SELECT data FROM {table} WHERE id={ph}',(document_id,)).fetchone()
+        else:
+            doc=cur.execute(f'SELECT data FROM {table} WHERE id={ph} AND store={ph}',(document_id,store)).fetchone()
+    if not doc:return PlainTextResponse('Documento non trovato',status_code=404)
+    return Response(content=bytes(doc['data']),media_type='application/pdf',headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+
+@app.post('/digitalizza/{kind}/{document_id}/testo-ocr')
+async def digital_ocr_text(request: Request,kind:str,document_id:int):
+    user=require_login(request)
+    if not user:return PlainTextResponse('Accesso richiesto',status_code=401)
+    if kind not in _DOC_KINDS:return PlainTextResponse('Documento non valido',status_code=404)
+    form=await request.form()
+    text=str(form.get('testo',''))[:120000]
+    if not text.strip():return PlainTextResponse('Testo OCR vuoto',status_code=422)
+    from .document_digitizer import _heuristic
+    result=_heuristic(text,kind)
+    result['metodo']='OCR gratuito nel browser; dati da verificare'
+    store=_document_store(request,user); table,_=_DOC_KINDS[kind];ph=_ph()
+    with connect() as conn:
+        cur=conn.cursor();_ensure_digitized_table(cur)
+        if store=='ALL':
+            if not is_admin(request):return PlainTextResponse('Accesso negato',status_code=403)
+            doc=cur.execute(f'SELECT store FROM {table} WHERE id={ph}',(document_id,)).fetchone()
+        else:
+            doc=cur.execute(f'SELECT store FROM {table} WHERE id={ph} AND store={ph}',(document_id,store)).fetchone()
+        if not doc:return PlainTextResponse('Documento non trovato',status_code=404)
         cur.execute(f'DELETE FROM document_digital_data WHERE kind={ph} AND document_id={ph} AND store={ph}',(kind,document_id,doc['store']))
         cur.execute(f'INSERT INTO document_digital_data(kind,document_id,store,payload,reviewed,updated_at) VALUES({ph},{ph},{ph},{ph},0,{ph})',(kind,document_id,doc['store'],json.dumps(result,ensure_ascii=False),datetime.now().isoformat()))
     return RedirectResponse(f'/digitalizza/{kind}/{document_id}',status_code=303)

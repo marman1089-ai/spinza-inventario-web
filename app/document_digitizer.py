@@ -48,53 +48,28 @@ def _heuristic(text, kind):
     return {'fornitore': '', 'numero_documento': '', 'data': '', 'totale': total, 'imponibile': '', 'iva': '', 'pagamento': '', 'note': '', 'righe': lines[:150], 'testo_originale': text[:25000], 'metodo': 'testo/OCR locale (verifica manuale)'}
 
 
-def _vision(images, kind):
-    key = os.getenv('OPENAI_API_KEY', '').strip()
-    if not key: return None
-    instruction = ('Leggi queste immagini di un documento italiano (' + kind + '). '
-        'Trascrivi TUTTI i prodotti/le voci uno per uno, senza omettere righe e senza inventare dati. '
-        'Per fatture estrai fornitore, numero, data, imponibile, IVA, totale e per OGNI prodotto descrizione, quantita, prezzo_unitario, totale riga, iva. '
-        'Per chiusure estrai tutte le voci di incasso, contante, POS, delivery, fondo cassa e totale, come righe. '
-        'Per spese estrai esercente, tutte le voci e totale. '
-        'Per dati assenti usa stringa vuota, importi in formato numerico con punto decimale. '
-        'Rispondi SOLO JSON oggetto con chiavi fornitore, numero_documento, data, imponibile, iva, totale, pagamento, note, righe; '
-        'righe array di oggetti con descrizione, quantita, prezzo_unitario, totale, iva. '
-        'Se una riga non è leggibile segnala in note e non inventare.')
-    content = [{'type': 'text', 'text': instruction}]
-    for img in images:
-        content.append({'type': 'image_url', 'image_url': {'url': 'data:image/jpeg;base64,'+base64.b64encode(img).decode(), 'detail':'high'}})
-    request_body = {'model': os.getenv('DOCUMENT_VISION_MODEL','gpt-4.1-mini'), 'messages':[{'role':'user','content':content}], 'response_format': {'type':'json_object'}, 'temperature':0, 'max_tokens':12000}
-    req = urllib.request.Request('https://api.openai.com/v1/chat/completions', data=json.dumps(request_body).encode(), headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'}, method='POST')
-    with urllib.request.urlopen(req, timeout=110) as response:
-        obj = json.load(response)
-    result = json.loads(obj['choices'][0]['message']['content'])
-    if not isinstance(result, dict): raise ValueError('Formato risposta non valido')
-    result['metodo'] = 'Visione AI (richiede verifica)'
-    result['testo_originale'] = ''
-    return result
-
-
 def extract_document(pdf_bytes, kind):
+    """Free, offline extraction for text PDFs; optional Tesseract if installed.
+    Scanned PDFs are supported by the browser OCR flow on the document page.
+    """
     texts, images = _pdf_pages(pdf_bytes)
-    source_text = '\n\n--- PAGINA ---\n\n'.join(texts)
-    error = ''
-    if os.getenv('OPENAI_API_KEY','').strip():
-        try: return _vision(images, kind)
-        except Exception as exc: error = 'Analisi AI non disponibile: ' + str(exc)[:170]
+    errors = []
     if shutil.which('tesseract'):
         for idx, image in enumerate(images):
             if len(texts[idx].strip()) > 100: continue
             try:
                 with tempfile.NamedTemporaryFile(suffix='.jpg') as tmp:
                     tmp.write(image); tmp.flush()
-                    lang = 'ita+eng'
-                    r = subprocess.run(['tesseract',tmp.name,'stdout','-l',lang], capture_output=True,text=True, timeout=35)
-                    if r.returncode: r = subprocess.run(['tesseract',tmp.name,'stdout','-l','eng'], capture_output=True,text=True,timeout=35)
-                    texts[idx] = r.stdout
-            except Exception as exc: error = str(exc)[:150]
-        source_text = '\n\n--- PAGINA ---\n\n'.join(texts)
-    result = _heuristic(source_text, kind)
-    if error: result['note'] = error
-    if not source_text.strip():
-        result['note'] = (result['note']+' | ' if result['note'] else '')+'Nessun testo riconosciuto. Configura OPENAI_API_KEY per la lettura delle foto, o installa Tesseract nel server.'
+                    proc = subprocess.run(['tesseract', tmp.name, 'stdout', '-l', 'ita+eng'],
+                                          capture_output=True, text=True, timeout=40)
+                    if proc.returncode:
+                        proc = subprocess.run(['tesseract', tmp.name, 'stdout', '-l', 'eng'],
+                                              capture_output=True, text=True, timeout=40)
+                    if proc.returncode == 0: texts[idx] = proc.stdout
+            except Exception as exc:
+                errors.append(str(exc)[:120])
+    result = _heuristic('\n\n--- PAGINA ---\n\n'.join(texts), kind)
+    if errors: result['note'] = 'OCR parziale. Usa OCR gratuito dal browser. ' + '; '.join(errors[:2])
+    if not result['testo_originale'].strip():
+        result['note'] = 'Questo PDF è una scansione: usa il pulsante OCR gratuito nel browser oppure compila manualmente.'
     return result

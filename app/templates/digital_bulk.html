@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% set title = "Digitalizzazione automatica archivio" %}
+{% block content %}
+<div class="card">
+  <h2>🆓 Digitalizzazione automatica dell'archivio</h2>
+  <p>Analizza tutte le fatture, chiusure e spese secondarie già presenti nel sito, senza ricaricarle e senza API a pagamento. Non sovrascrive i documenti già digitalizzati o corretti manualmente.</p>
+  <p class="muted">Il lavoro viene svolto in questo browser: mantieni la scheda aperta fino alla fine. I risultati vengono salvati uno per uno come <strong>da verificare</strong>, mai come confermati. Puoi aprire ogni documento per correggere prodotti, importi e righe riconosciute male.</p>
+  <div class="row"><button class="btn" id="start" onclick="startBatch()">▶ Avvia / riprendi digitalizzazione</button><button class="btn2" id="stop" onclick="stopping=true" disabled>⏸ Ferma dopo il documento corrente</button></div>
+  <p id="status" role="status">Preparazione...</p>
+  <progress id="progress" style="width:100%" value="0" max="1"></progress>
+  <p id="counts" class="muted"></p>
+  <div id="errors" style="max-height:240px;overflow:auto"></div>
+  <p class="muted">La prima volta servono Internet e memoria sufficienti sul dispositivo per scaricare le librerie OCR gratuite. Le fotografie sfocate o i PDF troppo lunghi possono richiedere una revisione manuale.</p>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+let running=false,stopping=false;
+const statusEl=document.getElementById('status'),counts=document.getElementById('counts');
+const progress=document.getElementById('progress'),errors=document.getElementById('errors');
+async function startBatch(){
+ if(running)return;
+ if(!window.pdfjsLib||!window.Tesseract){statusEl.textContent='Librerie OCR non disponibili: controlla Internet.';return;}
+ running=true;stopping=false;document.getElementById('start').disabled=true;document.getElementById('stop').disabled=false;
+ let worker=null,done=0,failed=0,total=0;
+ try{
+  const r=await fetch('/digitalizza/archivio/da-elaborare',{credentials:'same-origin'});
+  if(!r.ok)throw Error('Impossibile leggere archivio ('+r.status+')');
+  const data=await r.json();const queue=data.items||[];total=queue.length;
+  progress.max=Math.max(1,total);progress.value=0;
+  if(!total){statusEl.textContent='✅ Nessun documento da digitalizzare: tutti hanno già dati digitali.';return;}
+  pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  worker=await Tesseract.createWorker('ita+eng',1);
+  for(const item of queue){
+    if(stopping)break;
+    const name=item.kind+' n. '+item.id+' ('+item.store+')';
+    statusEl.textContent='Lettura '+name+' — '+(done+failed+1)+' di '+total;
+    try {
+      const pdfResponse=await fetch('/digitalizza/'+item.kind+'/'+item.id+'/originale',{credentials:'same-origin'});
+      if(!pdfResponse.ok)throw Error('Apertura fallita '+pdfResponse.status);
+      const bytes=new Uint8Array(await pdfResponse.arrayBuffer());
+      const pdf=await pdfjsLib.getDocument({data:bytes}).promise;
+      if(pdf.numPages>15)throw Error('Più di 15 pagine');
+      const chunks=[];
+      for(let n=1;n<=pdf.numPages;n++){
+        statusEl.textContent='OCR '+name+' — pagina '+n+'/'+pdf.numPages;
+        const page=await pdf.getPage(n);
+        const viewport=page.getViewport({scale:2});
+        const canvas=document.createElement('canvas');canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);
+        await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+        try {const recognized=await worker.recognize(canvas);chunks.push(recognized.data.text||'');}
+        finally {canvas.width=canvas.height=0;}
+      }
+      const raw=chunks.join('\n\n--- PAGINA ---\n\n');
+      if(!raw.trim())throw Error('Nessun testo riconosciuto');
+      const body=new FormData();body.append('testo',raw);
+      const saved=await fetch('/digitalizza/'+item.kind+'/'+item.id+'/testo-ocr',{method:'POST',body,credentials:'same-origin',redirect:'follow'});
+      if(!saved.ok)throw Error('Salvataggio fallito ('+saved.status+')');
+      done++;
+    }catch(err){failed++;const p=document.createElement('p');p.textContent='⚠ '+name+': '+err.message;errors.appendChild(p);}
+    progress.value=done+failed;counts.textContent='Digitalizzati: '+done+' · Da correggere manualmente: '+failed+' · Totale iniziale: '+total;
+  }
+  statusEl.textContent=stopping?'⏸ Elaborazione interrotta. Premi Avvia per riprendere dai documenti mancanti.':'✅ Elaborazione terminata. Apri gli archivi per controllare e confermare i risultati.';
+ }catch(err){statusEl.textContent='Errore: '+err.message;}
+ finally {if(worker)await worker.terminate();running=false;document.getElementById('start').disabled=false;document.getElementById('stop').disabled=true;}
+}
+// Avvio automatico all'apertura della pagina, una sola volta (l'utente può riprendere manualmente).
+window.addEventListener('load',()=>startBatch());
+</script>
+{% endblock %}

@@ -7,11 +7,14 @@
   <div class="row">
     <a class="btn2" href="{{back}}">← Archivio</a>
     <form action="/digitalizza/{{kind}}/{{document_id}}/estrai" method="post" onsubmit="return confirm('Rileggere il documento? Le correzioni precedenti saranno sostituite.');"><button class="btn" type="submit">🔎 {{'Rielabora foto / PDF' if payload else 'Estrai dati dalla foto / PDF'}}</button></form>
-    {% if payload %}<a class="btn2" href="/digitalizza/{{kind}}/{{document_id}}/csv">⬇ Esporta CSV</a>{% endif %}
+    {% if has_data %}<a class="btn2" href="/digitalizza/{{kind}}/{{document_id}}/csv">⬇ Esporta CSV</a>{% endif %}
   </div>
-  {% if reviewed %}<p style="color:green"><strong>✓ Dati revisionati e salvati</strong></p>{% elif payload %}<p style="color:#ad6c00"><strong>⚠ Da verificare: estrazione automatica non ancora confermata</strong></p>{% endif %}
+  <button type="button" class="btn" onclick="runFreeOCR()" id="ocr-btn">🆓 Leggi tutte le pagine con OCR gratuito</button>
+  <span id="ocr-status" role="status" class="muted" style="display:block;margin-top:10px"></span>
+  <p class="muted">OCR eseguito sul tuo dispositivo, senza chiave OpenAI. Prima del salvataggio controlla ogni cifra; le righe errate si possono eliminare e quelle mancanti aggiungere. La prima apertura può richiedere Internet per caricare i componenti gratuiti.</p>
+  <details style="margin-top:12px"><summary>📄 Visualizza il documento originale</summary><iframe title="Documento originale" src="/digitalizza/{{kind}}/{{document_id}}/originale" style="width:100%;height:550px;border:1px solid #ddd;border-radius:8px"></iframe></details>
+  {% if reviewed %}<p style="color:green"><strong>✓ Dati revisionati e salvati</strong></p>{% elif has_data %}<p style="color:#ad6c00"><strong>⚠ Da verificare: estrazione automatica non ancora confermata</strong></p>{% endif %}
 </div>
-{% if payload %}
 <div class="card" style="margin-top:14px">
 <form action="/digitalizza/{{kind}}/{{document_id}}/salva" method="post" id="digital-form">
   <h3>Informazioni principali</h3>
@@ -39,5 +42,41 @@ const cols=['descrizione','quantita','prezzo_unitario','totale','iva'];
 function addRow(){const tr=document.createElement('tr');for(const col of cols){const td=document.createElement('td');const input=document.createElement('input');input.dataset.field=col;input.style.width='100%';input.style.minWidth=col==='descrizione'?'190px':'85px';td.appendChild(input);tr.appendChild(td)}const td=document.createElement('td');const b=document.createElement('button');b.type='button';b.className='btn2';b.textContent='✕';b.onclick=()=>tr.remove();td.appendChild(b);tr.appendChild(td);document.querySelector('#righe tbody').appendChild(tr)}
 document.querySelector('#digital-form').addEventListener('submit',()=>{const lines=Array.from(document.querySelectorAll('#righe tbody tr')).map(tr=>Object.fromEntries(cols.map(c=>[c,tr.querySelector('[data-field="'+c+'"]')?.value || ''])));document.getElementById('righe_json').value=JSON.stringify(lines)});
 </script>
-{% endif %}
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+async function runFreeOCR(){
+  const btn=document.getElementById('ocr-btn'), status=document.getElementById('ocr-status');
+  if(!window.pdfjsLib || !window.Tesseract){status.textContent='Librerie OCR non disponibili. Controlla la connessione Internet oppure usa il pannello manuale.';return;}
+  if(!confirm('La nuova lettura sostituirà le correzioni NON salvate. Proseguire?'))return;
+  btn.disabled=true;let worker;
+  try {
+    status.textContent='Caricamento documento...';
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+    const response=await fetch('/digitalizza/{{kind}}/{{document_id}}/originale',{credentials:'same-origin'});
+    if(!response.ok)throw Error('Accesso al documento non riuscito ('+response.status+')');
+    const bytes=new Uint8Array(await response.arrayBuffer());
+    const pdf=await pdfjsLib.getDocument({data:bytes}).promise;
+    if(pdf.numPages>15)throw Error('Documento troppo lungo (massimo 15 pagine).');
+    worker=await Tesseract.createWorker('ita+eng',1,{logger:m=>{if(m.status==='recognizing text')status.textContent='Lettura OCR '+Math.round((m.progress||0)*100)+'%';}});
+    const all=[];
+    for(let i=1;i<=pdf.numPages;i++){
+      status.textContent='Lettura pagina '+i+' di '+pdf.numPages+'...';
+      const page=await pdf.getPage(i);const viewport=page.getViewport({scale:2});
+      const canvas=document.createElement('canvas');canvas.width=viewport.width;canvas.height=viewport.height;
+      await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+      const recognized=await worker.recognize(canvas);all.push(recognized.data.text||'');
+      canvas.width=canvas.height=0;
+    }
+    const raw=all.join('\n\n--- PAGINA ---\n\n');
+    if(!raw.trim())throw Error('Nessun testo riconosciuto; usa la compilazione manuale.');
+    status.textContent='Organizzazione dei dati...';
+    const body=new FormData();body.append('testo',raw);
+    const save=await fetch('/digitalizza/{{kind}}/{{document_id}}/testo-ocr',{method:'POST',body,credentials:'same-origin'});
+    if(!save.ok)throw Error('Salvataggio OCR fallito ('+save.status+')');
+    window.location.reload();
+  } catch(e){status.textContent='Impossibile completare OCR: '+e.message+' — puoi comunque inserire manualmente tutte le righe.';btn.disabled=false;}
+  finally{if(worker)await worker.terminate();}
+}
+</script>
 {% endblock %}
