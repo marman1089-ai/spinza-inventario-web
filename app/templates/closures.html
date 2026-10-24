@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set title = "Chiusure" %}
 {% block content %}
-{% if user.role=='admin' %}<div class="card" style="margin-bottom:12px"><a class="pill" href="/report-documenti?kind=chiusure">Copia / scarica report</a> <a class="pill" href="/admin/controllo">Centro di controllo</a></div>{% endif %}
+<div class="card" style="margin-bottom:12px"><a class="btn" href="/digitalizza/archivio/tutti">🆓 Digitalizza automaticamente tutti i documenti già caricati</a></div>
   <div class="card" style="margin-bottom:12px;">
     <form method="get" action="/chiusure">
       <div class="row">
@@ -13,12 +13,9 @@
 
   <div class="card" style="margin-bottom:12px;">
     <h2 style="margin-top:0">📸 Foto chiusure</h2>
-    <div class="muted">Carica la foto della chiusura, imposta la data e la ritrovi subito con la ricerca.</div>
-
-    {% if user.role=='admin' %}<p><a class="pill" href="/registrazione-digitale/chiusure">Inserisci direttamente in digitale · solo admin</a></p>{% endif %}
-    <form method="post" action="/chiusure/upload" enctype="multipart/form-data" style="margin-top:12px;">
+    <div class="muted">Carica la foto della chiusura, imposta la data e la ritrovi subito con la ricerca.</div> <form method="post" action="/chiusure/upload" enctype="multipart/form-data" style="margin-top:12px;">
       <div class="row">
-        
+        <input type="date" name="closure_date" required />
         <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-width:260px">
           <div id="closure-files" style="display:flex;flex-direction:column;gap:6px">
             <input type="file" name="files" accept="application/pdf,image/*" capture="environment" required />
@@ -28,7 +25,7 @@
             <span class="muted" style="font-size:12px">Se la chiusura ha più foto, premi +1 e aggiungi un’altra foto (verranno salvate nello stesso PDF).</span>
           </div>
         </div>
-        <button class="btn" type="submit">Carica foto e digitalizza</button>
+        <button class="btn" type="submit">Carica</button>
       </div>
     </form>
   </div>
@@ -51,13 +48,13 @@
             <tr>
               <td><strong>{{ r.closure_date }}</strong></td>
               {% if active_store == 'ALL' %}<td>{{ stores.get(r.store, r.store) }}</td>{% endif %}
-              <td>{% if user.role=='admin' %}<a class="pill" href="/chiusure/{{ r.id }}" target="_blank" style="text-decoration:none;color:var(--text)">Apri</a>{% endif %} <span class="muted">{{ r.filename or '' }}</span> <a class="pill" href="/documenti/chiusure/{{ r.id }}">Dati digitali / correggi</a></td>
-              <td>{% set summary=doc_summaries.get(r.id,{}) %}<strong>{{ summary.get('supplier') or '' }}</strong>{% if summary.get('amount') is not none %} · {{ summary.get('amount') }} {{ summary.get('currency','EUR') }}{% endif %}<div>{{ summary.get('description') or 'Trascrizione automatica in attesa' }}</div><small>{{ summary.get('state','Da digitalizzare') }}</small><br>{{ r.uploaded_by }}</td>
+              <td><a class="pill" href="/chiusure/{{ r.id }}" target="_blank" style="text-decoration:none;color:var(--text)">Apri</a> <span class="muted">{{ r.filename or '' }}</span></td>
+              <td>{{ r.uploaded_by }}</td>
               <td class="muted">{{ r.ts }}</td>
               <td>
-{% if user.role=='admin' %}                <form method="post" action="/chiusure/{{ r.id }}/delete" onsubmit="return confirm('Eliminare questa chiusura?');" style="display:inline;">
+                <a class="pill" href="/digitalizza/chiusure/{{ r.id }}" style="text-decoration:none;color:var(--text)">📋 Digitalizza</a> <form method="post" action="/chiusure/{{ r.id }}/delete" onsubmit="return confirm('Eliminare questa chiusura?');" style="display:inline;">
                   <button class="btn2" type="submit">Elimina</button>
-                </form>{% endif %}
+                </form>
               </td>
             </tr>
           {% endfor %}

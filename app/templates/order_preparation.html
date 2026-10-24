@@ -16,17 +16,17 @@
 {% for batch in batches %}
 <div class="card" style="margin-bottom:16px">
   <h2 style="margin:0 0 8px">🚚 {{ batch.supplier }} <span class="pill">{{ stores.get(batch.store, batch.store) }}</span></h2>
-  <p class="muted">{{ batch['items']|length }} prodotti</p>
-  <textarea id="order-message-{{ loop.index }}" readonly style="width:100%;min-height:{{ [180, 70+batch['items']|length*32]|max }}px;box-sizing:border-box;white-space:pre-wrap;padding:12px">{{ batch.message }}</textarea>
+  <p class="muted">{{ batch.items|length }} prodotti</p>
+  <textarea id="order-message-{{ loop.index }}" readonly style="width:100%;min-height:{{ [180, 70+batch.items|length*32]|max }}px;box-sizing:border-box;white-space:pre-wrap;padding:12px">{{ batch.message }}</textarea>
   <div class="row" style="margin:12px 0;gap:12px;flex-wrap:wrap">
     <button type="button" class="btn2" onclick="copyOrderMessage('order-message-{{ loop.index }}',this)">📋 Copia messaggio</button>
-    <form method="post" action="/ordini/confirm" onsubmit="return confirm('Confermi di aver inviato questo ordine al fornitore?')" style="display:inline">
+    <form method="post" action="/ordini/confirm" onsubmit="return confirm('Confermi di aver inviato l’ordine a {{ batch.supplier|e }}?')" style="display:inline">
       <input type="hidden" name="supplier" value="{{ batch.supplier }}" />
-      {% for item in batch['items'] %}<input type="hidden" name="queue_ids" value="{{ item.id }}" />{% endfor %}
+      {% for item in batch.items %}<input type="hidden" name="queue_ids" value="{{ item.id }}" />{% endfor %}
       <button class="btn" type="submit">✅ Conferma ordine inviato</button>
     </form>
   </div>
-  {% for item in batch['items'] %}<div style="padding:5px 0">{{ item.name }} · <strong>{{ '%g'|format(item.qty_to_order) }} {{ item.unit }}</strong></div>{% endfor %}
+  {% for item in batch.items %}<div style="padding:5px 0">{{ item.name }} · <strong>{{ '%g'|format(item.qty_to_order) }} {{ item.unit }}</strong></div>{% endfor %}
 </div>
 {% else %}
 {% if not unassigned %}<div class="card"><p>Nessun ordine da preparare.</p></div>{% endif %}

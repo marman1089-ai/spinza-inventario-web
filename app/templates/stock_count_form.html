@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% set title = "Conferma inventario" %}
+{% block content %}
+<div class="card"><h2>Conteggio {{ 'Cucina (settimanale)' if area == 'prodotti' else 'Sala (giornaliero)' }}</h2>
+<p>Compila le quantità <strong>fisicamente presenti</strong>. Alla conferma le giacenze verranno aggiornate e apparirà il report di confronto con il conteggio precedente.</p>
+{% if latest %}<p>Ultimo conteggio: <strong>{{ latest.counted_at }}</strong></p>{% else %}<p>Primo conteggio: crea la base. I consumi saranno calcolati dal secondo conteggio in poi.</p>{% endif %}
+<form method="post" action="/inventario/conteggio?area={{ area }}&store={{ store }}">
+<input type="hidden" name="area" value="{{ area }}"/><input type="hidden" name="store" value="{{ store }}"/>
+<label>Data conteggio <input required type="date" name="count_date" value="{{ today }}" max="{{ today }}" /></label>
+<table style="width:100%;margin-top:18px"><thead><tr><th>Prodotto</th><th>Giacenza in sistema</th><th>Quantità contata</th></tr></thead><tbody>
+{% for p in products %}<tr><td>{{ p.category }} / <b>{{ p.name }}</b> ({{ p.unit }})</td><td>{{ p.qty }}</td><td><input aria-label="Quantità contata {{ p.name }}" type="number" required min="0" step="any" name="qty_{{ p.id }}" value="{{ p.qty }}" style="width:115px;max-width:100%"></td></tr>{% endfor %}
+</tbody></table>
+<button type="submit" class="btn" onclick="return confirm('Confermare il conteggio? Le quantità del magazzino saranno aggiornate.')">✅ Conferma e genera report</button>
+</form></div>
+{% endblock %}

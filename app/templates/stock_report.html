@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% set title = "Report consumi" %}
+{% block content %}
+<div class="card"><h2>Report uscite magazzino — {{ 'Cucina' if area=='prodotti' else 'Sala' }}</h2>
+<p>Negozio: <strong>{{ stores.get(store,store) }}</strong>. Il report somma i periodi <strong>tra due conteggi completi</strong>, più gli arrivi di ordini/scambi confermati. Non rappresenta necessariamente il venduto: comprende possibili scarti e rettifiche.</p>
+<form method="get" action="/inventario/report" class="row" style="gap:10px;flex-wrap:wrap">
+<input type="hidden" name="store" value="{{ store }}"/><input type="hidden" name="area" value="{{ area }}"/>
+<label>Dal <input type="date" name="start" value="{{ start }}" required/></label>
+<label>Al <input type="date" name="end" value="{{ end }}" required/></label>
+<button class="btn2" type="submit">🔎 Mostra periodo</button><button class="btn2" type="button" onclick="window.print()">🖨️ Stampa / Salva PDF</button>
+</form>
+{% if not periods %}<div class="card" style="margin-top:12px">Non esistono ancora due conteggi completi nel periodo selezionato. Esegui un primo conteggio e un secondo successivo per ottenere un report affidabile. I giorni senza conteggi ai confini non vengono stimati automaticamente.</div>{% endif %}
+{% if totals %}<h3>Totale uscite nei periodi disponibili</h3><table style="width:100%"><thead><tr><th>Prodotto</th><th>Uscito / consumato dal magazzino</th></tr></thead><tbody>
+{% for t in totals %}<tr><td>{{ t.name }}</td><td><strong>{{ '%.2f'|format(t.outgoing) }} {{ t.unit }}</strong></td></tr>{% endfor %}
+</tbody></table>{% endif %}
+{% for period in periods %}<h3>{{ period.from }} → {{ period.to }}</h3><table style="width:100%"><thead><tr><th>Prodotto</th><th>Inizio</th><th>Arrivi</th><th>Fine</th><th>Uscite</th></tr></thead><tbody>
+{% for row in period.detail %}<tr><td>{{ row.name }}</td><td>{{ row.start }}</td><td>+{{ row.arrivals }}</td><td>{{ row.end }}</td><td><strong>{{ '%.2f'|format(row.outgoing) }} {{ row.unit }}</strong></td></tr>{% endfor %}
+</tbody></table>{% endfor %}
+<p><a class="btn2" href="/inventario/conteggio?area={{ area }}&store={{ store }}">📋 Nuovo conteggio</a></p></div>
+{% endblock %}

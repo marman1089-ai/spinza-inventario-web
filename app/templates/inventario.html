@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% set title = "Inventario" %}
 {% block content %}
+<div class="card" style="margin-bottom:12px;display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+  <a class="btn2" href="/inventario/conteggio?area={{ area if area is defined else 'prodotti' }}&store={{ active_store if active_store is defined and active_store != 'ALL' else 'spinza' }}">📋 Conferma conteggio e genera report</a>
+  <a class="btn2" href="/inventario/report?area={{ area if area is defined else 'prodotti' }}&store={{ active_store if active_store is defined and active_store != 'ALL' else 'spinza' }}">📊 Report consumi per periodo</a>
+</div>
 {% macro fmt_num(v) -%}
   {%- set s = "%.1f"|format((v or 0)|float) -%}
   {%- if s.endswith('.0') -%}
@@ -76,7 +80,7 @@
           {% else %}
             <strong>{{ user.store_label }}</strong>
           {% endif %}
-          · giacenze separate per posizione
+          · vista compatta a posizione unica
         </span>
       </div>
 
@@ -150,7 +154,7 @@
             {% if g.missing_total and g.missing_total > 0 %}<small class="inv-missing">⚠ {{ fmt_num(g.missing_total) }}</small>{% endif %}
           </div>
 
-          {% if can_edit and g.positions|length == 1 %}
+          {% if can_edit %}
           <div class="inv-action-cell">
             <button class="mini inv-icon-btn" type="button" title="Calcolatrice" onclick="openCalc({{ p.id }}, {{ g.total }}, '{{ jsq(g.unit or '') }}', '{{ p.store }}')">🧮</button>
 
@@ -168,7 +172,7 @@
                 <form method="post" action="/items/{{ p.id }}/edit" class="inv-edit-form">
                   <input type="hidden" name="next_url" value="" />
                   <input type="hidden" name="store" value="{{ p.store }}" />
-                  <input type="hidden" name="location" value="{{ p.location }}" />
+                  <input type="hidden" name="location" value="MAGAZZINO" />
                   <label>Categoria<input name="category" value="{{ p.category }}" required /></label>
                   <label>Sottogruppo<input name="subgroup" value="{{ g.subgroup }}" placeholder="Es. Coca Cola" /></label>
                   <label>Colore prodotto<input name="category_color" type="color" value="{{ color_value(g.category_color) }}" /></label>
@@ -201,7 +205,6 @@
             </form>
           </div>
           {% endif %}
-          <div style="grid-column:1 / -1;padding:8px;display:flex;gap:8px;flex-wrap:wrap">{% for pos in g.positions %}<span class="pill">{{ pos.location }}: {{ fmt_num(pos.qty) }}</span>{% endfor %}<a class="pill" href="/inventario-controllo?area={{ area }}&amp;store={{ g.store }}">Conta / sposta / registra consumo</a>{% if g.positions|length>1 %}<form action="/ordini/add_with_qty" method="post"><input type="hidden" name="item_id" value="{{ p.id }}"><input type="hidden" name="next_url" value="/inventario"><input type="number" name="qty_to_order" min="0.01" step="any" value="1" aria-label="Quantità da ordinare"><button>Richiedi ordine</button></form>{% endif %}</div>
         </article>
         {% endif %}
       {% endfor %}

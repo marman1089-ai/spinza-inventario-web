@@ -19,16 +19,31 @@
 <form action="/digitalizza/{{kind}}/{{document_id}}/salva" method="post" id="digital-form">
   <h3>Informazioni principali</h3>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:12px">
-  {% for field,label in [('fornitore','Fornitore / esercente'),('numero_documento','Numero documento'),('data','Data documento'),('totale','Totale (€)'),('imponibile','Imponibile (€)'),('iva','IVA (€)'),('pagamento','Metodo pagamento')] %}
+  {% for field,label in [('fornitore','Fornitore / esercente'),('numero_documento','Numero documento'),('data','Data documento'),('data_competenza','Data competenza'),('data_pagamento','Data pagamento'),('ora','Ora'),('destinatario','Azienda destinataria'),('reparto','Reparto: Sala / Cucina'),('categoria','Categoria di spesa'),('stato_pagamento','Stato pagamento'),('acquirente','Chi ha effettuato acquisto'),('totale','Totale (€)'),('imponibile','Imponibile (€)'),('iva','IVA (€)'),('iva_aliquota','Aliquota IVA'),('pagamento','Metodo pagamento')] %}
   <label>{{label}}<input style="width:100%" name="{{field}}" value="{{payload.get(field,'') or ''}}" /></label>
   {% endfor %}
   </div>
+  {% if kind == 'chiusure' %}
+  <h3>Dettagli chiusura di cassa</h3>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+  {% for field,label in [('contanti','Contanti (€)'),('pos','POS (€)'),('ticket','Ticket (€)'),('delivery','Delivery (€)'),('numero_documenti','N. documenti commerciali'),('numero_documenti_gestionali','N. documenti gestionali'),('numero_sconti','N. sconti'),('sconti','Importo sconti (€)'),('annullamenti','Annullamenti (€)'),('fondo_cassa','Fondo cassa (€)'),('differenza_cassa','Differenza cassa (€)')] %}
+  <label>{{label}}<input style="width:100%" name="{{field}}" value="{{payload.get(field,'') or ''}}"></label>
+  {% endfor %}
+  </div>
+  {% elif kind == 'spese' %}
+  <h3>Dettagli pagamento dello scontrino</h3>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+  {% for field,label in [('importo_consegnato','Importo consegnato (€)'),('resto','Resto (€)')] %}
+  <label>{{label}}<input style="width:100%" name="{{field}}" value="{{payload.get(field,'') or ''}}"></label>
+  {% endfor %}
+  </div>
+  {% endif %}
   <label>Note / dati poco leggibili<textarea style="width:100%;min-height:65px" name="note">{{payload.get('note','') or ''}}</textarea></label>
   <h3>Voci e prodotti digitalizzati</h3>
   <p class="muted">Una riga per prodotto o voce contabile. Per fatture: controlla quantità, prezzo unitario, costo riga e IVA. Per chiusure: usa righe separate per contanti, POS, delivery, fondo cassa, differenze ecc.</p>
-  <div style="overflow:auto"><table id="righe"><thead><tr><th>Prodotto / voce</th><th>Quantità</th><th>Prezzo unitario</th><th>Totale</th><th>IVA</th><th></th></tr></thead><tbody>
+  <div style="overflow:auto"><table id="righe"><thead><tr><th>Prodotto / voce</th><th>Quantità</th><th>Unità</th><th>Prezzo unitario</th><th>Totale</th><th>IVA</th><th>Reparto</th><th>Categoria</th><th>Codice</th><th></th></tr></thead><tbody>
   {% for r in payload.get('righe',[]) %}
-  <tr>{% for key in ['descrizione','quantita','prezzo_unitario','totale','iva'] %}<td><input style="min-width:{{'190' if key=='descrizione' else '85'}}px;width:100%" data-field="{{key}}" value="{{r.get(key,'') if r.get(key,'') is not none else ''}}"></td>{% endfor %}<td><button type="button" class="btn2" onclick="this.closest('tr').remove()">✕</button></td></tr>
+  <tr>{% for key in ['descrizione','quantita','unita_misura','prezzo_unitario','totale','iva','reparto','categoria','codice_prodotto'] %}<td><input style="min-width:{{'190' if key=='descrizione' else '85'}}px;width:100%" data-field="{{key}}" value="{{r.get(key,'') if r.get(key,'') is not none else ''}}"></td>{% endfor %}<td><button type="button" class="btn2" onclick="this.closest('tr').remove()">✕</button></td></tr>
   {% endfor %}
   </tbody></table></div>
   <button type="button" class="btn2" onclick="addRow()">+ Aggiungi voce</button>
@@ -38,7 +53,7 @@
 </div>
 {% if payload.get('testo_originale') %}<details class="card" style="margin-top:12px"><summary>Vedi testo riconosciuto (per recuperare righe mancanti)</summary><pre style="white-space:pre-wrap;word-break:break-word">{{payload['testo_originale']}}</pre></details>{% endif %}
 <script>
-const cols=['descrizione','quantita','prezzo_unitario','totale','iva'];
+const cols=['descrizione','quantita','unita_misura','prezzo_unitario','totale','iva','reparto','categoria','codice_prodotto'];
 function addRow(){const tr=document.createElement('tr');for(const col of cols){const td=document.createElement('td');const input=document.createElement('input');input.dataset.field=col;input.style.width='100%';input.style.minWidth=col==='descrizione'?'190px':'85px';td.appendChild(input);tr.appendChild(td)}const td=document.createElement('td');const b=document.createElement('button');b.type='button';b.className='btn2';b.textContent='✕';b.onclick=()=>tr.remove();td.appendChild(b);tr.appendChild(td);document.querySelector('#righe tbody').appendChild(tr)}
 document.querySelector('#digital-form').addEventListener('submit',()=>{const lines=Array.from(document.querySelectorAll('#righe tbody tr')).map(tr=>Object.fromEntries(cols.map(c=>[c,tr.querySelector('[data-field="'+c+'"]')?.value || ''])));document.getElementById('righe_json').value=JSON.stringify(lines)});
 </script>
