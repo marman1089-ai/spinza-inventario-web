@@ -1,0 +1,14 @@
+GESTIONALE COMPLETO - TUTTI I FILE PER GITHUB
+
+Questo ZIP contiene tutti i file del codice dell'ultima versione disponibile.
+
+1. Estrai questo ZIP in una cartella temporanea.
+2. In GitHub Desktop apri Repository > Show in Explorer.
+3. Copia TUTTO il CONTENUTO della cartella estratta (compresi app/, run.py, requirements.txt, render.yaml e .python-version) nella cartella repository.
+4. Non eliminare la cartella nascosta .git del repository; serve a GitHub Desktop.
+5. In GitHub Desktop fai commit e Push origin.
+6. Su Render verifica il deploy e i Logs.
+
+IMPORTANTE: il database di produzione non e' incluso. Non cancellare database, disco persistente, immagini e variabili d'ambiente su Render. Il file locale app/spinza.db e' stato escluso per evitare sovrascritture. Il file app/seed/spinza_seed.db resta come seed del progetto.
+
+Il pacchetto e' integro come archivio, ma non e' stato verificato l'avvio su Render: se fallisce invia il log dell'errore.

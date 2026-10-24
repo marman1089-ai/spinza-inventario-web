@@ -1,0 +1,12 @@
+# Dati locali, credenziali e file generati
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+app/spinza.db
+*.sqlite3
+.DS_Store
