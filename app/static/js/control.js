@@ -9,19 +9,6 @@
       if (status) status.textContent = 'Testo copiato';
     } catch (_) { target.focus(); target.select(); if (status) status.textContent = 'Testo selezionato: premi Copia o Ctrl+C.'; }
   }));
-  const archivePanel = document.querySelector('[data-archive-url]');
-  if (archivePanel) {
-    const pollArchive = async () => {
-      try {
-        const res = await fetch(archivePanel.dataset.archiveUrl);
-        if (!res.ok) return;
-        const state = await res.json();
-        if (state.token !== archivePanel.dataset.archiveToken) { location.reload(); return; }
-        if (state.configured && (state.pending || state.working || state.error)) setTimeout(pollArchive, (state.pending || state.working) ? 5000 : 15000);
-      } catch (_) { setTimeout(pollArchive, 15000); }
-    };
-    setTimeout(pollArchive, 5000);
-  }
   const jobPanel = document.querySelector('[data-job-url]');
   if (jobPanel) {
     const poll = async () => {

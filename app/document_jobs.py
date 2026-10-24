@@ -53,83 +53,19 @@ def enqueue(kind,doc_id,store,username='system',retry=False):
     _wakeup.set()
 
 
-def merge_missing_fields(cur,kind,doc_id,current,extracted):
-    """Fill missing AI text without replacing reviewed values or inventory mappings."""
-    if not current:
-        return False
-    extracted=dict(extracted)
-    if not extracted.get('raw_text') and extracted.get('text'):
-        extracted['raw_text']=extracted['text']
-    changes={}
-    for field in ('raw_text','description','supplier'):
-        if not str(current.get(field) or '').strip() and str(extracted.get(field) or '').strip():
-            changes[field]=str(extracted[field])
-    if current.get('amount') is None and extracted.get('amount') is not None:
-        changes['amount']=extracted['amount']
-    applied=cur.execute(f'SELECT id FROM invoice_imports WHERE invoice_doc_id={p()} AND store={p()}',(doc_id,current['store'])).fetchone() if kind=='fatture' else None
-    if not json.loads(current.get('lines_json') or '[]') and extracted.get('lines') and not applied:
-        changes['lines_json']=json.dumps(extracted['lines'],ensure_ascii=False)
-    if not changes:
-        return False
-    if 'amount' in changes or 'supplier' in changes:
-        changes['state']='bozza'
-    updates=','.join(f'{key}={p()}' for key in changes)
-    cur.execute(f'UPDATE digital_documents SET {updates},revision=revision+1,updated_at={p()} WHERE kind={p()} AND doc_id={p()}',
-        (*changes.values(),stamp(),kind,doc_id))
-    return True
-
-
-def enqueue_history(store=None,kind=None):
-    # Also rescan on archive visits, so existing uploads never require uploading again.
+def enqueue_history():
+    # Queue also verified legacy documents for an AI check, but never overwrite reviewed values.
     total=0
-    selected={kind:KINDS[kind]} if kind in KINDS else KINDS
     with connect() as conn:
         cur=conn.cursor()
-        for key,(table,_,_) in selected.items():
-            sql=f"SELECT id,store FROM {table} WHERE data IS NOT NULL AND COALESCE(filename,'')<>'registrazione-digitale'"
-            args=[]
-            if store and store!='ALL':
-                sql+=f' AND store={p()}';args.append(store)
-            rows=cur.execute(sql,tuple(args)).fetchall()
+        for kind,(table,_,_) in KINDS.items():
+            rows=cur.execute(f"SELECT id,store FROM {table} WHERE data IS NOT NULL AND COALESCE(filename,'')<>'registrazione-digitale' ").fetchall()
             for row in rows:
-                cur.execute(f"""INSERT INTO document_ai_jobs(kind,doc_id,store,requested_by,updated_at)
-                    VALUES({','.join([p()]*5)}) ON CONFLICT(kind,doc_id) DO NOTHING""",(key,row['id'],row['store'],'archivio',stamp()))
+                cur.execute(f'''INSERT INTO document_ai_jobs(kind,doc_id,store,requested_by,updated_at)
+                    VALUES({','.join([p()]*5)}) ON CONFLICT(kind,doc_id) DO NOTHING''',(kind,row['id'],row['store'],'archivio',stamp()))
                 total+=max(cur.rowcount,0)
-                job=cur.execute(f'SELECT * FROM document_ai_jobs WHERE kind={p()} AND doc_id={p()}',(key,row['id'])).fetchone()
-                current=cur.execute(f'SELECT * FROM digital_documents WHERE kind={p()} AND doc_id={p()}',(key,row['id'])).fetchone()
-                if job['state']=='done':
-                    try:
-                        extracted=json.loads(job['extracted_json'] or '{}')
-                    except (ValueError,TypeError):
-                        extracted={}
-                    if current and extracted:
-                        merge_missing_fields(cur,key,row['id'],current,extracted)
-                    missing_text=not current or (not str(current.get('raw_text') or '').strip() and not str(extracted.get('raw_text') or extracted.get('text') or '').strip())
-                    if missing_text:
-                        # A completed marker without a usable transcript must be recovered automatically.
-                        cur.execute(f"UPDATE document_ai_jobs SET state='pending',updated_at={p()} WHERE kind={p()} AND doc_id={p()}",(stamp(),key,row['id']))
-
     _wakeup.set()
     return total
-
-
-def archive_state(store,kind):
-    with connect() as conn:
-        cur=conn.cursor()
-        sql=f'SELECT * FROM document_ai_jobs WHERE kind={p()}'
-        args=[kind]
-        if store!='ALL':sql+=f' AND store={p()}';args.append(store)
-        jobs=cur.execute(sql,tuple(args)).fetchall()
-    result={state:sum(j['state']==state for j in jobs) for state in ['pending','working','done','error']}
-    result['configured']=bool(os.environ.get('OPENAI_API_KEY','').strip())
-    result['token']='|'.join(f"{j['doc_id']}:{j['state']}:{j['updated_at']}" for j in sorted(jobs,key=lambda j:j['doc_id']))
-    return result
-
-
-def ensure_archive(store,kind):
-    enqueue_history(store,kind)
-    start_worker()
-    return archive_state(store,kind)
 
 
 def run_document(kind,doc_id,username='system'):
@@ -150,8 +86,6 @@ def run_document(kind,doc_id,username='system'):
         from .pdf_tools import ensure_pdf
         data,_,_=ensure_pdf(data,src.get('filename') or 'foto',src.get('content_type') or 'application/octet-stream')
     result=extract_document(data,label)
-    if not str(result.get('text') or '').strip():
-        raise ValueError('Nessun testo leggibile nella foto: originale conservato, lettura da riprovare.')
     warnings=list(result.get('warnings') or [])
     dt=result.get('date')
     try:
@@ -187,7 +121,6 @@ def run_document(kind,doc_id,username='system'):
             update=','.join(f'{c}=excluded.{c}' for c in cols.split(',')[3:])
             cur.execute(f'INSERT INTO digital_documents({cols}) VALUES({",".join([p()]*15)}) ON CONFLICT(kind,doc_id) DO UPDATE SET {update}',values)
         else:
-            merge_missing_fields(cur,kind,doc_id,current,extracted)
             note='Controllo AI dell’archivio completato; dati già corretti conservati. Confronto disponibile all’amministratore.'
             cur.execute(f'UPDATE digital_documents SET warnings=warnings||{p()},revision=revision+1 WHERE kind={p()} AND doc_id={p()}',('\n'+note,kind,doc_id))
         cur.execute(f'''UPDATE document_ai_jobs SET state='done',error='',extracted_json={p()},updated_at={p()}
@@ -202,8 +135,6 @@ def process_one():
         return False
     with connect() as conn:
         begin(conn);cur=conn.cursor()
-        retry_before=(datetime.now(timezone.utc)-timedelta(minutes=15)).isoformat()
-        cur.execute(f"UPDATE document_ai_jobs SET state='pending',error='' WHERE state='error' AND attempts<3 AND updated_at<{p()}",(retry_before,))
         stale=(datetime.now(timezone.utc)-timedelta(minutes=10)).isoformat()
         cur.execute(f"UPDATE document_ai_jobs SET state='pending' WHERE state='working' AND updated_at<{p()}",(stale,))
         row=cur.execute("SELECT * FROM document_ai_jobs WHERE state='pending' ORDER BY updated_at,kind,doc_id LIMIT 1"+
@@ -225,8 +156,6 @@ def process_one():
 
 def start_worker():
     global _thread
-    if not os.environ.get('OPENAI_API_KEY','').strip():
-        return
     if _thread and _thread.is_alive():
         return
     _stop.clear()

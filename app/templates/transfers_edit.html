@@ -38,18 +38,18 @@
           </thead>
           <tbody>
             {% for p in products %}
-              {% set key = (p.category ~ '||' ~ p.name ~ '||' ~ (p.area or 'prodotti')) %}
+              {% set key = p.id %}
               {% set qsel = (selected.get(key) if selected else None) %}
               <tr data-search="{{ (p.area ~ ' ' ~ p.category ~ ' ' ~ p.name)|lower }}">
                 <td><span class="pill">{{ areas.get(p.area, p.area) }}</span></td>
                 <td><span class="pill">{{ p.category }}</span></td>
-                <td><strong>{{ p.name }}</strong> {% if p.unit %}<span class="muted">({{ p.unit }})</span>{% endif %}</td>
+                <td><strong>{{ p.name }}</strong> <span class="pill">{{ p.location }}</span> {% if p.unit %}<span class="muted">({{ p.unit }})</span>{% endif %}</td>
                 <td>
                   {{ "%.2f"|format(p.qty) }}
                   <div class="muted total-auto" data-qty="{{ p.qty }}" data-unit="{{ p.unit or '' }}"></div>
                 </td>
                 <td>
-                  <input class="mini" name="qty_{{ p.id }}" type="number" step="0.01" inputmode="decimal" placeholder="0" style="width:140px;" value="{% if qsel is not none %}{{ qsel }}{% endif %}" />
+                  <input class="mini" name="qty_{{ p.id }}" type="number" min="0" max="{{ p.qty }}" step="any" inputmode="decimal" placeholder="0" style="width:140px;" value="{% if qsel is not none %}{{ qsel }}{% endif %}" />
                 </td>
               </tr>
             {% endfor %}
