@@ -7300,6 +7300,8 @@ def closures_page(request: Request, q: str = ""):
 
     store = _effective_store(request, user)
     brand = "ALL" if store == "ALL" else store
+    from .document_jobs import ensure_archive
+    archive_state = ensure_archive(store, "chiusure")
 
     q = (q or "").strip()
     ph = _ph()
@@ -7324,8 +7326,13 @@ def closures_page(request: Request, q: str = ""):
         digital_rows = digital_conn.cursor().execute(f"SELECT * FROM digital_documents WHERE kind={_ph()}", ("chiusure",)).fetchall()
         allowed_ids = {r['id'] for r in rows}
         doc_summaries = {r['doc_id']:r for r in digital_rows if r['doc_id'] in allowed_ids}
+        for summary in doc_summaries.values():
+            summary['lines'] = json.loads(summary.get('lines_json') or '[]')
+        jobs_sql = f"SELECT * FROM document_ai_jobs WHERE kind={_ph()}"
+        jobs = digital_conn.cursor().execute(jobs_sql, ('chiusure',)).fetchall()
+        job_map = {r['doc_id']:r for r in jobs if r['doc_id'] in allowed_ids}
     active_store = request.session.get("active_store") if is_admin(request) else None
-    return render("closures.html", user=user, rows=rows, doc_summaries=doc_summaries, q=q, stores=STORES, brand=brand, active_store=active_store)
+    return render("closures.html", user=user, rows=rows, doc_summaries=doc_summaries, archive_state=archive_state, job_map=job_map, q=q, stores=STORES, brand=brand, active_store=active_store)
 
 
 @app.post("/chiusure/upload")

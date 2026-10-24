@@ -186,6 +186,14 @@ def install(app, api):
         from .document_jobs import stop_worker
         stop_worker()
 
+    @app.get('/archivio-digitale/{kind}/stato')
+    def archive_status(request:Request,kind:str):
+        user,store=auth(request)
+        if kind not in KINDS:
+            raise HTTPException(404,'Archivio non trovato.')
+        from .document_jobs import archive_state
+        return JSONResponse(archive_state(store,kind))
+
     @app.get('/admin/digitalizzazione')
     def history_status(request:Request):
         user,store=auth(request,admin=True)
