@@ -9231,6 +9231,128 @@ def _stock_arrivals(cur, store, area, product, after, until):
     return sum(float(r['delta'] or 0) for r in matches)
 
 
+# Fatture settimanali cucina: trascrizione manuale e tracciata, senza OCR.
+def _ensure_kitchen_invoice_tables():
+    pk = 'BIGSERIAL PRIMARY KEY' if using_postgres() else 'INTEGER PRIMARY KEY AUTOINCREMENT'
+    with connect() as conn:
+        c=conn.cursor()
+        c.execute(f"""CREATE TABLE IF NOT EXISTS kitchen_invoice_reviews (
+            id {pk}, store TEXT NOT NULL, week_start TEXT NOT NULL,
+            doc_id BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'draft',
+            updated_by TEXT NOT NULL, updated_at TEXT NOT NULL,
+            UNIQUE(store,week_start,doc_id))""")
+        c.execute(f"""CREATE TABLE IF NOT EXISTS kitchen_invoice_review_lines (
+            id {pk}, review_id BIGINT NOT NULL, product_id BIGINT NOT NULL,
+            qty DOUBLE PRECISION NOT NULL, UNIQUE(review_id,product_id))""")
+        c.execute('CREATE INDEX IF NOT EXISTS ix_kitchen_review_week ON kitchen_invoice_reviews(store,week_start)')
+
+
+def _kitchen_week(raw):
+    try: d=date.fromisoformat(raw)
+    except (ValueError,TypeError): d=date.today()
+    return (d-timedelta(days=d.weekday())).isoformat()
+
+
+@app.get('/inventario/fatture-settimana',response_class=HTMLResponse)
+def kitchen_weekly_invoices(request:Request,store:str='',week:str='',doc:int=0):
+    user,_,default_store=_stock_context(request)
+    if not user:return RedirectResponse('/',status_code=303)
+    store=store or default_store
+    if store not in STORES or (not is_admin(request) and store!=user.get('store')):
+        return PlainTextResponse('Negozio non autorizzato',status_code=403)
+    week=_kitchen_week(week)
+    week_end=(date.fromisoformat(week)+timedelta(days=6)).isoformat()
+    _ensure_kitchen_invoice_tables()
+    ph=_ph()
+    with connect() as conn:
+        c=conn.cursor()
+        docs=c.execute(f"SELECT id,supplier,doc_date,filename FROM invoices_docs WHERE store={ph} AND doc_date>={ph} AND doc_date<={ph} ORDER BY doc_date,id",(store,week,week_end)).fetchall()
+        reviews=c.execute(f"SELECT doc_id,status,updated_by,updated_at,id FROM kitchen_invoice_reviews WHERE store={ph} AND week_start={ph}",(store,week)).fetchall()
+        products=c.execute(f"SELECT id,name,category,unit FROM products WHERE store={ph} AND area={ph} ORDER BY category,name",(store,'prodotti')).fetchall()
+        revmap={int(r['doc_id']):dict(r) for r in reviews}
+        docids={int(r['id']) for r in docs}
+        selected=doc if doc in docids else (int(docs[0]['id']) if docs else 0)
+        saved=[]
+        if selected and selected in revmap:
+            saved=c.execute(f"SELECT product_id,qty FROM kitchen_invoice_review_lines WHERE review_id={ph}",(revmap[selected]['id'],)).fetchall()
+        progress=sum(1 for d in docs if revmap.get(int(d['id']),{}).get('status')=='done')
+        arrivals=c.execute(f"""SELECT l.product_id, SUM(l.qty) AS total FROM kitchen_invoice_review_lines l
+            JOIN kitchen_invoice_reviews r ON r.id=l.review_id
+            WHERE r.store={ph} AND r.week_start={ph} AND r.status='done' GROUP BY l.product_id""",(store,week)).fetchall()
+    return render('kitchen_invoice_week.html',request=request,user=user,store=store,stores=STORES,
+        week=week,week_end=week_end,docs=docs,reviews=revmap,selected=selected,
+        saved={str(x['product_id']):x['qty'] for x in saved},products=products,
+        progress=progress,arrivals={int(x['product_id']):float(x['total']) for x in arrivals})
+
+
+@app.get('/inventario/fatture-settimana/file/{doc_id}')
+def kitchen_invoice_file(request:Request,doc_id:int,store:str='',week:str=''):
+    user,_,default_store=_stock_context(request)
+    if not user:return RedirectResponse('/',status_code=303)
+    store=store or default_store
+    if store not in STORES or (not is_admin(request) and store!=user.get('store')):
+        return PlainTextResponse('Non autorizzato',status_code=403)
+    week=_kitchen_week(week)
+    end=(date.fromisoformat(week)+timedelta(days=6)).isoformat()
+    ph=_ph()
+    with connect() as conn:
+        row=conn.cursor().execute(f"SELECT data,content_type FROM invoices_docs WHERE id={ph} AND store={ph} AND doc_date>={ph} AND doc_date<={ph}",(doc_id,store,week,end)).fetchone()
+    if not row:return PlainTextResponse('Documento non trovato',status_code=404)
+    return Response(content=row['data'],media_type=row['content_type'] or 'application/pdf',headers={'Cache-Control':'private, max-age=120','X-Content-Type-Options':'nosniff','Content-Disposition':'inline'})
+
+
+@app.post('/inventario/fatture-settimana/salva')
+async def kitchen_invoice_save(request:Request):
+    user,_,default_store=_stock_context(request)
+    if not user:return RedirectResponse('/',status_code=303)
+    form=await request.form()
+    store=str(form.get('store') or default_store)
+    if store not in STORES or (not is_admin(request) and store!=user.get('store')):
+        return PlainTextResponse('Negozio non autorizzato',status_code=403)
+    week=_kitchen_week(str(form.get('week') or ''))
+    end=(date.fromisoformat(week)+timedelta(days=6)).isoformat()
+    try: doc_id=int(form.get('doc_id') or 0)
+    except ValueError:return PlainTextResponse('Fattura non valida',status_code=400)
+    status='done' if form.get('intent')=='done' else 'draft'
+    _ensure_kitchen_invoice_tables()
+    ph=_ph()
+    with connect() as conn:
+        c=conn.cursor()
+        document=c.execute(f"SELECT id FROM invoices_docs WHERE id={ph} AND store={ph} AND doc_date>={ph} AND doc_date<={ph}",(doc_id,store,week,end)).fetchone()
+        if not document:return PlainTextResponse('Fattura non trovata per questa settimana',status_code=404)
+        products=c.execute(f"SELECT id FROM products WHERE store={ph} AND area={ph}",(store,'prodotti')).fetchall()
+        allowed={int(r['id']) for r in products}
+        quantities=[]
+        for key,value in form.multi_items():
+            if not key.startswith('p_') or str(value).strip()=='':continue
+            try:
+                pid=int(key[2:]); qty=float(str(value).replace(',','.'))
+                if pid not in allowed or not __import__('math').isfinite(qty) or qty<0 or qty>1e9:raise ValueError()
+            except ValueError:return PlainTextResponse('Prodotto o quantità non valida',status_code=400)
+            if qty>0:quantities.append((pid,qty))
+        if status=='done' and not quantities:
+            return PlainTextResponse('Inserisci almeno un prodotto prima di completare la fattura',status_code=400)
+        existing=c.execute(f"SELECT id FROM kitchen_invoice_reviews WHERE store={ph} AND week_start={ph} AND doc_id={ph}",(store,week,doc_id)).fetchone()
+        if existing:
+            rid=int(existing['id'])
+            c.execute(f"UPDATE kitchen_invoice_reviews SET status={ph},updated_by={ph},updated_at={ph} WHERE id={ph}",(status,user['username'],datetime.now().isoformat(),rid))
+        elif using_postgres():
+            rid=int(c.execute(f"INSERT INTO kitchen_invoice_reviews(store,week_start,doc_id,status,updated_by,updated_at) VALUES({','.join([ph]*6)}) RETURNING id",(store,week,doc_id,status,user['username'],datetime.now().isoformat())).fetchone()['id'])
+        else:
+            c.execute(f"INSERT INTO kitchen_invoice_reviews(store,week_start,doc_id,status,updated_by,updated_at) VALUES({','.join([ph]*6)})",(store,week,doc_id,status,user['username'],datetime.now().isoformat()))
+            rid=int(c.lastrowid)
+        c.execute(f"DELETE FROM kitchen_invoice_review_lines WHERE review_id={ph}",(rid,))
+        for pid,qty in quantities:
+            c.execute(f"INSERT INTO kitchen_invoice_review_lines(review_id,product_id,qty) VALUES({ph},{ph},{ph})",(rid,pid,qty))
+        nextdoc=doc_id
+        if status=='done':
+            rows=c.execute(f"SELECT id FROM invoices_docs WHERE store={ph} AND doc_date>={ph} AND doc_date<={ph} ORDER BY doc_date,id",(store,week,end)).fetchall()
+            done=c.execute(f"SELECT doc_id FROM kitchen_invoice_reviews WHERE store={ph} AND week_start={ph} AND status='done'",(store,week)).fetchall()
+            doneids={int(r['doc_id']) for r in done}
+            nextdoc=next((int(r['id']) for r in rows if int(r['id']) not in doneids),doc_id)
+    return RedirectResponse('/inventario/fatture-settimana?'+urlencode({'store':store,'week':week,'doc':nextdoc}),status_code=303)
+
+
 @app.get('/inventario/conteggio',response_class=HTMLResponse)
 def stock_count_form(request: Request):
     _ensure_inventory_report_tables()

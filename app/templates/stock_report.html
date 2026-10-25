@@ -17,5 +17,6 @@
 {% for period in periods %}<h3>{{ period.from }} → {{ period.to }}</h3><table style="width:100%"><thead><tr><th>Prodotto</th><th>Inizio</th><th>Arrivi</th><th>Fine</th><th>Uscite</th></tr></thead><tbody>
 {% for row in period.detail %}<tr><td>{{ row.name }}</td><td>{{ row.start }}</td><td>+{{ row.arrivals }}</td><td>{{ row.end }}</td><td><strong>{{ '%.2f'|format(row.outgoing) }} {{ row.unit }}</strong></td></tr>{% endfor %}
 </tbody></table>{% endfor %}
+{% if area=='prodotti' %}<section class="card" style="margin:20px 0;padding:22px;border:1px solid #b7ddcf;border-radius:16px"><h2>🧾 Passaggio successivo: fatture della settimana</h2><p>Visualizza ogni fattura originale e trascrivi i prodotti ricevuti. Le fatture completate diventano verdi. Gli arrivi sono registrati separatamente dalle giacenze per evitare doppi carichi.</p><a class="shine-button" href="/inventario/fatture-settimana?store={{ store }}&week={{ end }}">Apri fatture della settimana →</a></section>{% endif %}
 <p><a class="btn2" href="/inventario/conteggio?area={{ area }}&store={{ store }}">📋 Nuovo conteggio</a></p></div>
 {% endblock %}
