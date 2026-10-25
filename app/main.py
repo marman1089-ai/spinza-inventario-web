@@ -387,18 +387,20 @@ def _startup():
     _ensure_inventory_report_tables()
     print("[STARTUP] init_db() completato")
 
-    restore_report = restore_sqlite_backup_if_postgres_empty()
-    print("[STARTUP] controllo backup SQLite:", restore_report)
+    # Operazioni di ripristino/riclassificazione sono manutenzione UNA TANTUM.
+    # Non farle ad ogni riavvio di Render: possono fare centinaia di query remote.
+    if os.environ.get("RESTORE_SQLITE_ON_START") == "1":
+        restore_report = restore_sqlite_backup_if_postgres_empty()
+        print("[STARTUP] controllo backup SQLite:", restore_report)
 
     ensure_admin_user()
     print("[STARTUP] ensure_admin_user() completato")
 
-    # Sistema i dati già inseriti: le righe importate come "import txt" o generiche
-    # vengono rilette e riclassificate nelle famiglie corrette.
-    fixed_expenses = _recategorize_existing_cash_expenses('ALL')
-    fixed_entries = _repair_existing_cash_entries_from_notes('ALL')
-    print(f"[STARTUP] uscite ricategorizzate: {fixed_expenses}")
-    print(f"[STARTUP] incassi riparati da note import: {fixed_entries}")
+    if os.environ.get("REPAIR_CASH_ON_START") == "1":
+        fixed_expenses = _recategorize_existing_cash_expenses('ALL')
+        fixed_entries = _repair_existing_cash_entries_from_notes('ALL')
+        print(f"[STARTUP] uscite ricategorizzate: {fixed_expenses}")
+        print(f"[STARTUP] incassi riparati da note import: {fixed_entries}")
 
     if os.environ.get("MIGRATE_ON_START") == "1":
         data_dir = os.environ.get("OLD_DATA_DIR", ".")
@@ -7349,10 +7351,18 @@ async def closures_upload(request: Request, closure_date: str = Form(""), files:
     pdfs: list[bytes] = []
     base_name = "chiusura"
     for f in files:
-        raw = await f.read()
-        filename_in = f.filename or base_name
+        if not f.filename:
+            continue
+        filename_in = f.filename
         content_type_in = f.content_type or "application/octet-stream"
+        if not (filename_in.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".pdf"))):
+            raise HTTPException(422, "Carica solo foto JPG/PNG/WEBP o documenti PDF.")
+        raw = await f.read()
+        if len(raw) > 18 * 1024 * 1024:
+            raise HTTPException(413, "Un singolo file supera 18 MB.")
         pdf_bytes, _, _ = ensure_pdf(raw, filename_in, content_type_in)
+        if not pdf_bytes.startswith(b"%PDF"):
+            raise HTTPException(422, "Il file non è una foto o un PDF valido.")
         pdfs.append(pdf_bytes)
 
     # Unisco tutto in un unico PDF (multi-pagina / multi-file)
@@ -7525,10 +7535,18 @@ async def secondary_expenses_upload(request: Request, expense_date: str = Form("
     pdfs: list[bytes] = []
     base_name = "spesa"
     for f in files:
-        raw = await f.read()
-        filename_in = f.filename or base_name
+        if not f.filename:
+            continue
+        filename_in = f.filename
         content_type_in = f.content_type or "application/octet-stream"
+        if not (filename_in.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".pdf"))):
+            raise HTTPException(422, "Carica solo foto JPG/PNG/WEBP o documenti PDF.")
+        raw = await f.read()
+        if len(raw) > 18 * 1024 * 1024:
+            raise HTTPException(413, "Un singolo file supera 18 MB.")
         pdf_bytes, _, _ = ensure_pdf(raw, filename_in, content_type_in)
+        if not pdf_bytes.startswith(b"%PDF"):
+            raise HTTPException(422, "Il file non è una foto o un PDF valido.")
         pdfs.append(pdf_bytes)
 
     if not pdfs:
@@ -8477,10 +8495,18 @@ async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: 
     pdfs: list[bytes] = []
     base_name = "fattura"
     for f in files:
-        raw = await f.read()
-        filename_in = f.filename or base_name
+        if not f.filename:
+            continue
+        filename_in = f.filename
         content_type_in = f.content_type or "application/octet-stream"
+        if not (filename_in.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".pdf"))):
+            raise HTTPException(422, "Carica solo foto JPG/PNG/WEBP o documenti PDF.")
+        raw = await f.read()
+        if len(raw) > 18 * 1024 * 1024:
+            raise HTTPException(413, "Un singolo file supera 18 MB.")
         pdf_bytes, _, _ = ensure_pdf(raw, filename_in, content_type_in)
+        if not pdf_bytes.startswith(b"%PDF"):
+            raise HTTPException(422, "Il file non è una foto o un PDF valido.")
         pdfs.append(pdf_bytes)
 
     # Unisco tutto in un unico PDF (multi-pagina / multi-file)
