@@ -8288,6 +8288,161 @@ async def invoice_import_confirm(request: Request, draft_id: int):
     return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
 
+
+# ===== Cucina: registrazione manuale delle consegne, a fine settimana =====
+def _week_monday(value: str = "") -> str:
+    try:
+        d = date.fromisoformat(value)
+    except (TypeError, ValueError):
+        d = date.today()
+    return (d - timedelta(days=d.weekday())).isoformat()
+
+
+def _kitchen_receipt_schema(cur):
+    # Tabelle additive: non cambiano né rimuovono fatture, prodotti o inventari esistenti.
+    id_type = "SERIAL PRIMARY KEY" if using_postgres() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    cur.execute(f"""CREATE TABLE IF NOT EXISTS kitchen_receipt_reviews (
+        id {id_type}, store TEXT NOT NULL, invoice_id INTEGER NOT NULL,
+        week_start TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft',
+        lines_json TEXT NOT NULL DEFAULT '[]', updated_by TEXT NOT NULL,
+        updated_at TEXT NOT NULL, UNIQUE(store, invoice_id, week_start)
+    )""")
+
+
+@app.get("/cucina/fatture", response_class=HTMLResponse)
+def kitchen_receipts(request: Request, week: str = "", invoice: int = 0):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    store = _effective_store(request, user)
+    if store == "ALL":
+        store = user.get('store') or 'spinza'
+    start = _week_monday(week)
+    end = (date.fromisoformat(start) + timedelta(days=6)).isoformat()
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        _kitchen_receipt_schema(cur)
+        rows = cur.execute(f"""SELECT i.id, i.supplier, i.doc_date, i.filename,
+          r.status, r.lines_json, r.updated_by
+          FROM invoices_docs i LEFT JOIN kitchen_receipt_reviews r
+          ON r.invoice_id=i.id AND r.store=i.store AND r.week_start={ph}
+          WHERE i.store={ph} AND ((i.doc_date>={ph} AND i.doc_date<={ph})
+          OR r.id IS NOT NULL)
+          ORDER BY i.doc_date, i.id""", (start,store,start,end)).fetchall()
+        products = cur.execute(f"SELECT id, category, name, unit FROM products WHERE store={ph} AND area={ph} ORDER BY category,name", (store,'cucina')).fetchall()
+        # Alcuni archivi usano nomi area differenti: mostrare anche gli altri prodotti.
+        if not products:
+            products = cur.execute(f"SELECT id, category, name, unit FROM products WHERE store={ph} ORDER BY category,name",(store,)).fetchall()
+    rows = [dict(r) for r in rows]
+    selected = next((r for r in rows if r['id']==invoice),None) if invoice else None
+    if not selected:
+        selected = next((r for r in rows if r.get('status') != 'done'), rows[0] if rows else None)
+    for r in rows:
+        try: r['lines'] = json.loads(r.get('lines_json') or '[]')
+        except (ValueError, TypeError): r['lines'] = []
+    if selected:
+        selected = next(r for r in rows if r['id']==selected['id'])
+    done = sum(r.get('status')=='done' for r in rows)
+    return render('kitchen_receipts.html',user=user,brand=store,store_name=STORES.get(store,store),
+                  week=start,end=end,rows=rows,selected=selected,done=done,
+                  products_json=json.dumps([dict(x) for x in products],ensure_ascii=False).replace('<','\\u003c'))
+
+
+@app.post("/cucina/fatture/{doc_id}/save")
+async def kitchen_receipts_save(request: Request, doc_id: int, week: str = Form(...), lines_json: str = Form('[]'), action: str = Form('draft')):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse('/', status_code=HTTP_303_SEE_OTHER)
+    store = _effective_store(request, user)
+    if store == 'ALL': store = user.get('store') or 'spinza'
+    week = _week_monday(week)
+    ph = _ph()
+    try:
+        raw = json.loads(lines_json)
+        if not isinstance(raw, list) or len(raw)>400: raise ValueError()
+        lines = []
+        for entry in raw:
+            pid = int(entry.get('product_id', 0))
+            qty = float(entry.get('qty',0))
+            if pid <= 0 or not 0 < qty <= 1000000: raise ValueError()
+            lines.append({'product_id':pid,'qty':qty})
+        if action=='done' and not lines: raise ValueError()
+    except (ValueError,TypeError,AttributeError):
+        return PlainTextResponse('Inserire prodotti validi e quantità maggiori di zero.',status_code=400)
+    with connect() as conn:
+        cur=conn.cursor()
+        _kitchen_receipt_schema(cur)
+        doc=cur.execute(f'SELECT id FROM invoices_docs WHERE id={ph} AND store={ph}',(doc_id,store)).fetchone()
+        if not doc: return PlainTextResponse('Fattura non trovata.',status_code=404)
+        for entry in lines:
+            if not cur.execute(f'SELECT id FROM products WHERE id={ph} AND store={ph}',(entry['product_id'],store)).fetchone():
+                return PlainTextResponse('Prodotto non valido per questo negozio.',status_code=400)
+        stamp=datetime.now().isoformat(timespec='seconds')
+        cur.execute(f"""INSERT INTO kitchen_receipt_reviews(store,invoice_id,week_start,status,lines_json,updated_by,updated_at)
+          VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph})
+          ON CONFLICT(store,invoice_id,week_start) DO UPDATE SET status=excluded.status,
+          lines_json=excluded.lines_json,updated_by=excluded.updated_by,updated_at=excluded.updated_at""",
+          (store,doc_id,week,'done' if action=='done' else 'draft',json.dumps(lines),user['username'],stamp))
+        _log(cur,store=store,username=user['username'],action='RECEIPT_DONE' if action=='done' else 'RECEIPT_DRAFT',
+             category='CUCINA',name=f'Fattura #{doc_id} settimana {week}',delta=0.0)
+        nextrow=cur.execute(f"""SELECT i.id FROM invoices_docs i LEFT JOIN kitchen_receipt_reviews r
+          ON r.invoice_id=i.id AND r.store=i.store AND r.week_start={ph}
+          WHERE i.store={ph} AND i.doc_date>={ph} AND i.doc_date<={ph}
+          AND (r.status IS NULL OR r.status<>'done') AND i.id<>{ph}
+          ORDER BY i.doc_date,i.id LIMIT 1""",(week,store,week,(date.fromisoformat(week)+timedelta(days=6)).isoformat(),doc_id)).fetchone()
+    from urllib.parse import urlencode
+    params={'week':week}
+    if action=='draft':params['invoice']=doc_id
+    elif nextrow:params['invoice']=nextrow['id']
+    return RedirectResponse('/cucina/fatture?'+urlencode(params),status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get('/cucina/fatture/report',response_class=HTMLResponse)
+def kitchen_receipts_report(request: Request, week: str = ''):
+    user=require_login(request)
+    if not user:return RedirectResponse('/',status_code=HTTP_303_SEE_OTHER)
+    store=_effective_store(request,user)
+    if store=='ALL':store=user.get('store') or 'spinza'
+    week=_week_monday(week)
+    ph=_ph()
+    with connect() as conn:
+        cur=conn.cursor();_kitchen_receipt_schema(cur)
+        rows=cur.execute(f"""SELECT i.supplier,i.doc_date,r.invoice_id,r.status,r.updated_by,
+            r.lines_json FROM kitchen_receipt_reviews r JOIN invoices_docs i ON i.id=r.invoice_id
+            WHERE r.store={ph} AND r.week_start={ph} ORDER BY i.doc_date,i.id""",(store,week)).fetchall()
+        products=cur.execute(f'SELECT id,name,category,unit FROM products WHERE store={ph}',(store,)).fetchall()
+    mapping={r['id']:dict(r) for r in products}
+    documents=[];summary={}
+    for row in rows:
+        item=dict(row); item['lines']=[]
+        for ln in json.loads(item['lines_json'] or '[]'):
+            prod=mapping.get(ln['product_id'])
+            if not prod:continue
+            item['lines'].append({'name':prod['name'],'category':prod['category'],'unit':prod['unit'],'qty':ln['qty']})
+            rec=summary.setdefault(prod['id'],{'name':prod['name'],'category':prod['category'],'unit':prod['unit'],'qty':0})
+            if item['status']=='done':rec['qty']+=ln['qty']
+        documents.append(item)
+    return render('kitchen_receipts_report.html',user=user,brand=store,week=week,store_name=STORES.get(store,store),
+                  documents=documents,summary=sorted(summary.values(),key=lambda x:(x['category'],x['name'])))
+
+
+@app.get('/cucina/fatture/documento/{doc_id}')
+def kitchen_receipt_document(request: Request,doc_id: int):
+    user=require_login(request)
+    if not user:return RedirectResponse('/',status_code=HTTP_303_SEE_OTHER)
+    store=_effective_store(request,user)
+    if store=='ALL':store=user.get('store') or 'spinza'
+    ph=_ph()
+    with connect() as conn:
+        row=conn.cursor().execute(f'SELECT filename,content_type,data FROM invoices_docs WHERE id={ph} AND store={ph}',(doc_id,store)).fetchone()
+    if not row:return PlainTextResponse('Fattura non trovata',status_code=404)
+    from fastapi.responses import Response
+    return Response(content=row['data'],media_type=row.get('content_type') or 'application/pdf',
+                    headers={'Content-Disposition':f'inline; filename="fattura-{doc_id}.pdf"','Cache-Control':'private, no-store',
+                             'X-Content-Type-Options':'nosniff'})
+
+
 @app.get("/fatture/{doc_id}")
 def invoices_download(request: Request, doc_id: int):
     user = require_login(request)

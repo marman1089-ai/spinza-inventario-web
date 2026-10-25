@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% set title = "Cucina · Controllo fatture" %}
+{% block content %}
+<style>
+.kr-head{padding:25px;border:1px solid #d1fae5;border-radius:22px;background:linear-gradient(115deg,#064e3b,#047857);color:white;margin-bottom:16px}.kr-head h2{margin:0;color:white;font-size:clamp(21px,3vw,32px)}.kr-head p{opacity:.85}.kr-head a{color:white}.kr-bar{height:10px;border-radius:16px;background:#ffffff45;overflow:hidden}.kr-bar i{display:block;height:100%;background:#86efac;transition:width .4s}.kr-layout{display:grid;grid-template-columns:minmax(210px,260px) minmax(320px,1fr) minmax(300px,450px);gap:12px;align-items:start}.kr-card{border-radius:18px;background:var(--card,#fff);border:1px solid var(--line-soft,#d1d5db);overflow:hidden;box-shadow:0 7px 20px #0000000a}.kr-card h3{margin:0;padding:15px;border-bottom:1px solid var(--line-soft,#ddd)}.kr-item{display:block;text-decoration:none;color:var(--text,inherit);padding:13px;border-bottom:1px solid var(--line-soft,#eee);border-left:5px solid transparent;transition:transform .2s,background .2s}.kr-item:hover{transform:translateX(3px);background:#10b98112}.kr-item.active{background:#0ea5e915;border-left-color:#0ea5e9}.kr-item.done{background:#22c55e17;border-left-color:#22c55e}.kr-tag{font-size:12px;float:right;border-radius:20px;padding:3px 7px;background:#e2e8f0;color:#334155}.kr-item.done .kr-tag{background:#bbf7d0;color:#166534}.kr-pdf{width:100%;height:min(77vh,820px);min-height:490px;border:0;background:#e2e8f0}.kr-form{padding:14px}.kr-form label{display:block;font-size:12px;margin-bottom:4px;color:var(--muted,#64748b)}.kr-line{display:grid;grid-template-columns:1fr 95px 35px;gap:6px;align-items:center;margin-bottom:10px;padding:8px;border:1px solid var(--line-soft,#ddd);border-radius:12px}.kr-line select,.kr-line input{width:100%;min-width:0;box-sizing:border-box}.kr-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:15px}.kr-actions button{flex:1;min-width:130px}.kr-help{font-size:13px;line-height:1.5;padding:10px;border-radius:10px;background:#10b98115;margin-bottom:12px}.kr-empty{text-align:center;padding:30px}.kr-form-title{font-weight:700;margin:6px 0 12px}.kr-count{font-weight:800;font-size:22px}.kr-split-note{padding:7px 12px;font-size:12px;opacity:.8}@media(max-width:1150px){.kr-layout{grid-template-columns:215px 1fr}.kr-entry{grid-column:1/-1}}@media(max-width:700px){.kr-layout{display:flex;flex-direction:column}.kr-layout>*{width:100%}.kr-list{max-height:220px;overflow:auto}.kr-pdf{height:53vh;min-height:350px}.kr-line{grid-template-columns:1fr 80px 32px}}
+</style>
+<div class="kr-head"><h2>🍳 Controllo fatture · Cucina</h2><p>{{store_name}} · Una fattura alla volta, senza cambiare schermata. Salva ogni consegna e spunta le fatture verificate.</p>
+<form method="get" action="/cucina/fatture" class="row" style="align-items:center;margin-bottom:14px"><label for="week" style="color:white">Settimana dal</label><input type="date" id="week" name="week" value="{{week}}"><button class="btn2" type="submit">Apri settimana</button><a class="pill" href="/cucina/fatture/report?week={{week}}">📋 Report settimanale</a></form>
+<div class="kr-bar"><i style="width:{{(done * 100 / rows|length)|round|int if rows else 0}}%"></i></div><p><b>{{done}} di {{rows|length}}</b> fatture completate · {{week}} / {{end}}</p></div>
+<div class="kr-layout">
+<section class="kr-card kr-list"><h3>📂 Da controllare</h3>{% for r in rows %}<a class="kr-item {% if r.status=='done' %}done{% endif %} {% if selected and r.id==selected.id %}active{% endif %}" href="/cucina/fatture?week={{week}}&invoice={{r.id}}"><span class="kr-tag">{% if r.status=='done' %}✓ Fatto{% elif r.status=='draft' %}✎ Bozza{% else %}Da fare{% endif %}</span><strong>{{r.supplier}}</strong><br><small>{{r.doc_date}} · #{{r.id}}</small></a>{% else %}<div class="kr-empty">Nessuna fattura per questa settimana. <a href="/fatture">Carica fatture</a>.</div>{% endfor %}</section>
+<section class="kr-card"><h3>👀 Fattura originale</h3>{% if selected %}<div class="kr-split-note">{{selected.supplier}} · Scorri tutte le pagine qui sotto, senza lasciare la compilazione.</div><iframe title="Fattura" class="kr-pdf" src="/cucina/fatture/documento/{{selected.id}}#toolbar=1"></iframe><div style="padding:12px"><a href="/cucina/fatture/documento/{{selected.id}}" target="_blank">🔍 Apri a schermo intero</a></div>{% else %}<div class="kr-empty">Seleziona una fattura.</div>{% endif %}</section>
+<section class="kr-card kr-entry"><h3>✍️ Prodotti arrivati</h3>{% if selected %}<form id="receiptForm" class="kr-form" method="post" action="/cucina/fatture/{{selected.id}}/save"><input type="hidden" name="week" value="{{week}}"><input type="hidden" name="lines_json" id="linesJson"><input type="hidden" name="action" id="actionValue" value="draft"><div class="kr-help">Seleziona un prodotto già presente nell'inventario e scrivi <b>quanto è arrivato</b>. Usa <b>+ Riga</b> per aggiungerne altri. I dati restano associati a questa fattura; non modificano ancora le giacenze.</div><div class="kr-form-title">{{selected.supplier}} {% if selected.status=='done' %}<span style="color:#16a34a">✓ Completata</span>{% endif %}</div><div id="krRows"></div><button type="button" class="btn2" onclick="addReceiptRow()">＋ Aggiungi prodotto</button><div class="kr-actions"><button class="btn2" type="button" onclick="saveReceipt('draft')">💾 Salva bozza</button><button class="btn" type="button" onclick="saveReceipt('done')">✓ Completa e avanti →</button></div><p class="muted" style="font-size:12px">Puoi tornare a modificare una fattura completata. Il report si aggiorna automaticamente.</p></form>{% else %}<div class="kr-empty">Carica una fattura per iniziare.</div>{% endif %}</section>
+</div>
+{% if selected %}<script>
+const catalog={{products_json|safe}};
+const previous={{selected.lines|tojson}};
+const rowsEl=document.getElementById('krRows');
+function addReceiptRow(item={}){
+ const wrap=document.createElement('div');wrap.className='kr-line';
+ const sel=document.createElement('select');sel.required=true;
+ let opt=document.createElement('option');opt.value='';opt.textContent='Seleziona prodotto…';sel.appendChild(opt);
+ for(const p of catalog){opt=document.createElement('option');opt.value=p.id;opt.textContent=p.category+' · '+p.name+' ('+(p.unit||'pz')+')';sel.appendChild(opt)}
+ sel.value=item.product_id||'';
+ const qty=document.createElement('input');qty.type='number';qty.min='0.001';qty.step='any';qty.placeholder='Qtà';qty.value=item.qty||'';qty.required=true;
+ const rm=document.createElement('button');rm.type='button';rm.className='btn2';rm.textContent='×';rm.title='Rimuovi riga';rm.onclick=()=>wrap.remove();
+ wrap.append(sel,qty,rm);rowsEl.appendChild(wrap);
+}
+(previous.length?previous:[{}]).forEach(addReceiptRow);
+function saveReceipt(action){
+ const out=[];const seen=new Set();
+ for(const el of rowsEl.querySelectorAll('.kr-line')){
+  const p=el.querySelector('select').value, qty=Number(el.querySelector('input').value);
+  if(!p && !el.querySelector('input').value)continue;
+  if(!p || !Number.isFinite(qty) || qty<=0){alert('Seleziona un prodotto e inserisci una quantità maggiore di zero.');return}
+  if(seen.has(p)){alert('Hai inserito due volte lo stesso prodotto. Accorpa le quantità in un’unica riga.');return}
+  seen.add(p);out.push({product_id:Number(p),qty});
+ }
+ if(action==='done' && !out.length){alert('Inserisci almeno un prodotto per completare la fattura.');return}
+ document.getElementById('linesJson').value=JSON.stringify(out);
+ document.getElementById('actionValue').value=action;
+ document.getElementById('receiptForm').submit();
+}
+</script>{% endif %}
+{% endblock %}

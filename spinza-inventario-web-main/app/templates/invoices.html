@@ -16,7 +16,7 @@
     <div class="muted">Carica una fattura (PDF o foto), imposta <strong>fornitore</strong> e <strong>data</strong>, poi la cerchi velocemente.</div>
 
     <div class="row" style="margin-top:10px;">
-      <a class="pill" href="/fatture/importa-prodotti" style="text-decoration:none;color:var(--text)">➕ Aggiungi prodotti da foto fattura</a>
+      <a class="pill" href="/cucina/fatture" style="text-decoration:none;color:var(--text)">🍳 Compila le fatture della cucina a fine settimana</a>
     </div>
 
     <form method="post" action="/fatture/upload" enctype="multipart/form-data" style="margin-top:12px;">
@@ -25,11 +25,11 @@
         <input type="date" name="doc_date" required />
         <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-width:260px">
           <div id="invoice-files" style="display:flex;flex-direction:column;gap:6px">
-            <input type="file" name="files" accept="application/pdf,image/*" capture="environment" required />
+            <input type="file" name="files" accept="application/pdf,image/*" multiple required />
           </div>
           <div style="display:flex;gap:8px;align-items:center">
             <button class="btn2" type="button" onclick="addFileInput('invoice-files')">+1</button>
-            <span class="muted" style="font-size:12px">Se la fattura ha più fogli, premi +1 e aggiungi un’altra foto (verranno salvate nello stesso PDF).</span>
+            <span class="muted" style="font-size:12px">Se la fattura ha più fogli, seleziona più foto insieme, oppure premi +1 per aggiungere altri file (verranno salvate nello stesso PDF).</span>
           </div>
         </div>
 

@@ -19,11 +19,11 @@
         <input type="date" name="closure_date" required />
         <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-width:260px">
           <div id="closure-files" style="display:flex;flex-direction:column;gap:6px">
-            <input type="file" name="files" accept="application/pdf,image/*" capture="environment" required />
+            <input type="file" name="files" accept="application/pdf,image/*" multiple required />
           </div>
           <div style="display:flex;gap:8px;align-items:center">
             <button class="btn2" type="button" onclick="addFileInput('closure-files')">+1</button>
-            <span class="muted" style="font-size:12px">Se la chiusura ha più foto, premi +1 e aggiungi un’altra foto (verranno salvate nello stesso PDF).</span>
+            <span class="muted" style="font-size:12px">Se la chiusura ha più foto, seleziona più foto insieme, oppure premi +1 per aggiungere altri file (verranno salvate nello stesso PDF).</span>
           </div>
         </div>
         <button class="btn" type="submit">Carica</button>

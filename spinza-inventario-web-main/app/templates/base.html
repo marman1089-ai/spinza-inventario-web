@@ -351,6 +351,7 @@
         <div class="nav-dd-panel">
           <a href="/select-area?area=bibite">🥤 Bibite</a>
           <a href="/select-area?area=prodotti">🍽️ Prodotti</a>
+          <a href="/cucina/fatture">🍳 Fatture cucina · settimanale</a>
           <a href="/ordini">🚚 Ordini da fare</a>
           <a href="/ordinati">📦 Ordini in corso</a>
           <a href="/storico-ordini">🗂️ Storico ordini</a>
@@ -410,6 +411,7 @@
       <div class="sub">
         <a href="/select-area?area=bibite" onclick="closeMobileMenu()">🥤 Bibite</a>
         <a href="/select-area?area=prodotti" onclick="closeMobileMenu()">🍽️ Prodotti</a>
+        <a href="/cucina/fatture" onclick="closeMobileMenu()">🍳 Fatture cucina · settimanale</a>
         <a href="/ordini" onclick="closeMobileMenu()">🚚 Ordini da fare</a>
         <a href="/ordinati" onclick="closeMobileMenu()">📦 Ordini in corso</a>
         <a href="/storico-ordini" onclick="closeMobileMenu()">🗂️ Storico ordini</a>
@@ -455,7 +457,7 @@
     const row = document.createElement('div');
     row.className = 'file-row';
     row.style.marginTop = '8px';
-    row.innerHTML = '<input type="file" name="files" accept="application/pdf,image/*" capture="environment" />';
+    row.innerHTML = '<input type="file" name="files" accept="application/pdf,image/*" multiple />';
     container.appendChild(row);
   }
 </script>
