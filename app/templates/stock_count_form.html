@@ -1,15 +1,13 @@
-{% extends "base.html" %}
-{% set title = "Conferma inventario" %}
-{% block content %}
-<div class="card"><h2>Conteggio {{ 'Cucina (settimanale)' if area == 'prodotti' else 'Sala (giornaliero)' }}</h2>
-<p>Compila le quantità <strong>fisicamente presenti</strong>. Alla conferma le giacenze verranno aggiornate e apparirà il report di confronto con il conteggio precedente.</p>
-{% if latest %}<p>Ultimo conteggio: <strong>{{ latest.counted_at }}</strong></p>{% else %}<p>Primo conteggio: crea la base. I consumi saranno calcolati dal secondo conteggio in poi.</p>{% endif %}
-<form method="post" action="/inventario/conteggio?area={{ area }}&store={{ store }}">
-<input type="hidden" name="area" value="{{ area }}"/><input type="hidden" name="store" value="{{ store }}"/>
-<label>Data conteggio <input required type="date" name="count_date" value="{{ today }}" max="{{ today }}" /></label>
-<table style="width:100%;margin-top:18px"><thead><tr><th>Prodotto</th><th>Giacenza in sistema</th><th>Quantità contata</th></tr></thead><tbody>
-{% for p in products %}<tr><td>{{ p.category }} / <b>{{ p.name }}</b> ({{ p.unit }})</td><td>{{ p.qty }}</td><td><input aria-label="Quantità contata {{ p.name }}" type="number" required min="0" step="any" name="qty_{{ p.id }}" value="{{ p.qty }}" style="width:115px;max-width:100%"></td></tr>{% endfor %}
-</tbody></table>
-<button type="submit" class="btn" onclick="return confirm('Confermare il conteggio? Le quantità del magazzino saranno aggiornate.')">✅ Conferma e genera report</button>
-</form></div>
-{% endblock %}
+{% extends "base.html" %}{% set title="Scheda inventario" %}{% block content %}
+<div class="shine-hero"><span class="eyebrow">MAGAZZINO · {{ stores.get(store,store) }}</span><h1>{{ 'Scheda settimanale cucina' if area=='prodotti' else 'Scheda conteggio sala' }}</h1><p>Compila la scheda quando vuoi, salva una bozza e conferma solo quando il conteggio è completo. Le schede concluse restano nello storico.</p><div class="shine-actions"><a class="shine-button secondary" href="/inventario/report?area={{ area }}&store={{ store }}">📊 Report e consumi</a><a class="shine-button secondary" href="/inventario">← Magazzino</a></div></div>
+{% if request.query_params.get('saved') %}<div class="shine-notice">✓ Bozza salvata. Le quantità ufficiali non sono state modificate.</div>{% endif %}
+<div class="shine-grid"><div class="shine-stat"><span>Articoli da contare</span><strong>{{ products|length }}</strong></div><div class="shine-stat"><span>Settimana dal</span><strong>{{ week_start }}</strong></div><div class="shine-stat"><span>Ultima chiusura</span><strong style="font-size:18px">{{ latest.counted_at[:10] if latest else 'Da eseguire' }}</strong></div></div>
+{% if draft %}<p class="muted">Bozza modificata da {{ draft.updated_by }} · {{ draft.updated_at }}.</p>{% endif %}
+<form id="count-sheet" method="post" action="/inventario/conteggio?area={{ area }}&store={{ store }}">
+<input type="hidden" name="area" value="{{ area }}"><input type="hidden" name="store" value="{{ store }}">
+<div class="card shine-panel"><div class="shine-toolbar"><label>Data della rilevazione <input required type="date" name="count_date" value="{{ today }}" max="{{ today }}"></label><label>Trova prodotto <input id="sheet-search" type="search" placeholder="Nome o categoria…" autocomplete="off"></label><span id="sheet-progress" class="shine-count"></span></div>
+<p class="muted">Le quantità sono precompilate dalla giacenza attuale, oppure dalla tua bozza salvata. Verifica ogni riga prima di confermare.</p><div class="shine-table-wrap"><table class="shine-table"><thead><tr><th>Articolo</th><th>Giacenza sistema</th><th>Quantità contata</th></tr></thead><tbody>
+{% for prod in products %}<tr class="sheet-row"><td><div class="shine-item">{{ prod.name }}</div><span class="muted">{{ prod.category }} · {{ prod.unit or 'pz' }}</span></td><td>{{ prod.qty }}</td><td><input class="sheet-qty" type="number" required min="0" step="any" inputmode="decimal" name="qty_{{ prod.id }}" aria-label="Quantità {{ prod.name }}" value="{{ draft_values.get(prod.id|string,prod.qty) }}"></td></tr>{% endfor %}
+</tbody></table></div><div class="shine-actions shine-bottom"><button class="shine-button secondary" type="submit" formaction="/inventario/bozza" formnovalidate>💾 Salva bozza</button><button class="shine-button" type="submit" onclick="return confirm('Confermi il conteggio? Le giacenze ufficiali verranno aggiornate e sarà creato un report permanente.')">✓ Conferma inventario e archivia report</button></div></div></form>
+<div class="card shine-panel"><h2>🗂️ Schede archiviate</h2><p class="muted">I report già chiusi sono consultabili e stampabili in PDF dal browser.</p><div class="shine-history">{% for h in history %}<a href="/inventario/report?area={{ area }}&store={{ store }}&id={{ h.id }}"><span>📄 {{ h.counted_at[:10] }}</span><small>{{ h.username }} · Visualizza report →</small></a>{% else %}<p class="muted">Nessuna scheda archiviata.</p>{% endfor %}</div></div>
+<script>const input=document.querySelector('#sheet-search');input.addEventListener('input',()=>{const term=input.value.toLocaleLowerCase('it');document.querySelectorAll('.sheet-row').forEach(row=>row.hidden=!row.textContent.toLocaleLowerCase('it').includes(term));});const fields=document.querySelectorAll('.sheet-qty');function updateSheet(){document.getElementById('sheet-progress').textContent=fields.length+' righe nella scheda';}fields.forEach(f=>f.addEventListener('input',updateSheet));updateSheet();</script>{% endblock %}

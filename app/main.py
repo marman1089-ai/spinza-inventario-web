@@ -7301,8 +7301,7 @@ def closures_page(request: Request, q: str = ""):
 
     store = _effective_store(request, user)
     brand = "ALL" if store == "ALL" else store
-    from .document_jobs import ensure_archive
-    archive_state = ensure_archive(store, "chiusure")
+    archive_state = {"pending":0,"working":0,"error":0,"done":0,"configured":False,"token":""}
 
     q = (q or "").strip()
     ph = _ph()
@@ -7391,7 +7390,7 @@ async def closures_upload(request: Request, closure_date: str = Form(""), files:
         )
 
     # OCR gratuito avviato nel browser dalla pagina documento.
-    return RedirectResponse(f"/digitalizza/chiusure/{new_doc_id}?auto=1", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse("/chiusure", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/chiusure/{doc_id}")
@@ -7565,7 +7564,7 @@ async def secondary_expenses_upload(request: Request, expense_date: str = Form("
         )
 
     # OCR gratuito avviato nel browser dalla pagina documento.
-    return RedirectResponse(f"/digitalizza/spese/{new_doc_id}?auto=1", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse("/spese-secondarie", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/spese-secondarie/{doc_id}")
@@ -8513,7 +8512,7 @@ async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: 
         )
 
     # OCR gratuito avviato nel browser dalla pagina documento.
-    return RedirectResponse(f"/digitalizza/fatture/{new_doc_id}?auto=1", status_code=HTTP_303_SEE_OTHER)
+    return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
 
 
 @app.get("/fatture/importa-prodotti", response_class=HTMLResponse)
@@ -9144,6 +9143,15 @@ def document_digital_csv(request: Request,kind:str,document_id:int):
     return Response(content='\ufeff'+output.getvalue(),media_type='text/csv; charset=utf-8',headers={'Content-Disposition':f'attachment; filename="{kind}_{document_id}.csv"'})
 
 
+# La digitalizzazione dismessa non e piu raggiungibile, inclusi gli endpoint di scrittura.
+@app.middleware("http")
+async def disable_legacy_digitizer(request: Request, call_next):
+    url = request.url.path
+    if (url.startswith('/digitalizza/') or url.startswith('/registrazione-digitale/')
+        or url.startswith('/archivio-digitale/') or url.startswith('/admin/digitalizzazione')):
+        return PlainTextResponse('Funzione di digitalizzazione disattivata. I documenti originali restano in archivio.', status_code=410)
+    return await call_next(request)
+
 # =========================
 # CONTEGGI E REPORT CONSUMI - SALA / CUCINA
 # =========================
@@ -9163,6 +9171,10 @@ def _ensure_inventory_report_tables():
             received DOUBLE PRECISION, outgoing DOUBLE PRECISION)""")
         cur.execute("CREATE INDEX IF NOT EXISTS ix_stock_counts_lookup ON inventory_period_count_headers(store, area, counted_at)")
         cur.execute("CREATE INDEX IF NOT EXISTS ix_stock_lines_lookup ON inventory_period_count_lines(count_id, product_id)")
+        cur.execute("""CREATE TABLE IF NOT EXISTS inventory_week_drafts (
+            store TEXT NOT NULL, area TEXT NOT NULL, week_start TEXT NOT NULL,
+            payload TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by TEXT NOT NULL,
+            PRIMARY KEY (store, area, week_start))""")
 
 
 def _stock_context(request):
@@ -9190,20 +9202,26 @@ def _stock_arrivals(cur, store, area, product, after, until):
 
 @app.get('/inventario/conteggio',response_class=HTMLResponse)
 def stock_count_form(request: Request):
+    _ensure_inventory_report_tables()
     user,area,store=_stock_context(request)
     if not user: return RedirectResponse('/',status_code=303)
     ph=_ph()
+    week_start=(date.today()-__import__('datetime').timedelta(days=date.today().weekday())).isoformat()
     with connect() as conn:
         cur=conn.cursor()
+        draft=cur.execute(f"SELECT payload, updated_at, updated_by FROM inventory_week_drafts WHERE store={ph} AND area={ph} AND week_start={ph}",(store,area,week_start)).fetchone()
+        draft_values=json.loads(draft['payload']) if draft else {}
+        history=cur.execute(f"SELECT id,counted_at,username FROM inventory_period_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC,id DESC LIMIT 16",(store,area)).fetchall()
         rows=cur.execute(f"SELECT id,name,category,unit,qty FROM products WHERE store={ph} AND area={ph} ORDER BY category,name",(store,area)).fetchall()
         # Gli eventuali duplicati storici sono visualizzati come righe separate e mantengono ID diversi.
         latest=cur.execute(f"SELECT counted_at FROM inventory_period_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC,id DESC LIMIT 1",(store,area)).fetchone()
     return render('stock_count_form.html', user=user,area=area,store=store,stores=STORES,
-        products=rows,latest=latest, today=date.today().isoformat())
+        products=rows,latest=latest, today=date.today().isoformat(), week_start=week_start, draft_values=draft_values, draft=draft, history=history, request=request)
 
 
 @app.post('/inventario/conteggio')
 async def stock_count_submit(request: Request):
+    _ensure_inventory_report_tables()
     user,area,store=_stock_context(request)
     if not user: return RedirectResponse('/',status_code=303)
     data=await request.form()
@@ -9257,11 +9275,14 @@ async def stock_count_submit(request: Request):
             # Il conteggio è la nuova quantità fisica ufficiale. Lo storico non viene riscritto.
             cur.execute(f"UPDATE products SET qty={ph},updated_at={_now()} WHERE id={ph} AND store={ph} AND area={ph}",(qty,product['id'],store,area))
             _log(cur,store=store,username=user['username'],action='CONTEGGIO_'+area.upper(),category=product['category'],name=product['name'],delta=qty)
+        week_start=(counted-__import__('datetime').timedelta(days=counted.weekday())).isoformat()
+        cur.execute(f"DELETE FROM inventory_week_drafts WHERE store={ph} AND area={ph} AND week_start={ph}",(store,area,week_start))
     return RedirectResponse(f'/inventario/report?area={area}&store={store}&id={count_id}',status_code=303)
 
 
 @app.get('/inventario/report',response_class=HTMLResponse)
 def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',end:str='',id:int=0):
+    _ensure_inventory_report_tables()
     user,default_area,default_store=_stock_context(request)
     if not user: return RedirectResponse('/',status_code=303)
     if area not in ('prodotti','bibite'): area=default_area
@@ -9307,4 +9328,67 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
         known=cur.execute(f"SELECT counted_at FROM inventory_period_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC LIMIT 1",(store,area)).fetchone()
     return render('stock_report.html',user=user,area=area,store=store,stores=STORES,
         start=start_day.isoformat(),end=end_day.isoformat(),periods=periods,totals=summaries,
-        known=known,generated=id>0)
+        known=known,generated=id>0,id=id)
+
+
+@app.post('/inventario/bozza')
+async def inventory_save_week_draft(request: Request):
+    _ensure_inventory_report_tables()
+    user, area, store = _stock_context(request)
+    if not user:
+        return RedirectResponse('/',status_code=303)
+    form=await request.form()
+    area=str(form.get('area') or area)
+    store=str(form.get('store') or store)
+    if area not in ('prodotti','bibite') or store not in STORES or (not is_admin(request) and store != user.get('store')):
+        return PlainTextResponse('Reparto o sede non autorizzati',status_code=403)
+    try:
+        counted=date.fromisoformat(str(form.get('count_date') or ''))
+        if counted > date.today(): raise ValueError()
+    except ValueError:
+        return PlainTextResponse('Data non valida',status_code=400)
+    week_start=(counted-__import__('datetime').timedelta(days=counted.weekday())).isoformat()
+    ph=_ph()
+    with connect() as conn:
+        cur=conn.cursor()
+        products=cur.execute(f"SELECT id FROM products WHERE store={ph} AND area={ph}",(store,area)).fetchall()
+        values={}
+        for product in products:
+            item_id=str(product['id'])
+            raw=str(form.get('qty_'+item_id,'')).strip().replace(',','.')
+            if not raw: continue
+            try:
+                qty=float(raw)
+                if not __import__('math').isfinite(qty) or qty < 0 or qty > 1e9: raise ValueError()
+            except ValueError: return PlainTextResponse('Quantita non valida',status_code=400)
+            values[item_id]=qty
+        payload=json.dumps(values)
+        # UPDATE/INSERT portabile senza cancellare il contenuto delle altre settimane.
+        cur.execute(f"DELETE FROM inventory_week_drafts WHERE store={ph} AND area={ph} AND week_start={ph}",(store,area,week_start))
+        cur.execute(f"INSERT INTO inventory_week_drafts(store,area,week_start,payload,updated_at,updated_by) VALUES({ph},{ph},{ph},{ph},CURRENT_TIMESTAMP,{ph})",(store,area,week_start,payload,user['username']))
+    return RedirectResponse(f'/inventario/conteggio?area={area}&store={store}&saved=1',status_code=303)
+
+@app.get('/inventario/report/csv')
+def inventory_count_csv(request: Request, area: str='prodotti', store: str='', id: int=0):
+    _ensure_inventory_report_tables()
+    user, fallback_area, fallback_store = _stock_context(request)
+    if not user: return RedirectResponse('/', status_code=303)
+    store=store or fallback_store
+    if area not in ('prodotti','bibite') or store not in STORES or (not is_admin(request) and store != user.get('store')):
+        return PlainTextResponse('Accesso non consentito',status_code=403)
+    ph=_ph()
+    with connect() as conn:
+        cur=conn.cursor()
+        head=cur.execute(f'SELECT id, counted_at FROM inventory_period_count_headers WHERE id={ph} AND store={ph} AND area={ph}',(id,store,area)).fetchone()
+        if not head: return PlainTextResponse('Scheda non trovata',status_code=404)
+        lines=cur.execute(f'SELECT category,name,unit,observed,previous,received,outgoing FROM inventory_period_count_lines WHERE count_id={ph} ORDER BY category,name',(id,)).fetchall()
+    out=io.StringIO()
+    writer=csv.writer(out,delimiter=';')
+    writer.writerow(['Negozio','Reparto','Data','Categoria','Prodotto','Unita','Conteggio','Conteggio precedente','Arrivi','Uscite'])
+    def safe(x):
+        if x is None:return ''
+        v=str(x)
+        return "'"+v if v.lstrip().startswith(('=','+','-','@')) else v
+    for row in lines:
+        writer.writerow([safe(store),safe(area),safe(head['counted_at'])]+[safe(row[k]) for k in ('category','name','unit','observed','previous','received','outgoing')])
+    return Response('\ufeff'+out.getvalue(), media_type='text/csv; charset=utf-8',headers={'Content-Disposition':f'attachment; filename="inventario_{area}_{id}.csv"'})
