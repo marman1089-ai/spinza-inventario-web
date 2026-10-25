@@ -13,6 +13,7 @@ from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException
 from .pdf_tools import ensure_pdf, merge_pdfs
 from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.status import HTTP_303_SEE_OTHER
@@ -382,10 +383,14 @@ def _startup():
     print("[STARTUP] DATABASE_URL presente:", bool(db_url))
     print("[STARTUP] DB TYPE:", "POSTGRES (Supabase)" if using_postgres() else "SQLITE (ATTENZIONE)")
 
+    from .startup_guard import needs_schema_sync
     ensure_db_exists()
-    init_db()
-    _ensure_inventory_report_tables()
-    print("[STARTUP] init_db() completato")
+    if needs_schema_sync():
+        print('[STARTUP] Aggiornamento schema necessario (solo prima volta / nuova versione)')
+        init_db()
+        _ensure_inventory_report_tables()
+    else:
+        print('[STARTUP] Schema gia aggiornato: salto DDL ripetitivo su Supabase')
 
     # Operazioni di ripristino/riclassificazione sono manutenzione UNA TANTUM.
     # Non farle ad ogni riavvio di Render: possono fare centinaia di query remote.
@@ -7360,7 +7365,7 @@ async def closures_upload(request: Request, closure_date: str = Form(""), files:
         raw = await f.read()
         if len(raw) > 18 * 1024 * 1024:
             raise HTTPException(413, "Un singolo file supera 18 MB.")
-        pdf_bytes, _, _ = ensure_pdf(raw, filename_in, content_type_in)
+        pdf_bytes, _, _ = await run_in_threadpool(ensure_pdf, raw, filename_in, content_type_in)
         if not pdf_bytes.startswith(b"%PDF"):
             raise HTTPException(422, "Il file non è una foto o un PDF valido.")
         pdfs.append(pdf_bytes)
@@ -7369,7 +7374,7 @@ async def closures_upload(request: Request, closure_date: str = Form(""), files:
     if not pdfs:
         return RedirectResponse("/chiusure", status_code=HTTP_303_SEE_OTHER)
 
-    content = merge_pdfs(pdfs) if len(pdfs) > 1 else pdfs[0]
+    content = await run_in_threadpool(merge_pdfs, pdfs) if len(pdfs) > 1 else pdfs[0]
     first_name = (files[0].filename if files and files[0].filename else base_name) or base_name
     filename = first_name if first_name.lower().endswith(".pdf") else f"{first_name}.pdf"
     content_type = "application/pdf"
@@ -7544,7 +7549,7 @@ async def secondary_expenses_upload(request: Request, expense_date: str = Form("
         raw = await f.read()
         if len(raw) > 18 * 1024 * 1024:
             raise HTTPException(413, "Un singolo file supera 18 MB.")
-        pdf_bytes, _, _ = ensure_pdf(raw, filename_in, content_type_in)
+        pdf_bytes, _, _ = await run_in_threadpool(ensure_pdf, raw, filename_in, content_type_in)
         if not pdf_bytes.startswith(b"%PDF"):
             raise HTTPException(422, "Il file non è una foto o un PDF valido.")
         pdfs.append(pdf_bytes)
@@ -7552,7 +7557,7 @@ async def secondary_expenses_upload(request: Request, expense_date: str = Form("
     if not pdfs:
         return RedirectResponse("/spese-secondarie", status_code=HTTP_303_SEE_OTHER)
 
-    content = merge_pdfs(pdfs) if len(pdfs) > 1 else pdfs[0]
+    content = await run_in_threadpool(merge_pdfs, pdfs) if len(pdfs) > 1 else pdfs[0]
     first_name = (files[0].filename if files and files[0].filename else base_name) or base_name
     filename = first_name if first_name.lower().endswith(".pdf") else f"{first_name}.pdf"
     content_type = "application/pdf"
@@ -8504,7 +8509,7 @@ async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: 
         raw = await f.read()
         if len(raw) > 18 * 1024 * 1024:
             raise HTTPException(413, "Un singolo file supera 18 MB.")
-        pdf_bytes, _, _ = ensure_pdf(raw, filename_in, content_type_in)
+        pdf_bytes, _, _ = await run_in_threadpool(ensure_pdf, raw, filename_in, content_type_in)
         if not pdf_bytes.startswith(b"%PDF"):
             raise HTTPException(422, "Il file non è una foto o un PDF valido.")
         pdfs.append(pdf_bytes)
@@ -8513,7 +8518,7 @@ async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: 
     if not pdfs:
         return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
 
-    content = merge_pdfs(pdfs) if len(pdfs) > 1 else pdfs[0]
+    content = await run_in_threadpool(merge_pdfs, pdfs) if len(pdfs) > 1 else pdfs[0]
     first_name = (files[0].filename if files and files[0].filename else base_name) or base_name
     filename = first_name if first_name.lower().endswith(".pdf") else f"{first_name}.pdf"
     content_type = "application/pdf"

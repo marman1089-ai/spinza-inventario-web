@@ -133,7 +133,13 @@ def install(app,api):
         return cur.execute(f"SELECT id,start_date,end_date,filename FROM pos_import_batches WHERE store={ph()} AND kind={ph()} AND status='active' AND start_date<={ph()} AND end_date>={ph()} ORDER BY id",
             (row['store'],row['kind'],row['end_date'],row['start_date'])).fetchall()
     @app.on_event('startup')
-    def startup_pos():init_pos()
+    def startup_pos():
+        from .startup_guard import needs_schema_sync, mark_schema_synced
+        if needs_schema_sync():
+            init_pos()
+            mark_schema_synced()
+        else:
+            print('[STARTUP] Schema POS gia verificato')
 
     @app.get('/admin/cassa')
     def index(request: Request):

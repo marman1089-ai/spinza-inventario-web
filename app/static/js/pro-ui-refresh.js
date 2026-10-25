@@ -100,24 +100,6 @@
     startLoading(hasFile ? 'Carico il file...' : 'Salvo e aggiorno...');
   }, true);
 
-  // Prefetch leggero quando passi sopra o tocchi un link interno.
-  function prefetch(a){
-    if(shouldIgnoreLink(a)) return;
-    const href = new URL(a.getAttribute('href'), window.location.href).href;
-    if(state.prefetched.has(href)) return;
-    state.prefetched.add(href);
-    const link = document.createElement('link');
-    link.rel = 'prefetch';
-    link.href = href;
-    link.as = 'document';
-    document.head.appendChild(link);
-  }
-  document.addEventListener('mouseover', function(ev){
-    const a = ev.target && ev.target.closest ? ev.target.closest('a') : null;
-    if(a) prefetch(a);
-  }, {passive:true});
-  document.addEventListener('touchstart', function(ev){
-    const a = ev.target && ev.target.closest ? ev.target.closest('a') : null;
-    if(a) prefetch(a);
-  }, {passive:true});
+  // Prefetch disattivato: apriva pagine e query DB solo passando il mouse sui link.
+
 })();

@@ -1,5 +1,6 @@
 import os
 from contextlib import contextmanager
+from threading import Lock
 
 # SQLite (solo fallback locale)
 import sqlite3
@@ -13,6 +14,31 @@ try:
 except ImportError:
     psycopg = None
     dict_row = None
+
+try:
+    from psycopg_pool import ConnectionPool
+except ImportError:
+    ConnectionPool = None
+
+_pg_pool = None
+_pg_pool_lock = Lock()
+
+def _get_postgres_pool(url):
+    """Reuse connections rather than new SSL handshakes on every page and upload."""
+    global _pg_pool
+    if ConnectionPool is None:
+        return None
+    if _pg_pool is None:
+        with _pg_pool_lock:
+            if _pg_pool is None:
+                _pg_pool = ConnectionPool(
+                    conninfo=url,
+                    min_size=0, max_size=int(os.environ.get("DB_POOL_MAX", "5")),
+                    timeout=15, max_idle=120,
+                    kwargs={"row_factory": dict_row, "sslmode": "require", "connect_timeout": 10},
+                    open=True,
+                )
+    return _pg_pool
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -60,9 +86,14 @@ def connect():
                 "DATABASE_URL è impostata ma il pacchetto psycopg non è installato. "
                 "Esegui: pip install -r requirements.txt"
             )
+        pool = _get_postgres_pool(url)
         try:
-            conn = psycopg.connect(url, row_factory=dict_row, sslmode="require")
-        except psycopg.OperationalError as exc:
+            conn_scope = pool.connection() if pool is not None else None
+            if conn_scope is not None:
+                conn = conn_scope.__enter__()
+            else:
+                conn = psycopg.connect(url, row_factory=dict_row, sslmode="require", connect_timeout=10)
+        except (psycopg.OperationalError, TimeoutError) as exc:
             message = str(exc)
             print("[DATABASE] Connessione PostgreSQL/Supabase non riuscita.")
             print("[DATABASE] Nessun dato è stato cancellato o modificato.")
@@ -73,8 +104,15 @@ def connect():
         try:
             yield conn
             conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
         finally:
-            conn.close()
+            if conn_scope is not None:
+                # Pool connection returns to pool after context cleanup.
+                conn_scope.__exit__(None, None, None)
+            else:
+                conn.close()
         return
 
     # --- SQLITE fallback ---

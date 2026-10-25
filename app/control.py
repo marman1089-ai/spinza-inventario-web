@@ -176,10 +176,16 @@ def install(app, api):
 
     @app.on_event('startup')
     def startup_control():
-        init_control_db()
-        from .document_jobs import enqueue_history,start_worker
-        enqueue_history()
-        start_worker()
+        from .startup_guard import needs_schema_sync
+        if needs_schema_sync():
+            init_control_db()
+        # Il vecchio OCR automatico non viene piu utilizzato: la scansione
+        # storica delle fatture impiegava molte query per ogni avvio Render.
+        # Riattivabile esplicitamente solo se necessario per manutenzione.
+        if os.getenv('ENABLE_LEGACY_DOCUMENT_OCR') == '1':
+            from .document_jobs import enqueue_history, start_worker
+            enqueue_history()
+            start_worker()
 
     @app.on_event('shutdown')
     def shutdown_control():
