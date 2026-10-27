@@ -8945,6 +8945,50 @@ async def invoice_import_confirm(request: Request, draft_id: int):
     return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
 
+@app.post("/fatture/{doc_id}/modifica")
+async def invoice_edit(request: Request, doc_id: int, supplier: str = Form(""), rotation: int = Form(0)):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if not is_admin(request):
+        raise HTTPException(403, "Solo admin può modificare fatture")
+    if rotation not in (0, 90, 180, 270):
+        raise HTTPException(422, "Rotazione non valida")
+    supplier = " ".join(supplier.split()).strip()
+    if not supplier or len(supplier) > 180:
+        raise HTTPException(422, "Fornitore mancante o troppo lungo")
+    store = _effective_store(request, user)
+    ph = _ph()
+    from io import BytesIO
+    with connect() as conn:
+        cur = conn.cursor()
+        condition = f"id={ph}" if store == "ALL" else f"id={ph} AND store={ph}"
+        params = (doc_id,) if store == "ALL" else (doc_id, store)
+        row = cur.execute(f"SELECT store, supplier, data FROM invoices_docs WHERE {condition}", params).fetchone()
+        if not row:
+            raise HTTPException(404, "Fattura non trovata")
+        existing = cur.execute("SELECT DISTINCT supplier FROM invoices_docs WHERE supplier IS NOT NULL").fetchall()
+        canonical = next((r['supplier'] for r in existing if _supplier_key(r['supplier']) == _supplier_key(supplier)), None)
+        supplier = canonical or supplier
+        data = bytes(row['data'])
+        if rotation:
+            from pypdf import PdfReader, PdfWriter
+            try:
+                reader = PdfReader(BytesIO(data))
+                writer = PdfWriter()
+                for page in reader.pages:
+                    page.rotate(rotation)
+                    writer.add_page(page)
+                output = BytesIO()
+                writer.write(output)
+                data = output.getvalue()
+            except Exception as exc:
+                raise HTTPException(422, "Impossibile ruotare il PDF originale") from exc
+        cur.execute(f"UPDATE invoices_docs SET supplier={ph}, data={ph} WHERE id={ph}", (supplier, data, doc_id))
+        _log(cur, store=row['store'], username=user['username'], action="FATTURA_MODIFICATA", category="FATTURE", name=f"#{doc_id} {supplier}", delta=0.0)
+    return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
+
+
 @app.get("/fatture/{doc_id}")
 def invoices_download(request: Request, doc_id: int):
     user = require_login(request)

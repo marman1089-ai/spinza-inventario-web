@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% set title="Fatture" %}{% block content %}
 <link rel="stylesheet" href="/static/multi_upload.css?v=3">
 <style>
-.supplier-picker{position:relative;flex:1;min-width:220px}.supplier-picker input{width:100%;box-sizing:border-box}
+.supplier-picker{position:relative;flex:1;min-width:220px}.supplier-picker input{width:100%;box-sizing:border-box}.supplier-native-select{display:block!important;width:100%;min-height:42px;margin-top:7px;background:#1c2330;color:#fff;border:1px solid #64748b;border-radius:9px;padding:8px;max-width:100%;cursor:pointer}.supplier-picker:focus-within .supplier-native-select{border-color:#64b5f6}
 .supplier-menu{position:absolute;z-index:40;top:100%;left:0;right:0;max-height:245px;overflow:auto;background:var(--panel,#1c2330);color:var(--text,#fff);border:1px solid #64748b;border-radius:10px;box-shadow:0 14px 24px #0006}
 .supplier-menu[hidden]{display:none}.supplier-option{display:block;width:100%;background:transparent;color:inherit;border:0;text-align:left;padding:11px 14px;cursor:pointer}
 .supplier-option:hover,.supplier-option:focus{background:#64748b44}.supplier-logo{position:absolute;right:16px;top:14px;width:66px;height:55px;object-fit:contain}
@@ -9,10 +9,10 @@
 </style>
 <div class="shine-hero"><span class="eyebrow">ARCHIVIO DOCUMENTALE</span><h1>🧾 Fatture</h1><p>Carica e consulta gli originali in foto o PDF.</p></div>
 <div class="card shine-panel">
-<form method="get" action="/fatture" class="shine-toolbar"><div class="supplier-picker" data-supplier-picker data-search="1"><input name="supplier" placeholder="Cerca fatture per fornitore" value="{{ supplier or '' }}" autocomplete="off" aria-label="Cerca fornitore"><div class="supplier-menu" role="listbox" hidden></div></div><button class="shine-button">Cerca</button></form>
+<form method="get" action="/fatture" class="shine-toolbar"><div class="supplier-picker" data-supplier-picker data-search="1"><input name="supplier" placeholder="Cerca fatture per fornitore" value="{{ supplier or '' }}" autocomplete="off" aria-label="Cerca fornitore"><select name="supplier_choice" class="supplier-native-select" aria-label="Elenco fornitori ricerca" size="1"><option value="">Tutti i fornitori</option>{% for name in suppliers %}<option value="{{ name }}">{{ name }}</option>{% endfor %}</select></div><button class="shine-button">Cerca</button></form>
 <h3>Carica nuovo documento</h3>
 <form method="post" action="/fatture/upload" enctype="multipart/form-data">
-  <div class="supplier-picker" data-supplier-picker><input name="supplier" placeholder="Cerca o seleziona fornitore" autocomplete="off" aria-label="Fornitore" aria-expanded="false" aria-controls="supplier-options"><div class="supplier-menu" id="supplier-options" role="listbox" hidden></div></div>
+  <div class="supplier-picker" data-supplier-picker><label>🔎 Cerca nell’elenco o aggiungi un fornitore nuovo</label><input name="supplier" placeholder="Cerca o seleziona fornitore" autocomplete="off" aria-label="Fornitore" aria-expanded="false" aria-controls="supplier-options"><select name="supplier_choice" class="supplier-native-select" aria-label="Elenco fornitori per nuova fattura" required><option value="">▼ Seleziona un fornitore dall’elenco</option>{% for name in suppliers %}<option value="{{ name }}">{{ name }}</option>{% endfor %}<option value="__new__">+ Aggiungi fornitore</option></select></div>
   <input name="doc_date" type="date" aria-label="Data fattura">
   <div class="upload-collector" data-document-upload></div>
   <div class="multi-upload-hint">📷 Seleziona più foto oppure PDF: verranno salvati in <strong>un solo documento multipagina</strong>. <span class="upload-count" aria-live="polite"></span></div>
@@ -22,7 +22,7 @@
 {% if user.role == 'admin' %}
 <div class="card shine-panel"><h3>🏢 Aggiungi loghi in PNG</h3><p class="muted">Solo admin: assegna un logo trasparente a un fornitore. Il logo apparirà su tutte le sue fatture, anche quelle già caricate.</p>
 <form class="logo-form" method="post" action="/fatture/logo/upload" enctype="multipart/form-data">
-<div class="supplier-picker" data-supplier-picker data-existing-only="1"><input name="supplier" required placeholder="Seleziona un fornitore esistente" autocomplete="off" aria-label="Fornitore per il logo" aria-expanded="false"><div class="supplier-menu" role="listbox" hidden></div></div>
+<div class="supplier-picker" data-supplier-picker data-existing-only="1"><label>🔎 Cerca e scegli il fornitore</label><input name="supplier" required placeholder="Seleziona un fornitore esistente" autocomplete="off" aria-label="Fornitore per il logo" aria-expanded="false"><select name="supplier_choice" class="supplier-native-select" aria-label="Elenco fornitori per logo" required><option value="">▼ Seleziona un fornitore per il logo</option>{% for name in suppliers %}<option value="{{ name }}">{{ name }}</option>{% endfor %}</select></div>
 <input type="file" name="logo" accept="image/png,.png" required aria-label="Logo PNG trasparente"><button class="shine-button">+ Aggiungi logo</button>
 </form></div>{% endif %}
 <div class="shine-doc-grid">{% for r in rows %}<div class="card shine-panel invoice-card">
@@ -30,25 +30,47 @@
 <span class="eyebrow">{{ stores.get(r.store,r.store) }}</span><h3>🧾 {{ r.supplier or 'Fornitore non indicato' }}</h3>
 <p><strong>📅 Data fattura:</strong> {{ r.doc_date or 'Non indicata' }}</p><p><strong>👤 Caricata da:</strong> {{ r.uploaded_by or 'Non indicato' }}</p>
 <p class="muted">📄 {{ r.filename or 'Documento' }}</p>
-{% if user.role=='admin' %}<a class="shine-button secondary" href="/fatture/{{ r.id }}" target="_blank">Apri originale</a><form action="/fatture/{{ r.id }}/delete" method="post" onsubmit="return confirm('Eliminare il documento?')"><button class="shine-button secondary">Elimina</button></form>{% endif %}
+{% if user.role=='admin' %}<details class="invoice-editor"><summary>✏️ Modifica fattura (fornitore / orientamento)</summary>
+<form method="post" action="/fatture/{{ r.id }}/modifica">
+<div class="supplier-picker" data-supplier-picker><label>Fornitore</label><input name="supplier" value="{{ r.supplier or '' }}" placeholder="Cerca fornitore" autocomplete="off"><select name="supplier_choice" class="supplier-native-select" aria-label="Fornitore fattura">{% for name in suppliers %}<option value="{{ name }}" {% if name == r.supplier %}selected{% endif %}>{{ name }}</option>{% endfor %}<option value="__new__">+ Aggiungi fornitore</option></select></div>
+<label>Ruota documento <select name="rotation"><option value="0">Non ruotare</option><option value="90">90° in senso orario</option><option value="180">180°</option><option value="270">90° in senso antiorario</option></select></label><button class="shine-button" type="submit">Salva modifiche</button></form></details>
+<a class="shine-button secondary" href="/fatture/{{ r.id }}" target="_blank">Apri originale</a><form action="/fatture/{{ r.id }}/delete" method="post" onsubmit="return confirm('Eliminare il documento?')"><button class="shine-button secondary">Elimina</button></form>{% endif %}
 </div>{% else %}<div class="card shine-panel">Nessun documento ancora caricato.</div>{% endfor %}</div>
-<script id="supplier-data" type="application/json">{{ suppliers|tojson }}</script>
 <script>
-(()=>{const suppliers=JSON.parse(document.getElementById('supplier-data').textContent);
+(()=>{
+const norm=v=>(v||'').trim().replace(/\s+/g,' ').toLocaleLowerCase();
 for(const picker of document.querySelectorAll('[data-supplier-picker]')){
- const input=picker.querySelector('input[name="supplier"]'), menu=picker.querySelector('.supplier-menu');
- const normalize=s=>s.trim().replace(/\s+/g,' ').toLocaleLowerCase();
- function close(){menu.hidden=true;input.setAttribute('aria-expanded','false')}
- function draw(){const term=normalize(input.value);menu.replaceChildren();const matches=suppliers.filter(s=>normalize(s).includes(term));
- const exact=suppliers.some(s=>normalize(s)===term);
- if(matches.length){for(const s of matches){const item=document.createElement('button');item.type='button';item.className='supplier-option';item.setAttribute('role','option');item.textContent=s;item.addEventListener('mousedown',e=>e.preventDefault());item.addEventListener('click',()=>{input.value=s;close()});menu.appendChild(item)}}
- if(term&&!exact&&!picker.hasAttribute('data-existing-only')&&!picker.hasAttribute('data-search')){const add=document.createElement('button');add.type='button';add.className='supplier-option';add.textContent='+ Aggiungi fornitore: '+input.value.trim();add.addEventListener('mousedown',e=>e.preventDefault());add.addEventListener('click',()=>{input.value=input.value.trim();close()});menu.appendChild(add)}
- if(!menu.children.length){close();return}menu.hidden=false;input.setAttribute('aria-expanded','true')}
- input.addEventListener('focus',draw);input.addEventListener('input',draw);input.addEventListener('keydown',e=>{if(e.key==='Escape')close();if(e.key==='Enter'&&!menu.hidden){const option=menu.querySelector('.supplier-option');if(option){e.preventDefault();option.click()}}});
- document.addEventListener('click',e=>{if(!picker.contains(e.target))close()});
-}}
-
-for(const form of document.querySelectorAll('form[action="/fatture/logo/upload"]')){form.addEventListener('submit',function(e){const input=form.querySelector('input[name="supplier"]');if(!suppliers.some(n=>n.trim().toLocaleLowerCase()===input.value.trim().toLocaleLowerCase())){e.preventDefault();input.setCustomValidity('Seleziona un fornitore dall’elenco');input.reportValidity();}else input.setCustomValidity('');});}
+ const input=picker.querySelector('input[name="supplier"]'), select=picker.querySelector('select');
+ const isSearch=picker.hasAttribute('data-search'), existingOnly=picker.hasAttribute('data-existing-only');
+ const names=Array.from(select.options).filter(o=>o.value&&!o.value.startsWith('__')).map(o=>o.value);
+ const oldValue=input.value;
+ function update(){
+   const query=norm(input.value), exact=names.some(n=>norm(n)===query);
+   const current=select.value;
+   select.replaceChildren();
+   if(isSearch)select.add(new Option('Tutti i fornitori',''));
+   else select.add(new Option('▼ Seleziona fornitore',''));
+   const matches=names.filter(n=>!query||norm(n).includes(query));
+   matches.forEach(n=>select.add(new Option(n,n)));
+   if(!existingOnly && !isSearch && query&&!exact)select.add(new Option('+ Aggiungi fornitore: '+input.value.trim(),'__new__'));
+   if(!matches.length&&(isSearch||existingOnly))select.add(new Option('Nessun fornitore trovato','',true,false));
+   // NON scegliere automaticamente il primo fornitore filtrato.
+   if(matches.includes(current) && norm(current)===query)select.value=current;
+   else if(exact){select.value=names.find(n=>norm(n)===query)}
+   else if(!existingOnly&&!isSearch&&query)select.value='__new__';
+   else select.value='';
+ }
+ input.addEventListener('input',update);
+ select.addEventListener('change',()=>{if(select.value==='__new__'){input.focus();return;}input.value=select.value;update()});
+ const form=picker.closest('form');
+ form?.addEventListener('submit',e=>{
+   const value=input.value.trim();
+   if(existingOnly&&!names.some(n=>norm(n)===norm(value))){e.preventDefault();input.setCustomValidity('Seleziona dall’elenco un fornitore già esistente');input.reportValidity();return;}
+   if(!isSearch&&!value){e.preventDefault();input.setCustomValidity('Seleziona o inserisci il fornitore');input.reportValidity();}
+ });
+ input.addEventListener('input',()=>input.setCustomValidity(''));
+ update();
+}
 })();
 </script><script src="/static/js/document_multi_upload.js?v=3" defer></script>
 {% endblock %}

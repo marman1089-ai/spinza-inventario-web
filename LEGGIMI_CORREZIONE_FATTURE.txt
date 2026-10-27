@@ -1,0 +1,8 @@
+CORREZIONE FATTURE — 27 ottobre 2026
+- Un solo progetto principale nella cartella radice (app/main.py e app/templates/invoices.html).
+- Menu select nativo SEMPRE visibile, con ricerca testuale, su: filtro fatture, caricamento, loghi admin e modifica.
+- Un nome non presente mostra + Aggiungi fornitore durante caricamento/modifica.
+- Ogni fattura ha Modifica fattura (admin) per correggere il fornitore e ruotare l'originale PDF 90/180/270 gradi; le rotazioni sono permanenti.
+- Logo associato per nome del fornitore sulla scheda fattura.
+Nota: distribuire il contenuto di questo ZIP come radice del progetto su Render; non caricare copie annidate precedenti.
+Test: compilazione Python e rendering Jinja riusciti. Non testato con un database di produzione o browser connesso a Render.
