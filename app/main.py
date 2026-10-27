@@ -1005,7 +1005,7 @@ def _detect_import_store(line: str, current_store: str) -> str:
     if 'CAMALDOLI' in upper:
         return 'reburger_camaldoli'
     if 'PALAZZUOLO' in upper or 'PALAZZUOLI' in upper:
-        return 'reburger_palazzuolo'
+        return 'reburger_maggio'
     return current_store or 'spinza'
 
 
