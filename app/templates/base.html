@@ -360,19 +360,6 @@
           <a href="/scambi">🔁 Scambi tra negozi</a>
         </div>
       </details>
-      <details class="nav-dd" id="navStrumenti">
-        <summary class="pill" style="text-decoration:none;color:var(--text)">Strumenti digitali</summary>
-        <div class="nav-dd-panel">
-          <a href="/fatture">Archivio fatture</a>
-          <a href="/chiusure">Archivio chiusure</a>
-          <a href="/spese-secondarie">Archivio spese</a>
-          <a href="/inventario/conteggio?area=bibite">Conteggio Sala giornaliero</a>
-          <a href="/inventario/conteggio?area=prodotti">Conteggio Cucina settimanale</a>
-          <a href="/inventario/report?area=bibite">Report consumi Sala</a>
-          <a href="/inventario/report?area=prodotti">Report consumi Cucina</a>
-          {% if user.role=='admin' %}<a href="/admin/controllo">Centro di controllo</a><a href="/admin/cassa">Carica CSV cassa</a><a href="/admin/cassa/report">Vendite e consumi</a><a href="/report-documenti">Report documenti</a>{% endif %}
-        </div>
-      </details>
       {% if user.role == 'admin' %}
         <a href="/file-archiviati" class="pill" style="text-decoration:none;color:var(--text)">🗄️ File archiviati</a>
       {% endif %}
@@ -437,17 +424,6 @@
         <a href="/scambi" onclick="closeMobileMenu()">🔁 Scambi tra negozi</a>
       </div>
 
-      <div class="section">Strumenti digitali</div>
-      <div class="sub">
-        <a href="/fatture">Archivio fatture</a>
-        <a href="/chiusure">Archivio chiusure</a>
-        <a href="/spese-secondarie">Archivio spese</a>
-        <a href="/inventario/conteggio?area=bibite">Conteggio Sala giornaliero</a>
-        <a href="/inventario/conteggio?area=prodotti">Conteggio Cucina settimanale</a>
-        <a href="/inventario/report?area=bibite">Report consumi Sala</a>
-        <a href="/inventario/report?area=prodotti">Report consumi Cucina</a>
-        {% if user.role=='admin' %}<a href="/admin/controllo">Centro di controllo</a><a href="/admin/cassa">Carica CSV cassa</a><a href="/admin/cassa/report">Vendite e consumi</a><a href="/report-documenti">Report documenti</a>{% endif %}
-      </div>
       <div class="section">Altro</div>
       {% if user.role == 'admin' %}
         <a href="/file-archiviati" onclick="closeMobileMenu()">🗄️ File archiviati</a>

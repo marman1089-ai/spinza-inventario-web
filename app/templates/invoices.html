@@ -1,1 +1,52 @@
-{% extends "base.html" %}{% set title="Fatture" %}{% block content %}<link rel="stylesheet" href="/static/multi_upload.css?v=3"><div class="shine-hero"><span class="eyebrow">ARCHIVIO DOCUMENTALE</span><h1>🧾 Fatture</h1><p>Carica e consulta gli originali in foto o PDF, senza OCR o compilazione digitale.</p></div><div class="card shine-panel"><form method="get" action="/fatture" class="shine-toolbar"><input name="supplier" placeholder="Cerca" value="{{ supplier or '' }}"><button class="shine-button">Cerca</button></form><h3>Carica nuovo documento</h3><form method="post" action="/fatture/upload" enctype="multipart/form-data"><input name="supplier" placeholder="Fornitore (facoltativo)" type="text"><input name="doc_date" type="date" aria-label="Data fattura"><div class="upload-collector" data-document-upload></div><div class="multi-upload-hint">📷 Seleziona più foto oppure PDF: verranno salvati in <strong>un solo documento multipagina</strong>. <span class="upload-count" aria-live="polite"></span></div><button class="shine-button">📤 Salva originale</button></form></div><div class="shine-doc-grid">{% for r in rows %}<div class="card shine-panel"><span class="eyebrow">{{ stores.get(r.store,r.store) }}</span><h3>🧾 {{ r.supplier or 'Fornitore non indicato' }}</h3><p><strong>📅 Data fattura:</strong> {{ r.doc_date or 'Non indicata' }}</p><p><strong>👤 Caricata da:</strong> {{ r.uploaded_by or 'Non indicato' }}</p><p class="muted">📄 {{ r.filename or 'Documento' }}</p>{% if user.role=='admin' %}<a class="shine-button secondary" href="/fatture/{{ r.id }}" target="_blank">Apri originale</a><form action="/fatture/{{ r.id }}/delete" method="post" onsubmit="return confirm('Eliminare il documento?')"><button class="shine-button secondary">Elimina</button></form>{% endif %}</div>{% else %}<div class="card shine-panel">Nessun documento ancora caricato.</div>{% endfor %}</div><script src="/static/js/document_multi_upload.js?v=3" defer></script>{% endblock %}
+{% extends "base.html" %}{% set title="Fatture" %}{% block content %}
+<link rel="stylesheet" href="/static/multi_upload.css?v=3">
+<style>
+.supplier-picker{position:relative;flex:1;min-width:220px}.supplier-picker input{width:100%;box-sizing:border-box}
+.supplier-menu{position:absolute;z-index:40;top:100%;left:0;right:0;max-height:245px;overflow:auto;background:var(--panel,#1c2330);color:var(--text,#fff);border:1px solid #64748b;border-radius:10px;box-shadow:0 14px 24px #0006}
+.supplier-menu[hidden]{display:none}.supplier-option{display:block;width:100%;background:transparent;color:inherit;border:0;text-align:left;padding:11px 14px;cursor:pointer}
+.supplier-option:hover,.supplier-option:focus{background:#64748b44}.supplier-logo{position:absolute;right:16px;top:14px;width:66px;height:55px;object-fit:contain}
+.invoice-card{position:relative;padding-right:92px}.logo-form{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+</style>
+<div class="shine-hero"><span class="eyebrow">ARCHIVIO DOCUMENTALE</span><h1>🧾 Fatture</h1><p>Carica e consulta gli originali in foto o PDF.</p></div>
+<div class="card shine-panel">
+<form method="get" action="/fatture" class="shine-toolbar"><input name="supplier" placeholder="Cerca fatture per fornitore" value="{{ supplier or '' }}"><button class="shine-button">Cerca</button></form>
+<h3>Carica nuovo documento</h3>
+<form method="post" action="/fatture/upload" enctype="multipart/form-data">
+  <div class="supplier-picker" data-supplier-picker><input name="supplier" placeholder="Cerca o seleziona fornitore" autocomplete="off" aria-label="Fornitore" aria-expanded="false" aria-controls="supplier-options"><div class="supplier-menu" id="supplier-options" role="listbox" hidden></div></div>
+  <input name="doc_date" type="date" aria-label="Data fattura">
+  <div class="upload-collector" data-document-upload></div>
+  <div class="multi-upload-hint">📷 Seleziona più foto oppure PDF: verranno salvati in <strong>un solo documento multipagina</strong>. <span class="upload-count" aria-live="polite"></span></div>
+  <button class="shine-button">📤 Salva originale</button>
+</form>
+</div>
+{% if user.role == 'admin' %}
+<div class="card shine-panel"><h3>🏢 Aggiungi loghi in PNG</h3><p class="muted">Solo admin: assegna un logo trasparente a un fornitore. Il logo apparirà su tutte le sue fatture, anche quelle già caricate.</p>
+<form class="logo-form" method="post" action="/fatture/logo/upload" enctype="multipart/form-data">
+<div class="supplier-picker" data-supplier-picker><input name="supplier" required placeholder="Cerca o seleziona fornitore" autocomplete="off" aria-label="Fornitore per il logo" aria-expanded="false"><div class="supplier-menu" role="listbox" hidden></div></div>
+<input type="file" name="logo" accept="image/png,.png" required aria-label="Logo PNG trasparente"><button class="shine-button">+ Aggiungi logo</button>
+</form></div>{% endif %}
+<div class="shine-doc-grid">{% for r in rows %}<div class="card shine-panel invoice-card">
+{% if r.logo_key %}<img class="supplier-logo" src="/fatture/logo/{{ r.logo_key|urlencode }}" alt="Logo {{ r.supplier }}" loading="lazy">{% endif %}
+<span class="eyebrow">{{ stores.get(r.store,r.store) }}</span><h3>🧾 {{ r.supplier or 'Fornitore non indicato' }}</h3>
+<p><strong>📅 Data fattura:</strong> {{ r.doc_date or 'Non indicata' }}</p><p><strong>👤 Caricata da:</strong> {{ r.uploaded_by or 'Non indicato' }}</p>
+<p class="muted">📄 {{ r.filename or 'Documento' }}</p>
+{% if user.role=='admin' %}<a class="shine-button secondary" href="/fatture/{{ r.id }}" target="_blank">Apri originale</a><form action="/fatture/{{ r.id }}/delete" method="post" onsubmit="return confirm('Eliminare il documento?')"><button class="shine-button secondary">Elimina</button></form>{% endif %}
+</div>{% else %}<div class="card shine-panel">Nessun documento ancora caricato.</div>{% endfor %}</div>
+<script id="supplier-data" type="application/json">{{ suppliers|tojson }}</script>
+<script>
+(()=>{const suppliers=JSON.parse(document.getElementById('supplier-data').textContent);
+for(const picker of document.querySelectorAll('[data-supplier-picker]')){
+ const input=picker.querySelector('input[name="supplier"]'), menu=picker.querySelector('.supplier-menu');
+ const normalize=s=>s.trim().replace(/\s+/g,' ').toLocaleLowerCase();
+ function close(){menu.hidden=true;input.setAttribute('aria-expanded','false')}
+ function draw(){const term=normalize(input.value);menu.replaceChildren();const matches=suppliers.filter(s=>normalize(s).includes(term));
+ const exact=suppliers.some(s=>normalize(s)===term);
+ if(matches.length){for(const s of matches){const item=document.createElement('button');item.type='button';item.className='supplier-option';item.setAttribute('role','option');item.textContent=s;item.addEventListener('mousedown',e=>e.preventDefault());item.addEventListener('click',()=>{input.value=s;close()});menu.appendChild(item)}}
+ if(term&&!exact){const add=document.createElement('button');add.type='button';add.className='supplier-option';add.textContent='+ Aggiungi fornitore: '+input.value.trim();add.addEventListener('mousedown',e=>e.preventDefault());add.addEventListener('click',()=>{input.value=input.value.trim();close()});menu.appendChild(add)}
+ if(!menu.children.length){close();return}menu.hidden=false;input.setAttribute('aria-expanded','true')}
+ input.addEventListener('focus',draw);input.addEventListener('input',draw);input.addEventListener('keydown',e=>{if(e.key==='Escape')close();if(e.key==='Enter'&&!menu.hidden){const option=menu.querySelector('.supplier-option');if(option){e.preventDefault();option.click()}}});
+ document.addEventListener('click',e=>{if(!picker.contains(e.target))close()});
+}}
+})();
+</script><script src="/static/js/document_multi_upload.js?v=3" defer></script>
+{% endblock %}

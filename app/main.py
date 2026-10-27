@@ -7328,6 +7328,18 @@ def closures_page(request: Request, q: str = ""):
 
         sql += " ORDER BY store, closure_date DESC, id DESC" if store == "ALL" else " ORDER BY closure_date DESC, id DESC"
         rows = cur.execute(sql, tuple(params)).fetchall()
+        # Elenco globale: include i fornitori storici di ogni negozio.
+        supplier_rows = cur.execute("SELECT DISTINCT supplier FROM invoices_docs WHERE supplier IS NOT NULL AND TRIM(supplier) <> ''").fetchall()
+        _ensure_supplier_logos(cur)
+        logo_rows = cur.execute("SELECT supplier_key, supplier_name FROM invoice_supplier_logos").fetchall()
+    suppliers_by_key = {}
+    for item in [r['supplier'] for r in supplier_rows] + [r['supplier_name'] for r in logo_rows]:
+        if _supplier_key(item):
+            suppliers_by_key.setdefault(_supplier_key(item), " ".join(item.split()))
+    suppliers = sorted(suppliers_by_key.values(), key=str.casefold)
+    logo_keys = {r['supplier_key'] for r in logo_rows}
+    for r in rows:
+        r['logo_key'] = _supplier_key(r['supplier']) if _supplier_key(r['supplier']) in logo_keys else None
 
     with connect() as digital_conn:
         digital_rows = digital_conn.cursor().execute(f"SELECT * FROM digital_documents WHERE kind={_ph()}", ("chiusure",)).fetchall()
@@ -8444,6 +8456,62 @@ async def transfers_submit(request: Request):
     return RedirectResponse(f"/scambi?from_store={from_store}&to_store={to_store}", status_code=HTTP_303_SEE_OTHER)
 
 
+def _ensure_supplier_logos(cur):
+    """Loghi globali per fornitore, persistenti nel database esistente."""
+    blob_type = "BYTEA" if using_postgres() else "BLOB"
+    cur.execute(f"""CREATE TABLE IF NOT EXISTS invoice_supplier_logos (
+        supplier_key TEXT PRIMARY KEY,
+        supplier_name TEXT NOT NULL,
+        png_data {blob_type} NOT NULL
+    )""")
+
+
+def _supplier_key(name: str) -> str:
+    return " ".join((name or "").split()).casefold()
+
+
+@app.get("/fatture/logo/{supplier_key}")
+def invoice_supplier_logo(request: Request, supplier_key: str):
+    user = require_login(request)
+    if not user:
+        raise HTTPException(401, "Accesso richiesto")
+    with connect() as conn:
+        cur = conn.cursor()
+        _ensure_supplier_logos(cur)
+        row = cur.execute(f"SELECT png_data FROM invoice_supplier_logos WHERE supplier_key={_ph()}", (supplier_key,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Logo non disponibile")
+    return Response(content=bytes(row["png_data"]), media_type="image/png", headers={"Cache-Control": "private, max-age=60", "X-Content-Type-Options":"nosniff"})
+
+
+@app.post("/fatture/logo/upload")
+async def invoice_supplier_logo_upload(request: Request, supplier: str = Form(...), logo: UploadFile = File(...)):
+    user = require_login(request)
+    if not user:
+        return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Solo l'admin può gestire i loghi")
+    supplier = " ".join(supplier.split()).strip()
+    key = _supplier_key(supplier)
+    if not key or len(supplier) > 180:
+        raise HTTPException(422, "Scegli un fornitore valido")
+    raw = await logo.read(2 * 1024 * 1024 + 1)
+    if len(raw) > 2 * 1024 * 1024 or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise HTTPException(422, "Il logo deve essere un PNG valido di massimo 2 MB")
+    # Il tipo 4/6 ha un canale alfa, il tipo 3 può avere trasparenza tRNS.
+    if len(raw) < 33 or raw[12:16] != b"IHDR" or (raw[25] not in (4, 6) and b"tRNS" not in raw):
+        raise HTTPException(422, "Carica un PNG con sfondo trasparente")
+    with connect() as conn:
+        cur = conn.cursor()
+        _ensure_supplier_logos(cur)
+        existing = cur.execute(f"SELECT supplier_key FROM invoice_supplier_logos WHERE supplier_key={_ph()}", (key,)).fetchone()
+        if existing:
+            cur.execute(f"UPDATE invoice_supplier_logos SET supplier_name={_ph()}, png_data={_ph()} WHERE supplier_key={_ph()}", (supplier, raw, key))
+        else:
+            cur.execute(f"INSERT INTO invoice_supplier_logos(supplier_key,supplier_name,png_data) VALUES({_ph()},{_ph()},{_ph()})", (key, supplier, raw))
+    return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
+
+
 @app.get("/fatture", response_class=HTMLResponse)
 def invoices_page(request: Request, supplier: str = "", q_date: str = ""):
     user = require_login(request)
@@ -8475,13 +8543,25 @@ def invoices_page(request: Request, supplier: str = "", q_date: str = ""):
 
         sql += " ORDER BY store, doc_date DESC, id DESC" if store == "ALL" else " ORDER BY doc_date DESC, id DESC"
         rows = cur.execute(sql, tuple(params)).fetchall()
+        supplier_rows = cur.execute("SELECT DISTINCT supplier FROM invoices_docs WHERE supplier IS NOT NULL AND TRIM(supplier) <> ''").fetchall()
+        _ensure_supplier_logos(cur)
+        logo_rows = cur.execute("SELECT supplier_key, supplier_name FROM invoice_supplier_logos").fetchall()
+    suppliers_by_key = {}
+    for name in [r['supplier'] for r in supplier_rows] + [r['supplier_name'] for r in logo_rows]:
+        if _supplier_key(name):
+            suppliers_by_key.setdefault(_supplier_key(name), " ".join(name.split()))
+    suppliers = sorted(suppliers_by_key.values(), key=str.casefold)
+    logo_keys = {r['supplier_key'] for r in logo_rows}
+    for r in rows:
+        key = _supplier_key(r['supplier'])
+        r['logo_key'] = key if key in logo_keys else None
 
     with connect() as digital_conn:
         digital_rows = digital_conn.cursor().execute(f"SELECT * FROM digital_documents WHERE kind={_ph()}", ("fatture",)).fetchall()
         allowed_ids = {r['id'] for r in rows}
         doc_summaries = {r['doc_id']:r for r in digital_rows if r['doc_id'] in allowed_ids}
     active_store = request.session.get("active_store") if is_admin(request) else None
-    return render("invoices.html", user=user, rows=rows, doc_summaries=doc_summaries, supplier=supplier, q_date=q_date, stores=STORES, brand=brand, active_store=active_store)
+    return render("invoices.html", user=user, rows=rows, doc_summaries=doc_summaries, supplier=supplier, q_date=q_date, stores=STORES, brand=brand, active_store=active_store, suppliers=suppliers)
 
 
 @app.post("/fatture/upload")
@@ -8493,6 +8573,15 @@ async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: 
     store = _effective_store(request, user)
     if store not in STORES:
         raise HTTPException(422, "Seleziona un singolo negozio prima di caricare documenti.")
+
+    supplier = " ".join((supplier or "").split()).strip()
+    if len(supplier) > 180:
+        raise HTTPException(422, "Nome fornitore troppo lungo")
+    # Usa il nome già registrato per evitare duplicati con maiuscole diverse.
+    with connect() as conn:
+        existing_suppliers = conn.cursor().execute("SELECT DISTINCT supplier FROM invoices_docs WHERE supplier IS NOT NULL AND TRIM(supplier) <> ''").fetchall()
+    canonical = next((r['supplier'] for r in existing_suppliers if _supplier_key(r['supplier']) == _supplier_key(supplier)), None)
+    supplier = canonical or supplier
 
     from .control import iso
     doc_date = iso(doc_date or _today_str())
