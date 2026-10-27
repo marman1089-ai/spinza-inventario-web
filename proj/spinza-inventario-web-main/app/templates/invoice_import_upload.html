@@ -14,7 +14,10 @@
       <div class="row" style="align-items:flex-end">
         <div style="display:flex;flex-direction:column;gap:6px;min-width:220px;flex:1">
           <label class="muted">Fornitore</label>
-          <input name="supplier" placeholder="Es. Metro" required />
+          <div class="supplier-picker" data-suppliers='{{ supplier_names | tojson | forceescape }}' style="position:relative;flex:1;min-width:200px">
+  <input name="supplier" autocomplete="off" placeholder="Cerca o seleziona fornitore…" required class="supplier-entry" style="width:100%;box-sizing:border-box" />
+  <div class="supplier-menu" style="display:none;position:absolute;z-index:1000;top:100%;left:0;right:0;max-height:220px;overflow-y:auto;background:var(--card,#232735);border:1px solid #777;border-radius:10px;box-shadow:0 8px 24px #0005"></div>
+</div>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;min-width:200px;">
           <label class="muted">Data fattura</label>
@@ -39,4 +42,28 @@
       Consiglio: scatta la foto ben dritta, in buona luce, e includi tutta la tabella dei prodotti.
     </div>
   </div>
+<script>
+(function(){
+ document.querySelectorAll('.supplier-picker').forEach(function(picker){
+  var names=JSON.parse(picker.dataset.suppliers||'[]'), input=picker.querySelector('.supplier-entry'), menu=picker.querySelector('.supplier-menu');
+  function draw(){
+   var q=input.value.trim().toLocaleLowerCase(), filtered=names.filter(n=>n.toLocaleLowerCase().includes(q));
+   menu.replaceChildren();
+   function option(label, value){
+    var b=document.createElement('button');b.type='button';b.textContent=label;
+    b.style.cssText='display:block;width:100%;padding:10px 12px;text-align:left;cursor:pointer;color:var(--text,#fff);background:transparent;border:0;';
+    b.addEventListener('mousedown',e=>e.preventDefault());
+    b.addEventListener('click',()=>{input.value=value;menu.style.display='none';input.dispatchEvent(new Event('change',{bubbles:true}));});
+    menu.append(b);
+   }
+   filtered.forEach(n=>option(n,n));
+   if(q && !names.some(n=>n.toLocaleLowerCase()===q)) option('+ Aggiungi fornitore: '+input.value.trim(),input.value.trim());
+   menu.style.display=menu.children.length?'block':'none';
+  }
+  input.addEventListener('focus',draw);input.addEventListener('input',draw);
+  input.addEventListener('blur',()=>setTimeout(()=>{menu.style.display='none'},150));
+  input.closest('form').addEventListener('submit',()=>{input.value=input.value.trim();});
+ });
+})();
+</script>
 {% endblock %}

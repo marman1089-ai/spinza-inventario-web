@@ -14,7 +14,7 @@
       <div class="row" style="align-items:flex-end">
         <div style="display:flex;flex-direction:column;gap:6px;min-width:220px;flex:1">
           <label class="muted">Fornitore</label>
-          <input name="supplier" placeholder="Es. Metro" required />
+          <input name="supplier" placeholder="Cerca o seleziona fornitore" list="invoice-import-suppliers" autocomplete="off" required /><datalist id="invoice-import-suppliers">{% for name in suppliers %}<option value="{{ name }}">{% endfor %}</datalist>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;min-width:200px;">
           <label class="muted">Data fattura</label>

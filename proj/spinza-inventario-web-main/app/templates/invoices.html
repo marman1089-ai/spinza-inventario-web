@@ -4,7 +4,8 @@
   <div class="card" style="margin-bottom:12px;">
     <form method="get" action="/fatture">
       <div class="row">
-        <input name="supplier" value="{{ supplier or '' }}" placeholder="Cerca fornitore…" style="flex:1;min-width:220px" />
+        <input name="supplier" value="{{ supplier or '' }}" list="supplier-search-list" placeholder="Cerca fornitore…" style="flex:1;min-width:220px" />
+        <datalist id="supplier-search-list">{% for name in supplier_names %}<option value="{{ name }}">{% endfor %}</datalist>
         <input name="q_date" value="{{ q_date or '' }}" placeholder="Cerca data (es. 2026-01-23)" style="flex:1;min-width:220px" />
         <button class="btn2" type="submit">Cerca</button>
       </div>
@@ -13,6 +14,11 @@
 
   <div class="card" style="margin-bottom:12px;">
     <h2 style="margin-top:0">🧾 Archivio fatture</h2>
+    {% if is_admin_user %}<form method="post" action="/fatture/logo" enctype="multipart/form-data" class="row" style="padding:10px 0;align-items:center;gap:8px">
+      <strong>Aggiungi logo PNG:</strong> <select name="supplier" required style="max-width:230px"><option value="">Seleziona fornitore</option>{% for name in supplier_names %}<option value="{{ name }}">{{ name }}</option>{% endfor %}</select>
+      <input type="file" name="file" accept="image/png,.png" required style="max-width:240px" />
+      <button class="btn2" type="submit">Salva logo</button>
+    </form>{% endif %}
     <div class="muted">Carica una fattura (PDF o foto), imposta <strong>fornitore</strong> e <strong>data</strong>, poi la cerchi velocemente.</div>
 
     <div class="row" style="margin-top:10px;">
@@ -21,7 +27,10 @@
 
     <form method="post" action="/fatture/upload" enctype="multipart/form-data" style="margin-top:12px;">
       <div class="row">
-        <input name="supplier" placeholder="Fornitore" required />
+        <div class="supplier-picker" data-suppliers='{{ supplier_names | tojson | forceescape }}' style="position:relative;flex:1;min-width:200px">
+  <input name="supplier" autocomplete="off" placeholder="Cerca o seleziona fornitore…" required class="supplier-entry" style="width:100%;box-sizing:border-box" />
+  <div class="supplier-menu" style="display:none;position:absolute;z-index:1000;top:100%;left:0;right:0;max-height:220px;overflow-y:auto;background:var(--card,#232735);border:1px solid #777;border-radius:10px;box-shadow:0 8px 24px #0005"></div>
+</div>
         <input type="date" name="doc_date" required />
         <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-width:260px">
           <div id="invoice-files" style="display:flex;flex-direction:column;gap:6px">
@@ -57,7 +66,7 @@
             <tr>
               <td><strong>{{ r.doc_date }}</strong></td>
               {% if active_store == 'ALL' %}<td>{{ stores.get(r.store, r.store) }}</td>{% endif %}
-              <td>{{ r.supplier }}</td>
+              <td><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:180px"><span>{{ r.supplier }}</span>{% if r.supplier|lower in logo_names %}<img src="/fatture/logo/{{ r.supplier|urlencode }}" alt="Logo {{ r.supplier }}" style="max-width:55px;max-height:42px;object-fit:contain;flex-shrink:0" loading="lazy" />{% endif %}</div></td>
               <td><a class="pill" href="/fatture/{{ r.id }}" target="_blank" style="text-decoration:none;color:var(--text)">Apri</a> <span class="muted">{{ r.filename or '' }}</span></td>
               <td>{{ r.uploaded_by }}</td>
               <td class="muted">{{ r.ts }}</td>
@@ -75,5 +84,29 @@
       </table>
     </div>
   </div>
+<script>
+(function(){
+ document.querySelectorAll('.supplier-picker').forEach(function(picker){
+  var names=JSON.parse(picker.dataset.suppliers||'[]'), input=picker.querySelector('.supplier-entry'), menu=picker.querySelector('.supplier-menu');
+  function draw(){
+   var q=input.value.trim().toLocaleLowerCase(), filtered=names.filter(n=>n.toLocaleLowerCase().includes(q));
+   menu.replaceChildren();
+   function option(label, value){
+    var b=document.createElement('button');b.type='button';b.textContent=label;
+    b.style.cssText='display:block;width:100%;padding:10px 12px;text-align:left;cursor:pointer;color:var(--text,#fff);background:transparent;border:0;';
+    b.addEventListener('mousedown',e=>e.preventDefault());
+    b.addEventListener('click',()=>{input.value=value;menu.style.display='none';input.dispatchEvent(new Event('change',{bubbles:true}));});
+    menu.append(b);
+   }
+   filtered.forEach(n=>option(n,n));
+   if(q && !names.some(n=>n.toLocaleLowerCase()===q)) option('+ Aggiungi fornitore: '+input.value.trim(),input.value.trim());
+   menu.style.display=menu.children.length?'block':'none';
+  }
+  input.addEventListener('focus',draw);input.addEventListener('input',draw);
+  input.addEventListener('blur',()=>setTimeout(()=>{menu.style.display='none'},150));
+  input.closest('form').addEventListener('submit',()=>{input.value=input.value.trim();});
+ });
+})();
+</script>
 {% endblock %}
 

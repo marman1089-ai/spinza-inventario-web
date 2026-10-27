@@ -7927,6 +7927,61 @@ async def transfers_submit(request: Request):
     return RedirectResponse(f"/scambi?from_store={from_store}&to_store={to_store}", status_code=HTTP_303_SEE_OTHER)
 
 
+# Supplier directory is shared across stores; logo bytes are stored in persistent DB.
+def _invoice_suppliers(cur):
+    cur.execute("SELECT DISTINCT supplier FROM invoices_docs WHERE supplier IS NOT NULL AND TRIM(supplier) <> ''")
+    names = [str(r['supplier']).strip() for r in cur.fetchall()]
+    cur.execute("SELECT name FROM invoice_supplier_logos")
+    names += [str(r['name']).strip() for r in cur.fetchall()]
+    unique = {}
+    for name in sorted(names, key=str.casefold):
+        unique.setdefault(name.casefold(), name)
+    return sorted(unique.values(), key=str.casefold)
+
+
+def _invoice_logo_table(cur):
+    blob = 'BYTEA' if using_postgres() else 'BLOB'
+    cur.execute(f"CREATE TABLE IF NOT EXISTS invoice_supplier_logos (name TEXT PRIMARY KEY, png {blob} NOT NULL)")
+
+
+@app.post('/fatture/logo')
+async def invoices_supplier_logo(request: Request, supplier: str = Form(...), file: UploadFile = File(...)):
+    if not require_login(request):
+        return RedirectResponse('/', status_code=HTTP_303_SEE_OTHER)
+    if not is_admin(request):
+        return PlainTextResponse('Solo admin', status_code=403)
+    supplier = supplier.strip()
+    raw = await file.read()
+    if not supplier or len(raw) > 2_000_000 or not raw.startswith(b'\x89PNG\r\n\x1a\n'):
+        return PlainTextResponse('Seleziona un fornitore e un PNG valido (massimo 2 MB).', status_code=400)
+    with connect() as conn:
+        cur = conn.cursor()
+        _invoice_logo_table(cur)
+        names = _invoice_suppliers(cur)
+        match = next((name for name in names if name.casefold() == supplier.casefold()), None)
+        if not match:
+            return PlainTextResponse('Fornitore non presente nell’elenco.', status_code=400)
+        ph = _ph()
+        cur.execute(f"DELETE FROM invoice_supplier_logos WHERE lower(name)=lower({ph})", (match,))
+        cur.execute(f"INSERT INTO invoice_supplier_logos (name, png) VALUES ({ph}, {ph})", (match, raw))
+    return RedirectResponse('/fatture', status_code=HTTP_303_SEE_OTHER)
+
+
+@app.get('/fatture/logo/{supplier_name}')
+def invoices_supplier_logo_view(request: Request, supplier_name: str):
+    if not require_login(request):
+        return PlainTextResponse('Accesso richiesto', status_code=401)
+    from fastapi.responses import Response
+    with connect() as conn:
+        cur = conn.cursor()
+        _invoice_logo_table(cur)
+        cur.execute(f"SELECT png FROM invoice_supplier_logos WHERE lower(name)=lower({_ph()})", (supplier_name,))
+        row = cur.fetchone()
+    if not row:
+        return Response(status_code=404)
+    return Response(content=bytes(row['png']), media_type='image/png', headers={'Cache-Control': 'private, max-age=60'})
+
+
 @app.get("/fatture", response_class=HTMLResponse)
 def invoices_page(request: Request, supplier: str = "", q_date: str = ""):
     user = require_login(request)
@@ -7942,6 +7997,10 @@ def invoices_page(request: Request, supplier: str = "", q_date: str = ""):
     ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
+        _invoice_logo_table(cur)
+        supplier_names = _invoice_suppliers(cur)
+        cur.execute("SELECT name FROM invoice_supplier_logos")
+        logo_names = {r["name"].casefold() for r in cur.fetchall()}
         if store == "ALL":
             sql = "SELECT id, store, supplier, doc_date, uploaded_by, ts, filename, content_type FROM invoices_docs WHERE 1=1"
             params = []
@@ -7960,7 +8019,7 @@ def invoices_page(request: Request, supplier: str = "", q_date: str = ""):
         rows = cur.execute(sql, tuple(params)).fetchall()
 
     active_store = request.session.get("active_store") if is_admin(request) else None
-    return render("invoices.html", user=user, rows=rows, supplier=supplier, q_date=q_date, stores=STORES, brand=brand, active_store=active_store)
+    return render("invoices.html", user=user, rows=rows, supplier=supplier, q_date=q_date, stores=STORES, brand=brand, active_store=active_store, supplier_names=supplier_names, logo_names=logo_names, is_admin_user=is_admin(request))
 
 
 @app.post("/fatture/upload")
@@ -8022,11 +8081,16 @@ def invoice_import_upload_page(request: Request):
 
     default_area = get_selected_area(request) or "prodotti"
     store = _effective_store(request, user)
+    with connect() as conn:
+        cur = conn.cursor()
+        _invoice_logo_table(cur)
+        supplier_names = _invoice_suppliers(cur)
     return render(
         "invoice_import_upload.html",
         user=user,
         default_area=default_area,
         brand=store,
+        supplier_names=supplier_names,
     )
 
 

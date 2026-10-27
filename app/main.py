@@ -8504,6 +8504,11 @@ async def invoice_supplier_logo_upload(request: Request, supplier: str = Form(..
     with connect() as conn:
         cur = conn.cursor()
         _ensure_supplier_logos(cur)
+        stored = cur.execute("SELECT DISTINCT supplier FROM invoices_docs WHERE supplier IS NOT NULL").fetchall()
+        stored_keys = {_supplier_key(r['supplier']) for r in stored}
+        saved = cur.execute("SELECT supplier_key FROM invoice_supplier_logos").fetchall()
+        if key not in stored_keys and key not in {r['supplier_key'] for r in saved}:
+            raise HTTPException(422, "Seleziona un fornitore già registrato")
         existing = cur.execute(f"SELECT supplier_key FROM invoice_supplier_logos WHERE supplier_key={_ph()}", (key,)).fetchone()
         if existing:
             cur.execute(f"UPDATE invoice_supplier_logos SET supplier_name={_ph()}, png_data={_ph()} WHERE supplier_key={_ph()}", (supplier, raw, key))
@@ -8646,11 +8651,18 @@ def invoice_import_upload_page(request: Request):
         return PlainTextResponse("Solo amministratore", status_code=403)
 
     store = _effective_store(request, user)
+    with connect() as conn:
+        cur = conn.cursor()
+        supplier_rows = cur.execute("SELECT DISTINCT supplier FROM invoices_docs WHERE supplier IS NOT NULL AND TRIM(supplier) <> ''").fetchall()
+        _ensure_supplier_logos(cur)
+        logo_rows = cur.execute("SELECT supplier_name FROM invoice_supplier_logos").fetchall()
+    names = { _supplier_key(name): ' '.join(name.split()) for name in [r['supplier'] for r in supplier_rows] + [r['supplier_name'] for r in logo_rows] if _supplier_key(name) }
     return render(
         "invoice_import_upload.html",
         user=user,
         default_area=default_area,
         brand=store,
+        suppliers=sorted(names.values(), key=str.casefold),
     )
 
 
