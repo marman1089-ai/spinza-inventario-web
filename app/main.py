@@ -6710,10 +6710,12 @@ def item_delta(request: Request, item_id: int, delta: float = Form(...), store: 
         current_total = float(row.get("qty") or 0)
         new_qty = current_total + float(delta)
         info = _collapse_product_rows_for_single_position(cur, row=row, effective_store=effective_store, new_qty=new_qty)
-        cur.execute(
-            f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (effective_store, user["username"], "DELTA", info["category"], info["name"], float(delta)),
-        )
+        actual_delta = info["qty"] - current_total
+        _log(cur, store=effective_store, username=user["username"],
+             action="CARICO" if actual_delta > 0 else "SCARICO" if actual_delta < 0 else "INVARIATO",
+             category=info["category"],
+             name=f'{info["name"]} | {current_total:g} → {info["qty"]:g}',
+             delta=actual_delta)
 
     return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
@@ -6745,11 +6747,14 @@ def item_set(request: Request, item_id: int, qty: float = Form(...), store: str 
         if not row:
             return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
+        old_qty = float(row.get("qty") or 0)
         info = _collapse_product_rows_for_single_position(cur, row=row, effective_store=effective_store, new_qty=float(qty))
-        cur.execute(
-            f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (effective_store, user["username"], "SET", info["category"], info["name"], float(qty)),
-        )
+        actual_delta = info["qty"] - old_qty
+        direction = "CARICO" if actual_delta > 0 else "SCARICO" if actual_delta < 0 else "INVARIATO"
+        _log(cur, store=effective_store, username=user["username"], action=direction,
+             category=info["category"],
+             name=f'{info["name"]} | modifica manuale {old_qty:g} → {info["qty"]:g}',
+             delta=actual_delta)
 
     return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
@@ -7328,19 +7333,6 @@ def closures_page(request: Request, q: str = ""):
 
         sql += " ORDER BY store, closure_date DESC, id DESC" if store == "ALL" else " ORDER BY closure_date DESC, id DESC"
         rows = cur.execute(sql, tuple(params)).fetchall()
-        # Elenco globale: include i fornitori storici di ogni negozio.
-        supplier_rows = cur.execute("SELECT DISTINCT supplier FROM invoices_docs WHERE supplier IS NOT NULL AND TRIM(supplier) <> ''").fetchall()
-        _ensure_supplier_logos(cur)
-        logo_rows = cur.execute("SELECT supplier_key, supplier_name FROM invoice_supplier_logos").fetchall()
-    suppliers_by_key = {}
-    for item in [r['supplier'] for r in supplier_rows] + [r['supplier_name'] for r in logo_rows]:
-        if _supplier_key(item):
-            suppliers_by_key.setdefault(_supplier_key(item), " ".join(item.split()))
-    suppliers = sorted(suppliers_by_key.values(), key=str.casefold)
-    logo_keys = {r['supplier_key'] for r in logo_rows}
-    for r in rows:
-        r['logo_key'] = _supplier_key(r['supplier']) if _supplier_key(r['supplier']) in logo_keys else None
-
     with connect() as digital_conn:
         digital_rows = digital_conn.cursor().execute(f"SELECT * FROM digital_documents WHERE kind={_ph()}", ("chiusure",)).fetchall()
         allowed_ids = {r['id'] for r in rows}
@@ -7425,10 +7417,6 @@ def closures_download(request: Request, doc_id: int):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-
-    # Solo admin può aprire/visualizzare il file
-    if not is_admin(request):
-        return PlainTextResponse("Solo admin", status_code=403)
 
     store = _effective_store(request, user)
     ph = _ph()
@@ -7607,9 +7595,6 @@ def secondary_expenses_download(request: Request, doc_id: int):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-
-    if not is_admin(request):
-        return PlainTextResponse("Solo admin", status_code=403)
 
     store = _effective_store(request, user)
     ph = _ph()
@@ -8994,10 +8979,6 @@ def invoices_download(request: Request, doc_id: int):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-
-    # Solo admin può aprire/visualizzare il file
-    if not is_admin(request):
-        return PlainTextResponse("Solo admin", status_code=403)
 
     store = _effective_store(request, user)
     ph = _ph()

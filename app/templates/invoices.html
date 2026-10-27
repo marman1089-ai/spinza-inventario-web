@@ -33,8 +33,8 @@
 {% if user.role=='admin' %}<details class="invoice-editor"><summary>✏️ Modifica fattura (fornitore / orientamento)</summary>
 <form method="post" action="/fatture/{{ r.id }}/modifica">
 <div class="supplier-picker" data-supplier-picker><label>Fornitore</label><input name="supplier" value="{{ r.supplier or '' }}" placeholder="Cerca fornitore" autocomplete="off"><select name="supplier_choice" class="supplier-native-select" aria-label="Fornitore fattura">{% for name in suppliers %}<option value="{{ name }}" {% if name == r.supplier %}selected{% endif %}>{{ name }}</option>{% endfor %}<option value="__new__">+ Aggiungi fornitore</option></select></div>
-<label>Ruota documento <select name="rotation"><option value="0">Non ruotare</option><option value="90">90° in senso orario</option><option value="180">180°</option><option value="270">90° in senso antiorario</option></select></label><button class="shine-button" type="submit">Salva modifiche</button></form></details>
-<a class="shine-button secondary" href="/fatture/{{ r.id }}" target="_blank">Apri originale</a><form action="/fatture/{{ r.id }}/delete" method="post" onsubmit="return confirm('Eliminare il documento?')"><button class="shine-button secondary">Elimina</button></form>{% endif %}
+<label>Ruota documento <select name="rotation"><option value="0">Non ruotare</option><option value="90">90° in senso orario</option><option value="180">180°</option><option value="270">90° in senso antiorario</option></select></label><button class="shine-button" type="submit">Salva modifiche</button></form></details>{% endif %}
+<a class="shine-button secondary" href="/fatture/{{ r.id }}" target="_blank">Apri originale</a>{% if user.role=='admin' %}<form action="/fatture/{{ r.id }}/delete" method="post" onsubmit="return confirm('Eliminare il documento?')"><button class="shine-button secondary">Elimina</button></form>{% endif %}
 </div>{% else %}<div class="card shine-panel">Nessun documento ancora caricato.</div>{% endfor %}</div>
 <script>
 (()=>{
