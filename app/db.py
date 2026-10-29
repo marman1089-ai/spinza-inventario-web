@@ -687,6 +687,13 @@ def init_db():
         )
         """)
 
+        # Reparto storico dei movimenti; migrazione additiva e ripetibile.
+        if using_postgres():
+            _safe_exec(cur, "ALTER TABLE logs ADD COLUMN IF NOT EXISTS area TEXT NOT NULL DEFAULT ''")
+        else:
+            if 'area' not in [r['name'] for r in cur.execute("PRAGMA table_info(logs)").fetchall()]:
+                cur.execute("ALTER TABLE logs ADD COLUMN area TEXT NOT NULL DEFAULT ''")
+
         # NOVITÀ E AGGIORNAMENTI (bacheca)
         _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS updates (

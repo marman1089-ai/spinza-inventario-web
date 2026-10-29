@@ -2,7 +2,7 @@
 import os
 from .db import connect, using_postgres
 
-SCHEMA_VERSION = '2026-10-25-inventory-camera-v1'
+SCHEMA_VERSION = '2026-10-29-log-area-v2'
 
 def needs_schema_sync():
     if os.getenv('FORCE_SCHEMA_SYNC_ON_START') == '1' or not using_postgres():

@@ -20,7 +20,7 @@
       <a class="btn" href="/logs/ordini" style="text-decoration:none;">🚚 Ordini</a>
       <a class="btn" href="/logs/documenti" style="text-decoration:none;">🧾 Foto/Documenti</a>
     </div>
-    <form method="get" action="/logs/ordini" class="row" style="gap:10px;flex-wrap:wrap;margin-top:12px;align-items:end;">
+    <form method="get" action="/logs/ordini" class="row" style="gap:10px;flex-wrap:wrap;margin-top:12px;align-items:end;">{% include 'log_filters.html' %}
       <div style="min-width:220px;flex:1;">
         <label class="muted">Cerca per persona (utente)</label>
         <input type="text" name="q_user" value="{{ q_user }}" placeholder="es. marco" />

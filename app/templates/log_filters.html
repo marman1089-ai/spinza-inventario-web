@@ -1,0 +1,2 @@
+<label> Sala/Cucina<select name="q_area"><option value="">Tutte</option><option value="bibite" {% if q_area=='bibite' %}selected{% endif %}>Sala</option><option value="prodotti" {% if q_area=='prodotti' %}selected{% endif %}>Cucina</option></select></label>
+<label>Gruppo articolo<select name="q_group"><option value="">Tutti i gruppi</option>{% for group in log_groups %}<option value="{{ group }}" {% if q_group==group %}selected{% endif %}>{{ group }}</option>{% endfor %}</select></label>

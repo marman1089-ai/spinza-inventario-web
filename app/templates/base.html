@@ -17,6 +17,11 @@
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;background:var(--bg);color:var(--text)}
     header{background:var(--panel);padding:8px 10px;display:flex;align-items:center;gap:10px;box-shadow:0 1px 8px rgba(0,0,0,.06);position:sticky;top:0;z-index:100;overflow:visible}
     header img{height:30px}
+    .brand-logo{display:inline-block;position:relative;overflow:hidden;flex-shrink:0;vertical-align:middle}
+    .spinza-logo{width:160px;height:34px}
+    .spinza-logo img{position:absolute;width:178px;height:auto;max-width:none;left:-9px;top:-16px}
+    .reburger-logo{width:145px;height:62px}
+    .reburger-logo img{position:absolute;width:166px;height:auto;max-width:none;left:-10px;top:-47px}
     .wrap{max-width:980px;margin:0 auto;padding:14px}
     .card{background:var(--panel);border-radius:14px;padding:14px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
     .row{display:flex;gap:10px;flex-wrap:wrap}
@@ -314,9 +319,9 @@
   <div class="brand-block">
     <div class="brand-line">
       {% if _brand == 'spinza' %}
-        <img src="/static/logo_scritta_spinza.png" alt="Spinza" style="height:34px" />
+        <span class="brand-logo spinza-logo"><img src="/static/logo_scritta_spinza.png?v=20261029" alt="Spinza" /></span>
       {% elif _brand.startswith('reburger') %}
-        <img src="/static/logo_reburger.png" alt="Reburger"/>
+        <span class="brand-logo reburger-logo"><img src="/static/logo_reburger.png?v=20261029" alt="Reburger"/></span>
       {% else %}
         <strong style="font-size:18px;letter-spacing:.02em">Gestionale</strong>
       {% endif %}

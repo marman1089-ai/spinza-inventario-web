@@ -179,13 +179,20 @@ def _compute_display_totals(total_qty: float, unit: str):
 # =========================
 # LOG HELPERS
 # =========================
-def _log(cur, *, store: str, username: str, action: str, category: str, name: str, delta: float = 0.0):
+def _log(cur, *, store: str, username: str, action: str, category: str, name: str, delta: float = 0.0, area: str = ""):
     """Inserisce una riga di log coerente tra SQLite/Postgres."""
     ph = _ph()
     now = _now()
+    if not area:
+        matches = cur.execute(
+            f"SELECT DISTINCT area FROM products WHERE store={ph} AND category={ph} AND name={ph}",
+            (store, category, name.split(' | ', 1)[0]),
+        ).fetchall()
+        if len(matches) == 1:
+            area = matches[0]['area'] or ''
     cur.execute(
-        f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-        (store, username, action, category, name, float(delta)),
+        f"INSERT INTO logs(ts, store, username, action, category, name, delta, area) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+        (store, username, action, category, name, float(delta), area),
     )
 
 
@@ -6746,7 +6753,7 @@ def item_delta(request: Request, item_id: int, delta: float = Form(...), store: 
              action="CARICO" if actual_delta > 0 else "SCARICO" if actual_delta < 0 else "INVARIATO",
              category=info["category"],
              name=f'{info["name"]} | {current_total:g} → {info["qty"]:g}',
-             delta=actual_delta)
+             delta=actual_delta, area=row.get("area") or "prodotti")
 
     return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
@@ -6785,7 +6792,7 @@ def item_set(request: Request, item_id: int, qty: float = Form(...), store: str 
         _log(cur, store=effective_store, username=user["username"], action=direction,
              category=info["category"],
              name=f'{info["name"]} | modifica manuale {old_qty:g} → {info["qty"]:g}',
-             delta=actual_delta)
+             delta=actual_delta, area=row.get("area") or "prodotti")
 
     return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
 
@@ -6891,6 +6898,7 @@ def item_transfer(
             category=category,
             name=f"{name} | {from_location} → {to_location}",
             delta=float(move_qty),
+            area=area,
         )
 
     return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
@@ -6944,8 +6952,8 @@ def item_add(
             (active_store, category, subgroup, name, area, location, unit, float(qty), float(min_qty), category_color),
         )
         cur.execute(
-            f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (active_store, user["username"], "ADD", category, name, float(qty)),
+            f"INSERT INTO logs(ts, store, username, action, category, name, delta, area) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (active_store, user["username"], "ADD", category, name, float(qty), area),
         )
 
     return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
@@ -7010,8 +7018,8 @@ def item_edit(
             new_category_color=category_color,
         )
         cur.execute(
-            f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (effective_store, user["username"], "EDIT", info["category"], info["name"], float(min_qty)),
+            f"INSERT INTO logs(ts, store, username, action, category, name, delta, area) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (effective_store, user["username"], "EDIT", info["category"], info["name"], float(min_qty), row.get("area") or "prodotti"),
         )
 
     return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
@@ -7048,8 +7056,8 @@ def item_delete(request: Request, item_id: int, store: str = Form(""), next_url:
                 (effective_store, area_row, row["category"], row["name"]),
             )
             cur.execute(
-                f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-                (effective_store, user["username"], "DELETE", row["category"], row["name"], 0.0),
+                f"INSERT INTO logs(ts, store, username, action, category, name, delta, area) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+                (effective_store, user["username"], "DELETE", row["category"], row["name"], 0.0, area_row),
             )
 
     return RedirectResponse(_safe_next_url(next_url, "/inventario"), status_code=HTTP_303_SEE_OTHER)
@@ -7137,8 +7145,8 @@ async def import_csv(request: Request, file: UploadFile = File(...)):
             count += 1
 
         cur.execute(
-            f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
-            (active_store, user["username"], "IMPORT", "CSV", file.filename or "upload", float(count)),
+            f"INSERT INTO logs(ts, store, username, action, category, name, delta, area) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph},{ph})",
+            (active_store, user["username"], "IMPORT", "CSV", file.filename or "upload", float(count), area),
         )
 
     return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
@@ -7161,6 +7169,16 @@ def _logs_sql_date_filter(using_pg: bool, field: str = "ts"):
     return f"substr({field}, 1, 10) = {_ph()}"
 
 
+def _log_groups(store):
+    ph = _ph()
+    with connect() as conn:
+        rows = conn.cursor().execute(
+            "SELECT DISTINCT category FROM logs" + (f" WHERE store={ph}" if store != "ALL" else "") + " ORDER BY category",
+            (store,) if store != "ALL" else (),
+        ).fetchall()
+    return [r['category'] for r in rows if r['category']]
+
+
 def _fetch_logs(
     *,
     store: str,
@@ -7168,6 +7186,8 @@ def _fetch_logs(
     section: str,
     q_user: str = "",
     q_day: str = "",
+    q_area: str = "",
+    q_group: str = "",
 ):
     """Legge i log filtrando per sezione, utente e giorno.
 
@@ -7209,6 +7229,23 @@ def _fetch_logs(
         where.append(_logs_sql_date_filter(using_pg, "ts"))
         params.append(q_day)
 
+    if q_group:
+        where.append(f"category={ph}")
+        params.append(q_group)
+    if q_area in ("bibite", "prodotti"):
+        # Old logs have no snapshot: infer only an unambiguous product match.
+        where.append(f"""(area={ph} OR (COALESCE(area,'')='' AND
+            (SELECT COUNT(DISTINCT p.area) FROM products p
+             WHERE p.store=logs.store AND p.category=logs.category
+             AND (p.name=logs.name OR p.name=split_part_placeholder))=1 AND
+            EXISTS (SELECT 1 FROM products p WHERE p.store=logs.store
+             AND p.category=logs.category AND p.area={ph}
+             AND (p.name=logs.name OR p.name=split_part_placeholder))))""".replace(
+                 'split_part_placeholder',
+                 "split_part(logs.name, ' | ', 1)" if using_pg else
+                 "CASE WHEN instr(logs.name,' | ')>0 THEN substr(logs.name,1,instr(logs.name,' | ')-1) ELSE logs.name END"))
+        params.extend([q_area, q_area])
+
     where_sql = " AND ".join(where) if where else "1=1"
 
     # In alcuni ambienti (soprattutto Postgres) il parametro bindato dentro LIMIT
@@ -7248,7 +7285,7 @@ def logs_home(request: Request):
 
 
 @app.get("/logs/inventario", response_class=HTMLResponse)
-def logs_inventory_page(request: Request, limit: int = 500, q_user: str = "", q_day: str = ""):
+def logs_inventory_page(request: Request, limit: int = 500, q_user: str = "", q_day: str = "", q_area: str = "", q_group: str = ""):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -7256,7 +7293,7 @@ def logs_inventory_page(request: Request, limit: int = 500, q_user: str = "", q_
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
     active_store = _normalize_active_store_for_admin(request)
-    rows = _fetch_logs(store=active_store, limit=limit, section="inventory", q_user=q_user, q_day=q_day)
+    rows = _fetch_logs(store=active_store, limit=limit, section="inventory", q_user=q_user, q_day=q_day, q_area=q_area, q_group=q_group)
     brand = "ALL" if active_store == "ALL" else active_store
     return render(
         "logs_inventory.html",
@@ -7265,6 +7302,9 @@ def logs_inventory_page(request: Request, limit: int = 500, q_user: str = "", q_
         limit=limit,
         q_user=q_user,
         q_day=q_day,
+        q_area=q_area,
+        q_group=q_group,
+        log_groups=_log_groups(active_store),
         stores=STORES,
         brand=brand,
         active_store=active_store,
@@ -7272,7 +7312,7 @@ def logs_inventory_page(request: Request, limit: int = 500, q_user: str = "", q_
 
 
 @app.get("/logs/ordini", response_class=HTMLResponse)
-def logs_orders_page(request: Request, limit: int = 500, q_user: str = "", q_day: str = ""):
+def logs_orders_page(request: Request, limit: int = 500, q_user: str = "", q_day: str = "", q_area: str = "", q_group: str = ""):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -7280,7 +7320,7 @@ def logs_orders_page(request: Request, limit: int = 500, q_user: str = "", q_day
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
     active_store = _normalize_active_store_for_admin(request)
-    rows = _fetch_logs(store=active_store, limit=limit, section="orders", q_user=q_user, q_day=q_day)
+    rows = _fetch_logs(store=active_store, limit=limit, section="orders", q_user=q_user, q_day=q_day, q_area=q_area, q_group=q_group)
     brand = "ALL" if active_store == "ALL" else active_store
     return render(
         "logs_orders.html",
@@ -7289,6 +7329,9 @@ def logs_orders_page(request: Request, limit: int = 500, q_user: str = "", q_day
         limit=limit,
         q_user=q_user,
         q_day=q_day,
+        q_area=q_area,
+        q_group=q_group,
+        log_groups=_log_groups(active_store),
         stores=STORES,
         brand=brand,
         active_store=active_store,
@@ -7296,7 +7339,7 @@ def logs_orders_page(request: Request, limit: int = 500, q_user: str = "", q_day
 
 
 @app.get("/logs/documenti", response_class=HTMLResponse)
-def logs_docs_page(request: Request, limit: int = 500, q_user: str = "", q_day: str = ""):
+def logs_docs_page(request: Request, limit: int = 500, q_user: str = "", q_day: str = "", q_area: str = "", q_group: str = ""):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -7304,7 +7347,7 @@ def logs_docs_page(request: Request, limit: int = 500, q_user: str = "", q_day: 
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
     active_store = _normalize_active_store_for_admin(request)
-    rows = _fetch_logs(store=active_store, limit=limit, section="docs", q_user=q_user, q_day=q_day)
+    rows = _fetch_logs(store=active_store, limit=limit, section="docs", q_user=q_user, q_day=q_day, q_area=q_area, q_group=q_group)
     brand = "ALL" if active_store == "ALL" else active_store
     return render(
         "logs_docs.html",
@@ -7313,6 +7356,9 @@ def logs_docs_page(request: Request, limit: int = 500, q_user: str = "", q_day: 
         limit=limit,
         q_user=q_user,
         q_day=q_day,
+        q_area=q_area,
+        q_group=q_group,
+        log_groups=_log_groups(active_store),
         stores=STORES,
         brand=brand,
         active_store=active_store,
@@ -9594,7 +9640,7 @@ async def stock_count_submit(request: Request):
                  VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})""",(count_id,product['id'],product['category'],product['name'],product['unit'] or '',qty,prev,arrivals,outgoing))
             # Il conteggio è la nuova quantità fisica ufficiale. Lo storico non viene riscritto.
             cur.execute(f"UPDATE products SET qty={ph},updated_at={_now()} WHERE id={ph} AND store={ph} AND area={ph}",(qty,product['id'],store,area))
-            _log(cur,store=store,username=user['username'],action='CONTEGGIO_'+area.upper(),category=product['category'],name=product['name'],delta=qty)
+            _log(cur,store=store,username=user['username'],action='CONTEGGIO_'+area.upper(),category=product['category'],name=product['name'],delta=qty,area=area)
         week_start=(counted-__import__('datetime').timedelta(days=counted.weekday())).isoformat()
         cur.execute(f"DELETE FROM inventory_week_drafts WHERE store={ph} AND area={ph} AND week_start={ph}",(store,area,week_start))
     return RedirectResponse(f'/inventario/report?area={area}&store={store}&id={count_id}',status_code=303)

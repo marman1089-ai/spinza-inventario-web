@@ -1,0 +1,17 @@
+AGGIORNAMENTO 29 OTTOBRE 2026
+
+- Sostituiti i loghi di Spinza e Reburger con i PNG forniti, conservando trasparenza, grafica e bordo bianco originali.
+- Adattata la sola visualizzazione dei loghi nell'intestazione.
+- Aggiunti Sala/Cucina (Bibite/Prodotti) e Gruppo articolo (categoria del movimento) nei Log.
+- Mantenuti i filtri esistenti, la separazione dei registri, i permessi e le sedi.
+- Il reparto viene conservato nei nuovi movimenti articolo. Migrazione automatica additiva della tabella logs, senza cancellazione di dati.
+- Nei log storici il reparto viene ricavato dagli articoli ancora presenti solo se univoco. Movimenti storici non classificabili e documenti senza riferimento articolo restano visibili con Tutte/Tutti i gruppi.
+
+VERIFICHE
+I quattro test specifici dei nuovi filtri passano: combinazione con utente/giorno/limite/sede, storico e ambiguita, pagine e permessi, cancellazione articolo e ripetibilita della migrazione.
+Compilazione Python e test JavaScript delle attivita inventario completati.
+La suite generale aggiornata esegue 50 test: 45 passano. Quattro segnalazioni riguardano la digitalizzazione documenti, gia disattivata nella versione originale e non modificata. Un test del pool PostgreSQL non e eseguibile nell'ambiente di prova privo di psycopg. Non e stato effettuato un collegamento a un database PostgreSQL reale.
+La stessa suite e stata confrontata sulla versione originale per verificare le anomalie pregresse.
+
+Il pacchetto contiene tutti i file dello ZIP originale, con le sole modifiche sopra indicate e questi test aggiuntivi. I database forniti sono preservati byte per byte. Le cartelle di vecchie versioni e backup restano inalterate; l'applicazione aggiornata e quella app/main.py avviata dal run.py nella radice.
+Usare le modalita di avvio gia previste dal gestionale.
