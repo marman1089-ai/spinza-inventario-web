@@ -35,7 +35,7 @@ def _get_postgres_pool(url):
                     conninfo=url,
                     min_size=0, max_size=int(os.environ.get("DB_POOL_MAX", "5")),
                     timeout=15, max_idle=120,
-                    kwargs={"row_factory": dict_row, "sslmode": "require", "connect_timeout": 10},
+                    kwargs={"row_factory": dict_row, "sslmode": "require", "connect_timeout": 10, "prepare_threshold": None},
                     open=True,
                 )
     return _pg_pool
@@ -72,6 +72,10 @@ def connect():
     - Altrimenti => SQLite locale (solo dev)
     """
     url = _database_url()
+    if os.getenv('RENDER') and not url:
+        raise RuntimeError('Su Render è obbligatoria DATABASE_URL PostgreSQL/Supabase: SQLite locale non è persistente.')
+    if url and not url.startswith(('postgres://', 'postgresql://')):
+        raise RuntimeError('DATABASE_URL deve essere una connessione PostgreSQL valida')
 
     # --- POSTGRES ---
     if url:
@@ -92,7 +96,7 @@ def connect():
             if conn_scope is not None:
                 conn = conn_scope.__enter__()
             else:
-                conn = psycopg.connect(url, row_factory=dict_row, sslmode="require", connect_timeout=10)
+                conn = psycopg.connect(url, row_factory=dict_row, sslmode="require", connect_timeout=10, prepare_threshold=None)
         except (psycopg.OperationalError, TimeoutError) as exc:
             message = str(exc)
             print("[DATABASE] Connessione PostgreSQL/Supabase non riuscita.")
@@ -102,6 +106,9 @@ def connect():
                 print("[DATABASE] Copiare una nuova Session pooler connection string dal pannello Supabase > Connect.")
             raise
         try:
+            # init_db uses autocommit for DDL; a pooled connection must never
+            # leak that mode into subsequent business transactions.
+            conn.autocommit = False
             yield conn
             conn.commit()
         except BaseException:
@@ -109,6 +116,7 @@ def connect():
             raise
         finally:
             if conn_scope is not None:
+                conn.autocommit = False
                 # Pool connection returns to pool after context cleanup.
                 conn_scope.__exit__(None, None, None)
             else:

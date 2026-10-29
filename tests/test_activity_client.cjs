@@ -1,0 +1,21 @@
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const fs = require('node:fs');
+const script = fs.readFileSync('app/static/inventory_activity.js','utf8');
+let now=0, focused=true, interval, requests=0;
+const handlers={};
+const document={visibilityState:'visible',hasFocus:()=>focused,getElementById:()=>({dataset:{store:'spinza',area:'prodotti'}}),addEventListener:(e,fn)=>handlers[e]=fn};
+const context={location:{pathname:'/inventario/conteggio'},document,crypto:{randomUUID:()=> '00000000-0000-4000-8000-000000000001'},performance:{now:()=>now},setInterval:fn=>interval=fn,fetch:async()=>{requests++;return {status:204};},URLSearchParams};
+vm.runInNewContext(script,context);
+(async()=>{
+ await interval();assert.equal(requests,0,'Opening a page must not credit activity');
+ handlers.input();await interval();assert.equal(requests,1);
+ document.visibilityState='hidden';await interval();assert.equal(requests,1);
+ document.visibilityState='visible';focused=false;await interval();assert.equal(requests,1);
+ focused=true;now=61000;await interval();assert.equal(requests,1);
+ handlers.keydown();await interval();assert.equal(requests,2);
+ let activated=false;
+ vm.runInNewContext(script,{...context,location:{pathname:'/inventario/report'},setInterval:()=>activated=true});
+ assert.equal(activated,false);
+ console.log('PASS: activity requires interaction, visibility, focus; idle timeout, resume, report exclusion');
+})();

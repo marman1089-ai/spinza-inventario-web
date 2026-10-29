@@ -5,6 +5,10 @@ import csv
 import io
 import calendar
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+def _rome_today():
+    return datetime.now(ZoneInfo("Europe/Rome")).date()
 import re
 import mimetypes
 from urllib.parse import quote, quote_plus, unquote_plus, urlencode
@@ -9349,12 +9353,17 @@ def _stock_context(request):
 
 
 def _stock_arrivals(cur, store, area, product, after, until):
-    # Solo movimenti fisici d'entrata con tracciatura esplicita (non ordini solo aperti).
+    # logs.ts is written in UTC by _log; count dates are local Rome dates.
+    from datetime import timezone
+    def utc_bound(value):
+        return datetime.fromisoformat(value).replace(tzinfo=ZoneInfo('Europe/Rome')).astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     ph=_ph()
-    matches=cur.execute(f"""SELECT delta FROM logs WHERE store={ph} AND category={ph}
-        AND name={ph} AND action IN ('ORDER_CARICATO_INVENTARIO','TRANSFER_CARICATO_INVENTARIO')
-        AND ts > {ph} AND ts <= {ph}""",(store,product['category'],product['name'],after,until)).fetchall()
-    return sum(float(r['delta'] or 0) for r in matches)
+    matches=cur.execute(f"""SELECT name,delta FROM logs WHERE store={ph} AND category={ph}
+        AND action IN ('ORDER_CARICATO_INVENTARIO','TRANSFER_CARICATO_INVENTARIO','IMPORT_FATTURA')
+        AND ts > {ph} AND ts <= {ph}""",(store,product['category'],utc_bound(after),utc_bound(until))).fetchall()
+    exact = product['name']
+    prefix = exact + ' | ' + str(product.get('location') or 'MAGAZZINO') + ' | '
+    return sum(float(r['delta'] or 0) for r in matches if r['name']==exact or str(r['name']).startswith(prefix))
 
 
 # Fatture settimanali cucina: trascrizione manuale e tracciata, senza OCR.
@@ -9375,7 +9384,7 @@ def _ensure_kitchen_invoice_tables():
 
 def _kitchen_week(raw):
     try: d=date.fromisoformat(raw)
-    except (ValueError,TypeError): d=date.today()
+    except (ValueError,TypeError): d=_rome_today()
     return (d-timedelta(days=d.weekday())).isoformat()
 
 
@@ -9485,17 +9494,17 @@ def stock_count_form(request: Request):
     user,area,store=_stock_context(request)
     if not user: return RedirectResponse('/',status_code=303)
     ph=_ph()
-    week_start=(date.today()-__import__('datetime').timedelta(days=date.today().weekday())).isoformat()
+    week_start=(_rome_today()-__import__('datetime').timedelta(days=_rome_today().weekday())).isoformat()
     with connect() as conn:
         cur=conn.cursor()
         draft=cur.execute(f"SELECT payload, updated_at, updated_by FROM inventory_week_drafts WHERE store={ph} AND area={ph} AND week_start={ph}",(store,area,week_start)).fetchone()
         draft_values=json.loads(draft['payload']) if draft else {}
         history=cur.execute(f"SELECT id,counted_at,username FROM inventory_period_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC,id DESC LIMIT 16",(store,area)).fetchall()
-        rows=cur.execute(f"SELECT id,name,category,unit,qty FROM products WHERE store={ph} AND area={ph} ORDER BY category,name",(store,area)).fetchall()
+        rows=cur.execute(f"SELECT id,name,category,unit,qty,location FROM products WHERE store={ph} AND area={ph} ORDER BY category,name",(store,area)).fetchall()
         # Gli eventuali duplicati storici sono visualizzati come righe separate e mantengono ID diversi.
         latest=cur.execute(f"SELECT counted_at FROM inventory_period_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC,id DESC LIMIT 1",(store,area)).fetchone()
     return render('stock_count_form.html', user=user,area=area,store=store,stores=STORES,
-        products=rows,latest=latest, today=date.today().isoformat(), week_start=week_start, draft_values=draft_values, draft=draft, history=history, request=request)
+        products=rows,latest=latest, today=_rome_today().isoformat(), week_start=week_start, draft_values=draft_values, draft=draft, history=history, request=request)
 
 
 @app.post('/inventario/conteggio')
@@ -9512,16 +9521,21 @@ async def stock_count_submit(request: Request):
         return PlainTextResponse('Negozio non consentito',status_code=403)
     try:
         counted=date.fromisoformat((data.get('count_date') or '').strip())
-        if counted > date.today(): raise ValueError()
+        if counted > _rome_today(): raise ValueError()
     except ValueError:
         return PlainTextResponse('Data del conteggio non valida',status_code=400)
     ph=_ph()
     with connect() as conn:
         cur=conn.cursor()
+        # Serialize confirmations, including the first count, across Render workers.
+        if using_postgres():
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ('inventory-count:'+store+':'+area,))
+        else:
+            cur.execute("BEGIN IMMEDIATE")
         latest=cur.execute(f"SELECT id,counted_at FROM inventory_period_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC,id DESC LIMIT 1",(store,area)).fetchone()
         if latest and str(latest['counted_at'])[:10] >= counted.isoformat():
             return PlainTextResponse('Data già conteggiata o precedente all’ultimo conteggio; modificare la data per evitare doppi report.',status_code=409)
-        products=cur.execute(f"SELECT id,name,category,unit,qty FROM products WHERE store={ph} AND area={ph} ORDER BY id",(store,area)).fetchall()
+        products=cur.execute(f"SELECT id,name,category,unit,qty,location FROM products WHERE store={ph} AND area={ph} ORDER BY id",(store,area)).fetchall()
         if not products: return PlainTextResponse('Nessun prodotto presente nel reparto',status_code=400)
         if len(products)>1000: return PlainTextResponse('Troppi prodotti per una singola sessione',status_code=400)
         values=[]
@@ -9550,7 +9564,7 @@ async def stock_count_submit(request: Request):
                     arrivals=_stock_arrivals(cur,store,area,product,str(latest['counted_at']),count_end)
                     outgoing=prev+arrivals-qty
             cur.execute(f"""INSERT INTO inventory_period_count_lines(count_id,product_id,category,name,unit,observed,previous,received,outgoing)
-                 VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})""",(count_id,product['id'],product['category'],product['name'],product['unit'] or '',qty,prev,arrivals,outgoing))
+                 VALUES({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})""",(count_id,product['id'],product['category'],product['name'],product['unit'] or '',qty,prev,arrivals,outgoing))
             # Il conteggio è la nuova quantità fisica ufficiale. Lo storico non viene riscritto.
             cur.execute(f"UPDATE products SET qty={ph},updated_at={_now()} WHERE id={ph} AND store={ph} AND area={ph}",(qty,product['id'],store,area))
             _log(cur,store=store,username=user['username'],action='CONTEGGIO_'+area.upper(),category=product['category'],name=product['name'],delta=qty)
@@ -9568,7 +9582,7 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
     if not store: store=default_store
     if store not in STORES or (not is_admin(request) and store!=user.get('store')):
         return PlainTextResponse('Negozio non consentito',status_code=403)
-    today=date.today()
+    today=_rome_today()
     try:
         start_day=date.fromisoformat(start) if start else today.replace(day=1)
         end_day=date.fromisoformat(end) if end else today
@@ -9577,8 +9591,13 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
     ph=_ph()
     with connect() as conn:
         cur=conn.cursor()
+        selected=None
+        selected_lines=[]
         if id:
             selected=cur.execute(f"SELECT * FROM inventory_period_count_headers WHERE id={ph} AND area={ph} AND store={ph}",(id,area,store)).fetchone()
+            if not selected:
+                return PlainTextResponse('Scheda non trovata',status_code=404)
+            selected_lines=cur.execute(f'SELECT * FROM inventory_period_count_lines WHERE count_id={ph} ORDER BY category,name',(id,)).fetchall()
             if selected:
                 end_day=date.fromisoformat(str(selected['counted_at'])[:10])
                 previous=cur.execute(f"SELECT counted_at FROM inventory_period_count_headers WHERE store={ph} AND area={ph} AND (counted_at < {ph} OR (counted_at={ph} AND id<{ph})) ORDER BY counted_at DESC,id DESC LIMIT 1",(store,area,selected['counted_at'],selected['counted_at'],id)).fetchone()
@@ -9604,10 +9623,12 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
             if detail:
                 periods.append({'from':str(before['counted_at'])[:10],'to':str(after['counted_at'])[:10],'detail':detail})
         summaries=[{'name':k[0],'unit':k[1],'outgoing':v} for k,v in sorted(totals.items())]
+        archive=cur.execute(f'SELECT id,counted_at,username FROM inventory_period_count_headers WHERE store={ph} AND area={ph} AND counted_at>={ph} AND counted_at<={ph} ORDER BY counted_at DESC,id DESC',(store,area,start_day.isoformat(),end_day.isoformat()+' 23:59:59')).fetchall()
+        invoices=cur.execute(f'SELECT id,supplier,doc_date,filename FROM invoices_docs WHERE store={ph} AND doc_date>={ph} AND doc_date<={ph} ORDER BY doc_date,id',(store,start_day.isoformat(),end_day.isoformat())).fetchall()
         known=cur.execute(f"SELECT counted_at FROM inventory_period_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC LIMIT 1",(store,area)).fetchone()
     return render('stock_report.html',user=user,area=area,store=store,stores=STORES,
         start=start_day.isoformat(),end=end_day.isoformat(),periods=periods,totals=summaries,
-        known=known,generated=id>0,id=id)
+        known=known,generated=id>0,id=id,selected=selected,selected_lines=selected_lines,archive=archive,invoices=invoices,request=request)
 
 
 @app.post('/inventario/bozza')
@@ -9623,7 +9644,7 @@ async def inventory_save_week_draft(request: Request):
         return PlainTextResponse('Reparto o sede non autorizzati',status_code=403)
     try:
         counted=date.fromisoformat(str(form.get('count_date') or ''))
-        if counted > date.today(): raise ValueError()
+        if counted > _rome_today(): raise ValueError()
     except ValueError:
         return PlainTextResponse('Data non valida',status_code=400)
     week_start=(counted-__import__('datetime').timedelta(days=counted.weekday())).isoformat()
@@ -9671,3 +9692,21 @@ def inventory_count_csv(request: Request, area: str='prodotti', store: str='', i
     for row in lines:
         writer.writerow([safe(store),safe(area),safe(head['counted_at'])]+[safe(row[k]) for k in ('category','name','unit','observed','previous','received','outgoing')])
     return Response('\ufeff'+out.getvalue(), media_type='text/csv; charset=utf-8',headers={'Content-Disposition':f'attachment; filename="inventario_{area}_{id}.csv"'})
+
+
+from .inventory_activity import register_inventory_activity
+register_inventory_activity(app, globals())
+
+
+@app.get('/inventario/fatture-periodo/{doc_id}')
+def inventory_period_invoice(request: Request, doc_id: int, store: str = ''):
+    user, _, fallback = _stock_context(request)
+    if not user: return RedirectResponse('/',status_code=303)
+    store = store or fallback
+    if store not in STORES or (not is_admin(request) and store != user.get('store')):
+        return PlainTextResponse('Accesso negato',status_code=403)
+    ph = _ph()
+    with connect() as conn:
+        row = conn.cursor().execute(f'SELECT data,content_type FROM invoices_docs WHERE id={ph} AND store={ph}',(doc_id,store)).fetchone()
+    if not row: return PlainTextResponse('Fattura non trovata',status_code=404)
+    return Response(content=bytes(row['data']),media_type=row['content_type'] or 'application/pdf',headers={'Content-Disposition':'inline','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})

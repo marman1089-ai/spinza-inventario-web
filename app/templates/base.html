@@ -367,6 +367,7 @@
       <a href="/profile" class="pill" style="text-decoration:none;color:var(--text)">⚙️ Profilo</a>
 
       {% if user.role == 'admin' %}
+        <a href="/admin/fasce-orarie">🕒 Fasce orarie</a>
         <a href="/admin" class="pill" style="text-decoration:none;color:var(--text)">🛠️ Admin</a>
 
         <form method="post" action="/set-active-store" style="display:inline;">
@@ -434,6 +435,7 @@
       <a href="/profile" onclick="closeMobileMenu()">⚙️ Profilo</a>
 
       {% if user.role == 'admin' %}
+        <a href="/admin/fasce-orarie">🕒 Fasce orarie</a>
         <a href="/admin" onclick="closeMobileMenu()">🛠️ Admin</a>
         <form method="post" action="/set-active-store" style="margin-top:10px;">
           <input type="hidden" name="next_url" value="" />
@@ -597,6 +599,7 @@
 </script>
 
 <script defer src="/static/js/pro-ui-refresh.js?v=20260827c"></script>
+{% if user %}<div id="inventory-activity-context" hidden data-store="{{ store if store is defined and store else (active_store if active_store is defined else user.store) }}" data-area="{{ area if area is defined else 'prodotti' }}"></div><script src="/static/inventory_activity.js?v=20261029" defer></script>{% endif %}
 </body>
 
 </html>

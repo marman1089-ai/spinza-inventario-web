@@ -10,6 +10,10 @@
 <button class="btn2" type="submit">🔎 Mostra periodo</button><button class="btn2" type="button" onclick="window.print()">🖨️ Stampa / Salva PDF</button>
 </form>
 {% if id %}<p><a class="shine-button secondary" href="/inventario/report/csv?area={{ area }}&store={{ store }}&id={{ id }}">⬇️ Scarica scheda CSV</a></p>{% endif %}
+{% if selected %}<div class="shine-notice">Scheda #{{ selected.id }} archiviata · {{ selected.counted_at[:10] }} · {{ selected.username }}</div>
+<h3>Conteggio salvato</h3><table style="width:100%"><thead><tr><th>Categoria</th><th>Prodotto</th><th>Quantità contata</th></tr></thead><tbody>{% for row in selected_lines %}<tr><td>{{ row.category }}</td><td>{{ row.name }}</td><td>{{ row.observed }} {{ row.unit }}</td></tr>{% endfor %}</tbody></table>{% endif %}
+<h3>Schede archiviate nel periodo</h3>{% for h in archive %}<p><a href="/inventario/report?area={{ area }}&store={{ store }}&id={{ h.id }}">#{{ h.id }} · {{ h.counted_at[:10] }} · {{ h.username }}</a></p>{% else %}<p>Nessuna scheda in questo periodo.</p>{% endfor %}
+<h3>Fatture dello stesso periodo</h3>{% for doc in invoices %}<p>{{ doc.doc_date }} · {{ doc.supplier }} · <a href="/inventario/fatture-periodo/{{ doc.id }}?store={{ store }}" target="_blank" rel="noopener">{{ doc.filename }}</a></p>{% else %}<p>Nessuna fattura nel periodo.</p>{% endfor %}
 {% if not periods %}<div class="card" style="margin-top:12px">Non esistono ancora due conteggi completi nel periodo selezionato. Esegui un primo conteggio e un secondo successivo per ottenere un report affidabile. I giorni senza conteggi ai confini non vengono stimati automaticamente.</div>{% endif %}
 {% if totals %}<h3>Totale uscite nei periodi disponibili</h3><table style="width:100%"><thead><tr><th>Prodotto</th><th>Uscito / consumato dal magazzino</th></tr></thead><tbody>
 {% for t in totals %}<tr><td>{{ t.name }}</td><td><strong>{{ '%.2f'|format(t.outgoing) }} {{ t.unit }}</strong></td></tr>{% endfor %}
