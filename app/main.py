@@ -64,9 +64,17 @@ app = FastAPI(title="Spinza Inventario")
 @app.middleware('http')
 async def supply_render_request(request: Request, call_next):
     token = _render_request.set(request)
+    from time import time as control_now
+    from .control_journal import record_request, snapshot_target
+    started = control_now()
+    previous_user = dict(request.session.get('user') or {})
+    response = None
+    await run_in_threadpool(snapshot_target, request, previous_user)
     try:
-        return await call_next(request)
+        response = await call_next(request)
+        return response
     finally:
+        await run_in_threadpool(record_request, request, response, previous_user, started, globals())
         _render_request.reset(token)
 
 

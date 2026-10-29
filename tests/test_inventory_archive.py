@@ -221,14 +221,14 @@ class InventoryTests(unittest.TestCase):
         self.ping(token,t)
         with patch('app.inventory_activity.activity_now',return_value=t+1):
             page=self.client.get('/admin/fasce-orarie?store=spinza')
-        self.assertIn('● In uso ora',page.text)
+        self.assertIn('● Segnale recente',page.text)
         self.assertIn('10:00',page.text)
         r=self.client.post('/inventario/attivita',data={'token':token,'store':'spinza','area':'prodotti','state':'paused'},headers={'X-Inventory-Activity':'1'})
         self.assertEqual(r.status_code,204)
         self.assertEqual(len(self.sql('SELECT * FROM inventory_activity_sessions')),0)
         with patch('app.inventory_activity.activity_now',return_value=t+2):
             page=self.client.get('/admin/fasce-orarie?store=spinza')
-        self.assertNotIn('● In uso ora',page.text)
+        self.assertNotIn('● Segnale recente',page.text)
 
     def deletion_form(self,count_id=1):
         import re

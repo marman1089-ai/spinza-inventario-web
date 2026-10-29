@@ -1,5 +1,5 @@
 (() => {
-  if (!/^\/inventario(?:$|\/|\-controllo)/.test(location.pathname) || location.pathname.includes('/report')) return;
+  if (location.pathname.startsWith('/admin/fasce-orarie')) return;
   const root = document.getElementById('inventory-activity-context');
   if (!root || !root.dataset.store || root.dataset.store === 'ALL') return;
   const token = crypto.randomUUID();
@@ -25,5 +25,8 @@
   ['pointerdown','keydown','input','scroll','touchstart'].forEach(event => document.addEventListener(event,touch,{passive:true,capture:true}));
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='visible')pause();});
   window.addEventListener('blur',pause);window.addEventListener('pagehide',pause);
+  window.addEventListener('focus',touch);
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')touch();});
+  touch(); // Immediate signal: no interaction or minimum visit duration is required.
   setInterval(ping,15000);
 })();
