@@ -15,3 +15,7 @@ La stessa suite e stata confrontata sulla versione originale per verificare le a
 
 Il pacchetto contiene tutti i file dello ZIP originale, con le sole modifiche sopra indicate e questi test aggiuntivi. I database forniti sono preservati byte per byte. Le cartelle di vecchie versioni e backup restano inalterate; l'applicazione aggiornata e quella app/main.py avviata dal run.py nella radice.
 Usare le modalita di avvio gia previste dal gestionale.
+
+CORREZIONE VISUALIZZAZIONE LOGHI
+Eliminati riquadri di ritaglio e posizionamenti assoluti incompatibili con i CSS esistenti. Le immagini PNG originali sono incorporate senza alterazioni in due contenitori SVG che escludono solo i margini trasparenti. Dimensioni proporzionali, filtri colore disabilitati sui loghi e regole specifiche per desktop e mobile.
+Verifica visiva in Microsoft Edge a 1280 e 390 pixel: entrambi i loghi caricati e visibili integralmente.

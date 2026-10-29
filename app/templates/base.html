@@ -17,11 +17,6 @@
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;background:var(--bg);color:var(--text)}
     header{background:var(--panel);padding:8px 10px;display:flex;align-items:center;gap:10px;box-shadow:0 1px 8px rgba(0,0,0,.06);position:sticky;top:0;z-index:100;overflow:visible}
     header img{height:30px}
-    .brand-logo{display:inline-block;position:relative;overflow:hidden;flex-shrink:0;vertical-align:middle}
-    .spinza-logo{width:160px;height:34px}
-    .spinza-logo img{position:absolute;width:178px;height:auto;max-width:none;left:-9px;top:-16px}
-    .reburger-logo{width:145px;height:62px}
-    .reburger-logo img{position:absolute;width:166px;height:auto;max-width:none;left:-10px;top:-47px}
     .wrap{max-width:980px;margin:0 auto;padding:14px}
     .card{background:var(--panel);border-radius:14px;padding:14px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
     .row{display:flex;gap:10px;flex-wrap:wrap}
@@ -307,6 +302,10 @@
 <style>
 .brand-line{display:flex;align-items:center;gap:16px;flex-wrap:wrap}.brand-store-switch{display:flex;flex-direction:column;gap:3px;margin:0}.brand-store-switch label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}.brand-store-switch select{max-width:260px;min-height:38px;font-weight:650;cursor:pointer;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);padding:7px 30px 7px 10px}@media(max-width:600px){.brand-line{gap:8px}.brand-store-switch select{max-width:205px;font-size:12px}.brand-block{max-width:calc(100% - 76px)}}
 </style><link rel="stylesheet" href="/static/css/brand-night.css?v=20261029b">
+<style>
+    body header .brand-line img.brand-logo{display:block;position:static!important;width:154px!important;height:auto!important;max-width:154px!important;max-height:none!important;object-fit:contain;filter:none!important;opacity:1!important;flex-shrink:0}
+    @media(max-width:600px){body header .brand-line img.brand-logo{width:100px!important;max-width:100px!important;height:auto!important}}
+  </style>
 </head>
 <body class="brand-{{ _brand or 'ALL' }}">
 <div id="pageProgress" aria-hidden="true"></div>
@@ -319,9 +318,9 @@
   <div class="brand-block">
     <div class="brand-line">
       {% if _brand == 'spinza' %}
-        <span class="brand-logo spinza-logo"><img src="/static/logo_scritta_spinza.png?v=20261029" alt="Spinza" /></span>
+        <img class="brand-logo brand-logo-spinza" src="/static/logo_spinza_header.svg?v=20261029fix2" alt="Spinza" />
       {% elif _brand.startswith('reburger') %}
-        <span class="brand-logo reburger-logo"><img src="/static/logo_reburger.png?v=20261029" alt="Reburger"/></span>
+        <img class="brand-logo brand-logo-reburger" src="/static/logo_reburger_header.svg?v=20261029fix2" alt="Reburger" />
       {% else %}
         <strong style="font-size:18px;letter-spacing:.02em">Gestionale</strong>
       {% endif %}

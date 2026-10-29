@@ -168,7 +168,7 @@ class InventoryTests(unittest.TestCase):
         page=self.client.get(r.headers['location'])
         self.assertEqual(page.status_code,200)
         self.assertIn('brand-reburger_maggio',page.text)
-        self.assertIn('/static/logo_reburger.png',page.text)
+        self.assertIn('/static/logo_reburger_header.svg',page.text)
         self.assertIn('Reburger San Felice',page.text)
         self.assertNotIn('Scheda #1 archiviata',page.text)
         # Header must also follow the session on pages without active_store context.
@@ -184,7 +184,7 @@ class InventoryTests(unittest.TestCase):
             page=self.client.get(r.headers['location'])
             self.assertEqual(page.status_code,200)
             self.assertIn('brand-'+key,page.text)
-        self.assertIn('/static/logo_scritta_spinza.png',page.text)
+        self.assertIn('/static/logo_spinza_header.svg',page.text)
         r=self.client.post('/set-active-store',data={'store':'spinza','next_url':'//example.com'},follow_redirects=False)
         self.assertEqual(r.headers['location'],'/inventario')
 
