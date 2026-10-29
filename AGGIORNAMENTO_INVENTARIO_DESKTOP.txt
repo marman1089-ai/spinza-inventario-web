@@ -1,0 +1,8 @@
+CORREZIONE FINESTRA AGGIUNGI PRODOTTO - DESKTOP E MOBILE
+
+La precedente griglia desktop a sette colonne faceva uscire diversi campi dalla finestra, rendendoli illeggibili o irraggiungibili.
+Ora la finestra usa due colonne con dimensioni flessibili, etichette permanenti, nome prodotto a tutta larghezza e pulsante Salva a tutta larghezza. Tutti i campi restano nel riquadro, compreso il selettore colore. Il modulo conserva gli stessi nomi dei campi, destinazione e valori inviati al server.
+
+Verificato nel browser Microsoft Edge su Spinza e Reburger a larghezze di 1366, 1024, 390 e 360 pixel: otto controlli superati. Verificati apertura/chiusura, compilazione, dati del modulo, assenza di campi fuori dal riquadro ed errori JavaScript. Controllate visivamente le schermate desktop e telefono.
+
+Conservate tutte le precedenti modifiche: loghi corretti, filtri Log, regole di eliminazione dei documenti. Database e altri file restano identici alla versione precedente.

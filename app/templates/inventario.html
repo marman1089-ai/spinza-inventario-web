@@ -90,13 +90,13 @@
             <form method="post" action="/items/add" class="inv-add-form">
               <input type="hidden" name="next_url" value="" />
               <input type="hidden" name="location" value="MAGAZZINO" />
-              <input name="category" placeholder="Categoria (es. Soft drink)" required />
-              <input name="subgroup" placeholder="Sottogruppo (es. Coca Cola)" />
+              <label>Categoria<input name="category" placeholder="Es. Soft drink" required /></label>
+              <label>Sottogruppo<input name="subgroup" placeholder="Es. Coca Cola" /></label>
+              <label class="inv-field-wide">Prodotto<input name="name" placeholder="Nome prodotto" required /></label>
+              <label>Unità<input name="unit" placeholder="Es. pz, kg, l" /></label>
+              <label>Quantità<input name="qty" placeholder="0" type="number" step="0.1" inputmode="decimal" /></label>
+              <label>Scorta minima<input name="min_qty" placeholder="0" type="number" step="0.1" inputmode="decimal" /></label>
               <label class="inv-color-field" title="Colore del singolo prodotto"><span>Colore prodotto</span><input name="category_color" type="color" value="#64748b" /></label>
-              <input name="name" placeholder="Prodotto" required />
-              <input name="unit" placeholder="Unità" />
-              <input name="qty" placeholder="Q.tà" type="number" step="0.1" inputmode="decimal" />
-              <input name="min_qty" placeholder="Min" type="number" step="0.1" inputmode="decimal" />
               <button class="btn" type="submit">Salva</button>
             </form>
             {% else %}
@@ -555,7 +555,13 @@
   .inv-modal-head .mini{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;padding:0!important;}
   .inv-add-popover{width:min(94vw,620px);} 
   .inv-csv-popover{width:min(92vw,360px);display:flex;flex-direction:column;gap:8px;}
-  .inv-add-form{display:grid;grid-template-columns:1fr .8fr 1.4fr .7fr .7fr .7fr auto;gap:6px;align-items:center;}
+  .inv-add-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:end;}
+  .inv-add-form > label{display:grid;gap:6px;min-width:0;font-size:13px;font-weight:600;color:var(--text);}
+  .inv-add-form input{box-sizing:border-box;width:100%;min-width:0;max-width:100%;}
+  .inv-add-form .inv-field-wide,.inv-add-form > button{grid-column:1 / -1;}
+  .inv-add-form .inv-color-field{display:grid!important;grid-template-columns:minmax(0,1fr);gap:6px;font-size:13px!important;white-space:normal;color:var(--text);}
+  .inv-add-form input[type="color"]{width:100%;min-height:42px;}
+  .inv-add-form input::placeholder{color:#aeb8cb;opacity:1;}
   .inv-color-field{display:flex!important;align-items:center;gap:6px;font-size:10px;color:var(--muted);white-space:nowrap;}
   .inv-color-field input[type="color"],.inv-edit-form input[type="color"]{height:34px!important;padding:2px!important;cursor:pointer;}
   .inv-csv-form{display:flex;gap:6px;align-items:center;}
@@ -614,7 +620,7 @@
     .inv-toolbar-actions{gap:4px;}
     .inv-popover:not(.inv-modal-popover){position:fixed;left:8px;right:8px;top:74px;width:auto!important;max-height:72vh;overflow:auto;}
     .inv-modal-popover{width:calc(100vw - 18px)!important;max-height:calc(100dvh - 18px)!important;}
-    .inv-add-form{grid-template-columns:1fr 1fr;}
+    .inv-add-form{grid-template-columns:repeat(2,minmax(0,1fr));}
     .inv-add-form input[name="name"]{grid-column:1 / -1;}
     .inv-add-form button{grid-column:1 / -1;}
     .inv-color-field{font-size:10px!important;}
