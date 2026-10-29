@@ -249,7 +249,7 @@
     background:rgba(37,99,235,.16) !important;
     border-color:rgba(96,165,250,.25) !important;
   }
-  .line, [class*="line"]{background:rgba(148,163,184,.13) !important}
+  .line{background:rgba(148,163,184,.13) !important}
   .line > div{background:linear-gradient(90deg, var(--accent-3), var(--accent-2), var(--accent)) !important}
   .bar{background:linear-gradient(180deg, var(--accent-3), var(--accent-2), var(--accent)) !important; box-shadow:0 10px 22px rgba(37,99,235,.18) !important;}
   .bar.neg{background:linear-gradient(180deg, #fb7185, #ef4444) !important}
@@ -299,6 +299,9 @@
   <link rel="preload" href="/static/css/pro-ui-refresh.css?v=20260501b" as="style">
   <link rel="stylesheet" href="/static/css/pro-ui-refresh.css?v=20260827c">
 <link rel="stylesheet" href="/static/css/shine-2026.css?v=1">
+<style>
+.brand-line{display:flex;align-items:center;gap:16px;flex-wrap:wrap}.brand-store-switch{display:flex;flex-direction:column;gap:3px;margin:0}.brand-store-switch label{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}.brand-store-switch select{max-width:260px;min-height:38px;font-weight:650;cursor:pointer;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);padding:7px 30px 7px 10px}@media(max-width:600px){.brand-line{gap:8px}.brand-store-switch select{max-width:205px;font-size:12px}.brand-block{max-width:calc(100% - 76px)}}
+</style><link rel="stylesheet" href="/static/css/brand-night.css?v=20261029b">
 </head>
 <body class="brand-{{ _brand or 'ALL' }}">
 <div id="pageProgress" aria-hidden="true"></div>
@@ -316,6 +319,17 @@
         <img src="/static/logo_reburger.png" alt="Reburger"/>
       {% else %}
         <strong style="font-size:18px;letter-spacing:.02em">Gestionale</strong>
+      {% endif %}
+      {% if user and user.role == 'admin' %}
+      <form class="brand-store-switch" method="post" action="/set-active-store">
+        <input type="hidden" name="next_url" value="/inventario">
+        <label for="header-store">Negozio attivo</label>
+        <select id="header-store" name="store" aria-label="Cambia negozio" onchange="this.form.next_url.value=location.pathname+location.search;this.form.classList.add('is-switching');this.form.querySelector('label').textContent='Cambio negozio…';this.form.submit()">
+          {% set chosen = header_store or active_store or 'spinza' %}
+          {% for key,label in [('spinza',"Spinza Santa'Agostino"),('reburger_maggio','Reburger San Felice'),('reburger_camaldoli','Reburger Camaldoli'),('ALL','Tutti i negozi')] %}
+          <option value="{{ key }}" {% if chosen==key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select><noscript><button>Cambia</button></noscript>
+      </form>
       {% endif %}
     </div>
     {% if user %}
@@ -367,22 +381,9 @@
       <a href="/profile" class="pill" style="text-decoration:none;color:var(--text)">⚙️ Profilo</a>
 
       {% if user.role == 'admin' %}
-        <a href="/admin/fasce-orarie">🕒 Fasce orarie</a>
         <a href="/admin" class="pill" style="text-decoration:none;color:var(--text)">🛠️ Admin</a>
 
-        <form method="post" action="/set-active-store" style="display:inline;">
-          <input type="hidden" name="next_url" value="" />
-          <select name="store" class="pill" style="cursor:pointer" onchange="
-            this.form.next_url.value = window.location.pathname + window.location.search;
-            this.form.submit();
-          ">
-            {% set _sel = active_store or 'spinza' %}
-            <option value="spinza" {% if _sel=='spinza' %}selected{% endif %}>Negozio: Spinza</option>
-            <option value="reburger_camaldoli" {% if _sel=='reburger_camaldoli' %}selected{% endif %}>Negozio: Reburger Camaldoli</option>
-            <option value="reburger_maggio" {% if _sel=='reburger_maggio' %}selected{% endif %}>Negozio: Reburger Maggio</option>
-            <option value="ALL" {% if _sel=='ALL' %}selected{% endif %}>Visualizzali tutti</option>
-          </select>
-        </form>
+
       {% endif %}
 
       <a href="/logout" class="pill" style="text-decoration:none;color:var(--text)">Esci</a>
@@ -435,22 +436,8 @@
       <a href="/profile" onclick="closeMobileMenu()">⚙️ Profilo</a>
 
       {% if user.role == 'admin' %}
-        <a href="/admin/fasce-orarie">🕒 Fasce orarie</a>
         <a href="/admin" onclick="closeMobileMenu()">🛠️ Admin</a>
-        <form method="post" action="/set-active-store" style="margin-top:10px;">
-          <input type="hidden" name="next_url" value="" />
-          <div class="section">Negozio attivo</div>
-          <select name="store" style="width:100%;" onchange="
-            this.form.next_url.value = window.location.pathname + window.location.search;
-            this.form.submit();
-          ">
-            {% set _sel2 = active_store or 'spinza' %}
-            <option value="spinza" {% if _sel2=='spinza' %}selected{% endif %}>Spinza</option>
-            <option value="reburger_camaldoli" {% if _sel2=='reburger_camaldoli' %}selected{% endif %}>Reburger Camaldoli</option>
-            <option value="reburger_maggio" {% if _sel2=='reburger_maggio' %}selected{% endif %}>Reburger Maggio</option>
-            <option value="ALL" {% if _sel2=='ALL' %}selected{% endif %}>Tutti</option>
-          </select>
-        </form>
+
       {% endif %}
 
       <a href="/logout" onclick="closeMobileMenu()" style="background:var(--text);color:var(--panel)">Esci</a>
@@ -599,7 +586,7 @@
 </script>
 
 <script defer src="/static/js/pro-ui-refresh.js?v=20260827c"></script>
-{% if user %}<div id="inventory-activity-context" hidden data-store="{{ store if store is defined and store else (active_store if active_store is defined else user.store) }}" data-area="{{ area if area is defined else 'prodotti' }}"></div><script src="/static/inventory_activity.js?v=20261029" defer></script>{% endif %}
+{% if user %}<div id="inventory-activity-context" hidden data-store="{{ store if store is defined and store else (active_store if active_store is defined else user.store) }}" data-area="{{ area if area is defined else 'prodotti' }}"></div><script src="/static/inventory_activity.js?v=20261029b" defer></script>{% endif %}
 </body>
 
 </html>

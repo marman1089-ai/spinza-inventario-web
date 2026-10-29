@@ -4,6 +4,7 @@ import json
 import csv
 import io
 import calendar
+import secrets
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -11,7 +12,10 @@ def _rome_today():
     return datetime.now(ZoneInfo("Europe/Rome")).date()
 import re
 import mimetypes
-from urllib.parse import quote, quote_plus, unquote_plus, urlencode
+from urllib.parse import quote, quote_plus, unquote_plus, urlencode, urlsplit, parse_qsl
+from contextvars import ContextVar
+
+_render_request = ContextVar("render_request", default=None)
 
 from fastapi import FastAPI, Request, Form, UploadFile, File, HTTPException
 from .pdf_tools import ensure_pdf, merge_pdfs
@@ -35,6 +39,13 @@ templates = Environment(
 )
 
 def render(name: str, **ctx):
+    request = ctx.get('request') or _render_request.get()
+    if request is not None and ctx.get('user'):
+        selected = request.session.get('active_store') if ctx['user'].get('role') == 'admin' else ctx['user'].get('store')
+        ctx.setdefault('active_store', selected or 'spinza')
+        ctx['header_store'] = selected or 'spinza'
+        ctx['brand'] = selected or 'spinza'
+    ctx.setdefault('stores', STORES)
     tpl = templates.get_template(name)
     return HTMLResponse(tpl.render(**ctx))
 
@@ -50,6 +61,15 @@ def _safe_next_url(next_url: str | None, default: str = "/inventario") -> str:
 
 app = FastAPI(title="Spinza Inventario")
 
+@app.middleware('http')
+async def supply_render_request(request: Request, call_next):
+    token = _render_request.set(request)
+    try:
+        return await call_next(request)
+    finally:
+        _render_request.reset(token)
+
+
 # Compressione sicura: rende più leggere le pagine HTML/CSS/JS senza cambiare la logica.
 app.add_middleware(GZipMiddleware, minimum_size=700)
 
@@ -63,9 +83,9 @@ async def add_static_cache_headers(request: Request, call_next):
 
 # === Multi-inventory (stores) ===
 STORES = {
-    "spinza": "Spinza",
+    "spinza": "Spinza Santa'Agostino",
     "reburger_camaldoli": "Reburger Camaldoli",
-    "reburger_maggio": "Reburger Maggio",
+    "reburger_maggio": "Reburger San Felice",
 }
 
 app.add_middleware(
@@ -5558,10 +5578,17 @@ def set_active_store(request: Request, store: str = Form(...), next_url: str = F
         store = "spinza"
     request.session["active_store"] = store
 
-    # sicurezza: evita redirect esterni
-    if not next_url or not next_url.startswith("/"):
-        next_url = "/inventario"
-    return RedirectResponse(next_url, status_code=HTTP_303_SEE_OTHER)
+    # Keep the selected page's filters, but discard identifiers from the old store.
+    target = urlsplit(next_url or '/inventario')
+    safe_pages = {'/inventario','/inventario/conteggio','/inventario/report',
+        '/admin','/admin/fasce-orarie','/logs','/gestionale','/fatture','/chiusure','/spese-secondarie'}
+    path = target.path if not target.netloc and not target.scheme and target.path in safe_pages else '/inventario'
+    params = [(k,v) for k,v in parse_qsl(target.query) if k in ('area','day','start','end','q')]
+    if path in ('/inventario/conteggio','/inventario/report') and store == 'ALL':
+        path = '/inventario'
+    if path in ('/inventario/conteggio','/inventario/report','/admin/fasce-orarie'):
+        params.append(('store',store))
+    return RedirectResponse(path + ('?' + urlencode(params) if params else ''),status_code=303)
 
 
 
@@ -9628,7 +9655,7 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
         known=cur.execute(f"SELECT counted_at FROM inventory_period_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC LIMIT 1",(store,area)).fetchone()
     return render('stock_report.html',user=user,area=area,store=store,stores=STORES,
         start=start_day.isoformat(),end=end_day.isoformat(),periods=periods,totals=summaries,
-        known=known,generated=id>0,id=id,selected=selected,selected_lines=selected_lines,archive=archive,invoices=invoices,request=request)
+        known=known,generated=id>0,id=id,selected=selected,selected_lines=selected_lines,archive=archive,invoices=invoices,request=request,delete_token=request.session.setdefault('inventory_report_csrf',secrets.token_urlsafe(32)))
 
 
 @app.post('/inventario/bozza')
@@ -9710,3 +9737,46 @@ def inventory_period_invoice(request: Request, doc_id: int, store: str = ''):
         row = conn.cursor().execute(f'SELECT data,content_type FROM invoices_docs WHERE id={ph} AND store={ph}',(doc_id,store)).fetchone()
     if not row: return PlainTextResponse('Fattura non trovata',status_code=404)
     return Response(content=bytes(row['data']),media_type=row['content_type'] or 'application/pdf',headers={'Content-Disposition':'inline','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
+
+
+@app.post('/inventario/report/{count_id}/elimina')
+async def delete_inventory_report(request: Request, count_id: int):
+    user=require_login(request)
+    if not user or not is_admin(request):
+        return PlainTextResponse('Solo gli amministratori possono eliminare i report.',status_code=403)
+    form=await request.form()
+    expected=request.session.get('inventory_report_csrf')
+    if not expected or not secrets.compare_digest(str(form.get('delete_token') or ''),expected):
+        return PlainTextResponse('Conferma scaduta. Riapri il report e riprova.',status_code=403)
+    store=str(form.get('store') or '')
+    area=str(form.get('area') or '')
+    if store not in STORES or area not in ('prodotti','bibite'):
+        return PlainTextResponse('Negozio o reparto non valido',status_code=400)
+    _ensure_inventory_report_tables()
+    ph=_ph()
+    with connect() as conn:
+        c=conn.cursor()
+        if using_postgres():
+            c.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',('inventory-count:'+store+':'+area,))
+        else: c.execute('BEGIN IMMEDIATE')
+        head=c.execute(f'SELECT * FROM inventory_period_count_headers WHERE id={ph} AND store={ph} AND area={ph}',(count_id,store,area)).fetchone()
+        if not head: return PlainTextResponse('Report non trovato o già eliminato.',status_code=404)
+        before=c.execute(f'SELECT id FROM inventory_period_count_headers WHERE store={ph} AND area={ph} AND (counted_at<{ph} OR (counted_at={ph} AND id<{ph})) ORDER BY counted_at DESC,id DESC LIMIT 1',(store,area,head['counted_at'],head['counted_at'],count_id)).fetchone()
+        after=c.execute(f'SELECT id FROM inventory_period_count_headers WHERE store={ph} AND area={ph} AND (counted_at>{ph} OR (counted_at={ph} AND id>{ph})) ORDER BY counted_at,id LIMIT 1',(store,area,head['counted_at'],head['counted_at'],count_id)).fetchone()
+        if after:
+            # Only derived comparisons change; all retained physical counts remain intact.
+            prior={r['product_id']:r for r in c.execute(f'SELECT * FROM inventory_period_count_lines WHERE count_id={ph}',(before['id'],)).fetchall()} if before else {}
+            removed={r['product_id']:r for r in c.execute(f'SELECT * FROM inventory_period_count_lines WHERE count_id={ph}',(count_id,)).fetchall()}
+            following=c.execute(f'SELECT * FROM inventory_period_count_lines WHERE count_id={ph}',(after['id'],)).fetchall()
+            for line in following:
+                start=prior.get(line['product_id']);middle=removed.get(line['product_id'])
+                previous=float(start['observed']) if start else None
+                received=None;outgoing=None
+                if start and middle and middle['received'] is not None and line['received'] is not None:
+                    received=float(middle['received'])+float(line['received'])
+                    outgoing=previous+received-float(line['observed'])
+                c.execute(f'UPDATE inventory_period_count_lines SET previous={ph},received={ph},outgoing={ph} WHERE id={ph}',(previous,received,outgoing,line['id']))
+        c.execute(f'DELETE FROM inventory_period_count_lines WHERE count_id={ph}',(count_id,))
+        c.execute(f'DELETE FROM inventory_period_count_headers WHERE id={ph} AND store={ph} AND area={ph}',(count_id,store,area))
+        _log(c,store=store,username=user['username'],action='REPORT_INVENTARIO_ELIMINATO',category='REPORT',name=f"Report #{count_id} · {area} · {head['counted_at']}",delta=0)
+    return RedirectResponse('/inventario/report?'+urlencode({'store':store,'area':area,'deleted':'1'}),status_code=303)

@@ -10,6 +10,8 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from fastapi import Request
 from fastapi.responses import PlainTextResponse, Response
+import csv
+import io
 from .db import connect, using_postgres
 
 ROME = ZoneInfo('Europe/Rome')
@@ -83,6 +85,11 @@ def register_inventory_activity(app, helpers):
             else:
                 c.execute('BEGIN IMMEDIATE')
             old = c.execute(f'SELECT last_ping FROM inventory_activity_sessions WHERE token={ph} AND user_id={ph} AND store={ph}', (token,uid,store)).fetchone()
+            if form.get('state') == 'paused':
+                c.execute(f'DELETE FROM inventory_activity_sessions WHERE token={ph} AND user_id={ph} AND store={ph}',(token,uid,store))
+                return Response(status_code=204)
+            if not old or now-float(old['last_ping']) > 30:
+                c.execute(f'INSERT INTO inventory_activity_intervals(user_id,username,store,area,started,ended) VALUES({",".join([ph]*6)})',(uid,user['username'],store,area,now,now))
             if old and 0 < now-float(old['last_ping']) <= 30:
                 c.execute(f'INSERT INTO inventory_activity_intervals(user_id,username,store,area,started,ended) VALUES({",".join([ph]*6)})', (uid,user['username'],store,area,float(old['last_ping']),now))
             c.execute(f'''INSERT INTO inventory_activity_sessions(token,user_id,store,last_ping) VALUES({ph},{ph},{ph},{ph})
@@ -91,7 +98,7 @@ def register_inventory_activity(app, helpers):
         return Response(status_code=204)
 
     @app.get('/admin/fasce-orarie')
-    def activity_report(request: Request, day: str = '', store: str = ''):
+    def activity_report(request: Request, day: str = '', store: str = '', download: str = ''):
         user = helpers['require_login'](request)
         if not user or user['role'] != 'admin':
             return PlainTextResponse('Accesso riservato agli amministratori', status_code=403)
@@ -103,21 +110,36 @@ def register_inventory_activity(app, helpers):
         if store != 'ALL' and store not in helpers['STORES']:
             return PlainTextResponse('Negozio non valido', status_code=400)
         init_activity_db()
+        from .inventory_analytics import build_reports, duration
         lo, hi = day_bounds(selected)
+        monday = selected-timedelta(days=selected.weekday())
+        history_lo = day_bounds(monday-timedelta(days=28))[0]
+        now = activity_now()
+        today = datetime.fromtimestamp(now,ROME).date()
         ph = '%s' if using_postgres() else '?'
         scope = f' AND store={ph}' if store != 'ALL' else ''
         args = (store,) if scope else ()
         with connect() as conn:
             c = conn.cursor()
             users = c.execute('SELECT id,username,store FROM users WHERE 1=1'+scope+' ORDER BY username,store', args).fetchall()
-            events = c.execute(f'SELECT * FROM inventory_activity_intervals WHERE ended>{ph} AND started<{ph}'+scope+' ORDER BY started', (lo,hi)+args).fetchall()
+            events = c.execute(f'SELECT * FROM inventory_activity_intervals WHERE ended>={ph} AND started<{ph}'+scope+' ORDER BY started', (history_lo,hi)+args).fetchall()
+            recent = c.execute(f'SELECT user_id,store,MAX(last_ping) AS last_ping FROM inventory_activity_sessions WHERE last_ping>={ph}'+scope+' GROUP BY user_id,store',(now-30,)+args).fetchall()
         people = {(int(u['id']),u['store']): {'name':u['username'],'store':u['store'],'intervals':[]} for u in users}
         for e in events:
             key = (int(e['user_id']),e['store'])
             row = people.setdefault(key, {'name':e['username'],'store':e['store'],'intervals':[]})
-            row['intervals'].append((max(lo,float(e['started'])),min(hi,float(e['ended']))))
-        for row in people.values():
-            merged = merge_intervals(row.pop('intervals'))
+            row['intervals'].append((float(e['started']),float(e['ended'])))
+        active = {(int(r['user_id']),r['store']):float(r['last_ping']) for r in recent} if selected == today else {}
+        for key,row in people.items():
+            all_intervals = row.pop('intervals')
+            row.update(build_reports(all_intervals,selected))
+            merged = merge_intervals([(max(lo,a),min(hi,b)) for a,b in all_intervals if b>=lo and a<hi])
+            row['active'] = key in active
+            row['first'] = datetime.fromtimestamp(merged[0][0],ROME).strftime('%H:%M') if merged else ('Adesso' if row['active'] else '—')
+            row['current_duration'] = duration(merged[-1][1]-merged[-1][0]) if row['active'] and merged else '0 min'
+            row['current_start'] = datetime.fromtimestamp(merged[-1][0],ROME).strftime('%H:%M') if row['active'] and merged else '—'
+            row['last'] = datetime.fromtimestamp(merged[-1][1],ROME).strftime('%H:%M') if merged else '—'
+            row['sessions'] = [{'start':datetime.fromtimestamp(a,ROME).strftime('%H:%M:%S %Z'),'end':datetime.fromtimestamp(b,ROME).strftime('%H:%M:%S %Z'),'duration':duration(b-a)} for a,b in merged]
             row['minutes'] = round(sum(b-a for a,b in merged)/60,1)
             row['bars'] = []
             for a,b in merged:
@@ -139,4 +161,17 @@ def register_inventory_activity(app, helpers):
                     minute = left.hour*60+left.minute+left.second/60
                     row['bars'].append({'left':minute/1440*100,'width':(stop-start)/86400*100,
                         'label':left.strftime('%H:%M:%S %Z')+' – '+right.strftime('%H:%M:%S %Z')})
-        return helpers['render']('inventory_activity.html',user=user,day=selected.isoformat(),store=store,stores=helpers['STORES'],people=list(people.values()),hours=range(25),dst=(hi-lo)!=86400)
+        rows=sorted(people.values(),key=lambda row:(not row['active'],-row['daily']['seconds'],row['name'].lower()))
+        if download == 'csv':
+            output=io.StringIO();writer=csv.writer(output,delimiter=';')
+            writer.writerow(['Tipo','Dipendente','Negozio','Dal','Al','Minuti utilizzo','Confronto','Minuti riferimento','Variazione %'])
+            def safe(value):
+                value=str(value)
+                return "'"+value if value.lstrip().startswith(('=','+','-','@')) else value
+            for row in rows:
+                for kind,items,label in [('Giorno',row['days'],'Media 7 giorni precedenti, inclusi giorni a zero'),('Settimana',row['weeks'],'Stessi giorni settimana precedente')]:
+                    for item in items:
+                        writer.writerow([kind,safe(row['name']),safe(helpers['STORES'].get(row['store'],row['store'])),item['from'],item['to'],round(item['seconds']/60,2),label,round(item['base']/60,2),item['delta'] if item['delta'] is not None else 'N/D: riferimento zero'])
+            return Response('\ufeff'+output.getvalue(),media_type='text/csv; charset=utf-8',headers={'Content-Disposition':f'attachment; filename="utilizzo_inventario_{selected.isoformat()}.csv"'})
+        return helpers['render']('inventory_activity.html',user=user,day=selected.isoformat(),store=store,stores=helpers['STORES'],people=rows,hours=range(25),dst=(hi-lo)!=86400,live=selected==today,
+            active_count=sum(r['active'] for r in rows),total_duration=duration(sum(r['daily']['seconds'] for r in rows)),used_count=sum(bool(r['sessions']) for r in rows),updated=datetime.fromtimestamp(now,ROME).strftime('%H:%M:%S'),request=request)

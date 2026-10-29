@@ -1,0 +1,18 @@
+/* Shared brand tokens: both Reburger stores use the same green night theme. */
+body.brand-spinza{--brand-bg:#10070a;--brand-bg-soft:#1b0a0f;--brand-panel:#1b1015;--brand-panel-solid:#1b1015;--brand-panel-2:#28151c;--brand-primary:#c7394b;--brand-primary-2:#ec5c63;--brand-blue:#d54452;--brand-cyan:#fa9399;--brand-line:#65313d;--brand-line-strong:#a64857;--accent:#c7394b;--accent-2:#df4c58;--accent-3:#fa9399;--shine-accent:#c7394b;--shine-violet:#df4c58}
+body.brand-reburger_maggio,body.brand-reburger_camaldoli{--brand-bg:#060e0b;--brand-bg-soft:#091a13;--brand-panel:#101e18;--brand-panel-solid:#101e18;--brand-panel-2:#162c22;--brand-primary:#16855d;--brand-primary-2:#38c58c;--brand-blue:#239f70;--brand-cyan:#79dfaf;--brand-line:#294c3b;--brand-line-strong:#3c8b63;--accent:#16855d;--accent-2:#239f70;--accent-3:#79dfaf;--shine-accent:#16855d;--shine-violet:#239f70}
+body[class*="brand-"]{--bg:var(--brand-bg);--panel:var(--brand-panel);--panel-2:var(--brand-panel-2);--line:var(--brand-line);--line-soft:var(--brand-line);--text:#f2f6f4;--muted:#adb9b3;background:radial-gradient(ellipse at 10% 0,var(--brand-bg-soft),transparent 60%),var(--brand-bg)!important;color:var(--text)}
+body[class*="brand-"] header{background:var(--brand-bg-soft)!important;border-bottom:1px solid var(--brand-line-strong);box-shadow:0 8px 32px #0004}
+body[class*="brand-"] .card,body[class*="brand-"] .shine-panel,body[class*="brand-"] .shine-stat{background:var(--panel)!important;border-color:var(--line)!important}
+body[class*="brand-"] .shine-hero{background:linear-gradient(120deg,var(--brand-bg-soft),var(--brand-panel-2))!important;border:1px solid var(--brand-line-strong)}
+body[class*="brand-"] .eyebrow{color:var(--brand-cyan)}body[class*="brand-"] .shine-hero p{color:#cbd6d1}
+body[class*="brand-"] select option{background:var(--brand-panel-solid);color:var(--text)}
+.brand-store-switch select{box-shadow:0 0 0 3px color-mix(in srgb,var(--brand-primary) 10%,transparent);border-color:var(--brand-line-strong)!important;transition:border-color .2s,box-shadow .2s}
+.brand-store-switch select:focus{outline:2px solid var(--brand-primary-2);outline-offset:3px}.brand-store-switch select:hover{box-shadow:0 0 16px color-mix(in srgb,var(--brand-primary) 20%,transparent)}
+.brand-store-switch.is-switching{opacity:.65;pointer-events:none}.brand-store-switch.is-switching label{color:var(--brand-cyan)}
+.wrap{animation:workspace-enter .25s ease both}.btn,.btn2,.shine-button{transition:transform .18s ease,filter .18s ease,box-shadow .18s ease}.btn:hover,.btn2:hover{transform:translateY(-1px);filter:brightness(1.1)}
+@keyframes workspace-enter{from{opacity:.4;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.wrap{animation:none}.brand-store-switch select,.btn,.btn2,.shine-button{transition:none}}
+body[class*="brand-"] header .brand-line{background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important}
+@media(max-width:600px){header .brand-block{flex-direction:column!important;align-items:flex-start!important;gap:7px!important;max-width:calc(100% - 70px)}header .brand-line{flex-wrap:nowrap;gap:10px!important}header .brand-line img{height:29px!important;max-width:65px;object-fit:contain}header .brand-store-switch select{width:100%;max-width:220px;min-width:0;font-size:11px}header .brand-store-switch{min-width:0;flex:1}header .brand-store-switch label{font-size:9px}header .user-line{font-size:10px!important;padding:4px 8px!important}.brand-store-switch{max-width:100%}}
+body[class*="brand-reburger"] header .brand-line img{filter:brightness(0) invert(1);opacity:.94}body.brand-spinza header .brand-line img{filter:brightness(1.4) saturate(1.05)}

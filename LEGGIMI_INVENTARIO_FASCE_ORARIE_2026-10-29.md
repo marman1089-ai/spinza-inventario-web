@@ -23,7 +23,7 @@ I consumi richiedono due conteggi completi e gli arrivi registrati tra essi: non
 
 ## Admin → Fasce orarie
 
-Nuova pagina /admin/fasce-orarie, collegata dal pannello admin e dai menu desktop/mobile. Filtro per giorno e negozio; asse X 00:00–24:00, asse Y utenti/dipendenti del negozio, barre verdi e minuti effettivamente rilevati. Gli utenti senza attività restano visibili; lo storico conserva il nome registrato anche se l'utente viene successivamente rimosso.
+Nuova pagina /admin/fasce-orarie, collegata esclusivamente dal pannello admin, accanto ai Log. Filtro per giorno e negozio; asse X 00:00–24:00, asse Y utenti/dipendenti del negozio, barre verdi e minuti effettivamente rilevati. Gli utenti senza attività restano visibili; lo storico conserva il nome registrato anche se l'utente viene successivamente rimosso.
 
 Il rilevamento riguarda /inventario, le sue pagine operative e /inventario-controllo, con un negozio selezionato; esclude le pagine report. Richiede JavaScript, pagina visibile, finestra attiva e un'interazione (tastiera, input, scroll, tocco). Invia campioni ogni 15 secondi e sospende dopo 60 secondi senza interazioni. Il primo campione avvia l'intervallo; una pausa superiore a 30 secondi tra campioni non viene riempita. Le schede simultanee sono unite per non duplicare i minuti. Non è una misura di presenza al lavoro; la risoluzione è indicativa e gli ultimi secondi prima di chiudere la pagina possono non essere rilevati.
 
@@ -54,11 +54,11 @@ Fonti ufficiali controllate:
 
 ## Test e limiti di verifica
 
-12 test specifici passati su database SQLite isolati: prima/seconda archiviazione, rilettura con nuovo client e connessione, CSV, annullamento transazione con errore simulato, bozza, conferma simultanea, validazioni, permessi tra negozi, fatture originali, campioni attività, pausa/ripresa, mezzanotte/cambio ora, migrazione su copia del DB allegato senza perdita prodotti, blocco SQLite su Render. Il ripristino della modalità transazionale PostgreSQL è verificato con un pool simulato, non con Supabase reale.
+18 test specifici passati su database SQLite isolati: prima/seconda archiviazione, rilettura con nuovo client e connessione, CSV, annullamento transazione con errore simulato, bozza, conferma simultanea, validazioni, permessi tra negozi, fatture originali, campioni attività, pausa/ripresa, mezzanotte/cambio ora, migrazione su copia del DB allegato senza perdita prodotti, blocco SQLite su Render. Il ripristino della modalità transazionale PostgreSQL è verificato con un pool simulato, non con Supabase reale.
 
 Test JavaScript passato: nessuna attività per semplice apertura pagina, sospensione per pagina nascosta, finestra non attiva e inattività; ripresa con interazione; esclusione report.
 
-Suite completa: 40 test, 36 passati e 4 problemi preesistenti. Gli stessi quattro sono stati riprodotti sulla suite originale non modificata (28 test, 24 passati):
+Suite completa: 46 test, 42 passati e 4 problemi preesistenti. Gli stessi quattro sono stati riprodotti sulla suite originale non modificata (28 test, 24 passati):
 - test_document_upload_opens_digital_review
 - test_staff_photo_only_and_originals_protected
 - test_admin_can_create_written_record_without_original
@@ -76,3 +76,5 @@ Comandi ripetibili dalla root (con le dipendenze installate):
     python -m unittest discover -s tests -v
 
 I file dati originali dell'allegato sono conservati senza modifiche; database di prova, dipendenze scaricate e cache Python non sono inclusi nel pacchetto.
+
+La versione 2 aggiunge cambio negozio accanto al logo, temi rosso/verde scuri, report attività con percentuali ed eliminazione admin delle schede errate. Vedere LEGGIMI_VERSIONE_2.md per comportamento e istruzioni aggiornati.
