@@ -7382,6 +7382,33 @@ def _effective_store(request: Request, user: dict) -> str:
     return user.get("store") or "spinza"
 
 
+def _document_delete_now():
+    return datetime.now(ZoneInfo("Europe/Rome"))
+
+
+def _can_delete_uploaded_document(user, document):
+    """Staff: own store, own upload, same Rome calendar day. Admin: always."""
+    if user.get('role') == 'admin':
+        return True
+    if document.get('store') != user.get('store') or not user.get('username') or document.get('uploaded_by') != user['username']:
+        return False
+    try:
+        uploaded = document.get('ts')
+        if not isinstance(uploaded, datetime):
+            uploaded = datetime.fromisoformat(str(uploaded).replace('Z', '+00:00'))
+        # SQLite datetime('now') and the deployment's timestamp values are UTC.
+        if uploaded.tzinfo is None:
+            uploaded = uploaded.replace(tzinfo=ZoneInfo('UTC'))
+        uploaded = uploaded.astimezone(ZoneInfo('Europe/Rome'))
+        now = _document_delete_now()
+        return uploaded.date() == now.date() and uploaded <= now
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+templates.globals['can_delete_uploaded_document'] = _can_delete_uploaded_document
+
+
 @app.get("/chiusure", response_class=HTMLResponse)
 def closures_page(request: Request, q: str = ""):
     user = require_login(request)
@@ -7524,10 +7551,7 @@ def closures_delete(request: Request, doc_id: int):
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
-    if not is_admin(request):
-        return PlainTextResponse("Solo amministratore", status_code=403)
-
-    store = _effective_store(request, user)
+    store = "ALL" if is_admin(request) else _effective_store(request, user)
     ph = _ph()
     now = _now()
 
@@ -7536,16 +7560,20 @@ def closures_delete(request: Request, doc_id: int):
 
         if store == "ALL" and is_admin(request):
             info = cur.execute(
-                f"SELECT store, closure_date, filename FROM closures WHERE id={ph}",
+                f"SELECT store, closure_date, filename, uploaded_by, ts FROM closures WHERE id={ph}",
                 (int(doc_id),),
             ).fetchone()
         else:
             info = cur.execute(
-                f"SELECT store, closure_date, filename FROM closures WHERE id={ph} AND store={ph}",
+                f"SELECT store, closure_date, filename, uploaded_by, ts FROM closures WHERE id={ph} AND store={ph}",
                 (int(doc_id), store),
             ).fetchone()
 
+        if not info and not is_admin(request):
+            return PlainTextResponse("Documento non eliminabile", status_code=403)
         if info:
+            if not _can_delete_uploaded_document(user, info):
+                return PlainTextResponse("Puoi eliminare solo i tuoi file nel giorno del caricamento (ora italiana).", status_code=403)
             if store == "ALL" and is_admin(request):
                 cur.execute(f"DELETE FROM closures WHERE id={ph}", (int(doc_id),))
                 store_for_log = info["store"]
@@ -7703,10 +7731,7 @@ def secondary_expenses_delete(request: Request, doc_id: int):
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
-    if not is_admin(request):
-        return PlainTextResponse("Solo amministratore", status_code=403)
-
-    store = _effective_store(request, user)
+    store = "ALL" if is_admin(request) else _effective_store(request, user)
     ph = _ph()
     now = _now()
 
@@ -7715,16 +7740,20 @@ def secondary_expenses_delete(request: Request, doc_id: int):
 
         if store == "ALL" and is_admin(request):
             info = cur.execute(
-                f"SELECT store, expense_date, filename FROM secondary_expenses WHERE id={ph}",
+                f"SELECT store, expense_date, filename, uploaded_by, ts FROM secondary_expenses WHERE id={ph}",
                 (int(doc_id),),
             ).fetchone()
         else:
             info = cur.execute(
-                f"SELECT store, expense_date, filename FROM secondary_expenses WHERE id={ph} AND store={ph}",
+                f"SELECT store, expense_date, filename, uploaded_by, ts FROM secondary_expenses WHERE id={ph} AND store={ph}",
                 (int(doc_id), store),
             ).fetchone()
 
+        if not info and not is_admin(request):
+            return PlainTextResponse("Documento non eliminabile", status_code=403)
         if info:
+            if not _can_delete_uploaded_document(user, info):
+                return PlainTextResponse("Puoi eliminare solo i tuoi file nel giorno del caricamento (ora italiana).", status_code=403)
             if store == "ALL" and is_admin(request):
                 cur.execute(f"DELETE FROM secondary_expenses WHERE id={ph}", (int(doc_id),))
                 store_for_log = info["store"]
@@ -9086,10 +9115,7 @@ def invoices_delete(request: Request, doc_id: int):
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
-    if not is_admin(request):
-        return PlainTextResponse("Solo amministratore", status_code=403)
-
-    store = _effective_store(request, user)
+    store = "ALL" if is_admin(request) else _effective_store(request, user)
     ph = _ph()
     now = _now()
 
@@ -9099,16 +9125,20 @@ def invoices_delete(request: Request, doc_id: int):
         # recupera info per log
         if store == "ALL" and is_admin(request):
             info = cur.execute(
-                f"SELECT store, supplier, doc_date, filename FROM invoices_docs WHERE id={ph}",
+                f"SELECT store, supplier, doc_date, filename, uploaded_by, ts FROM invoices_docs WHERE id={ph}",
                 (int(doc_id),),
             ).fetchone()
         else:
             info = cur.execute(
-                f"SELECT store, supplier, doc_date, filename FROM invoices_docs WHERE id={ph} AND store={ph}",
+                f"SELECT store, supplier, doc_date, filename, uploaded_by, ts FROM invoices_docs WHERE id={ph} AND store={ph}",
                 (int(doc_id), store),
             ).fetchone()
 
+        if not info and not is_admin(request):
+            return PlainTextResponse("Documento non eliminabile", status_code=403)
         if info:
+            if not _can_delete_uploaded_document(user, info):
+                return PlainTextResponse("Puoi eliminare solo i tuoi file nel giorno del caricamento (ora italiana).", status_code=403)
             if store == "ALL" and is_admin(request):
                 cur.execute(f"DELETE FROM invoices_docs WHERE id={ph}", (int(doc_id),))
                 store_for_log = info["store"]

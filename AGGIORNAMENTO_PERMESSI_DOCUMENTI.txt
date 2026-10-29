@@ -1,0 +1,17 @@
+AGGIORNAMENTO PERMESSI ELIMINAZIONE DOCUMENTI
+
+Archivi interessati: Fatture, Chiusure, Spese secondarie.
+
+DIPENDENTI
+Possono eliminare solo documenti caricati dal proprio utente nella propria sede e solo fino alla mezzanotte del giorno del caricamento, con riferimento al fuso Europe/Rome. Non si tratta di 24 ore successive al caricamento: il giorno seguente l'eliminazione e riservata agli admin.
+Conta la data e ora di caricamento salvata dal server, non la data della fattura, chiusura o spesa inserita nel modulo.
+Il pulsante Elimina compare solo quando l'operazione e consentita. Il server applica la stessa regola anche alle richieste dirette, incluse pagine lasciate aperte dalla sera precedente.
+Timestamp mancanti o non validi non consentono l'eliminazione ai dipendenti.
+
+ADMIN
+Possono sempre eliminare documenti di qualsiasi utente, data e sede. L'azione viene registrata nei Log con l'utente che elimina e la sede effettiva del documento.
+
+VERIFICHE
+Superati i tre test aggiuntivi con casi per tutti gli archivi: proprieta, sede, giorno corrente/precedente, cambio data italiana rispetto a UTC, pulsanti, richieste HTTP dirette e admin su documenti vecchi di altre sedi.
+Loghi corretti e filtri Log delle precedenti versioni conservati. Database e file originali preservati; nessuna modifica allo schema richiesta per questa funzione.
+La suite generale conserva le anomalie pregresse documentate nella precedente nota (digitalizzazione disattivata e dipendenza PostgreSQL assente nell'ambiente di prova).
