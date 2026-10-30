@@ -1,5 +1,5 @@
 (() => {
-  if (location.pathname.startsWith('/admin/fasce-orarie')) return;
+  if (location.pathname.startsWith('/admin/fasce-orarie') || location.pathname.startsWith('/admin/controllo-live')) return;
   const root = document.getElementById('inventory-activity-context');
   if (!root || !root.dataset.store || root.dataset.store === 'ALL') return;
   const token = crypto.randomUUID();

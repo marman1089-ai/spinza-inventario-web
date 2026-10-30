@@ -3,7 +3,7 @@
 {% block content %}
 <link rel="stylesheet" href="/static/css/inventory-activity.css?v=20261029-control-v2">
 <section class="activity-page">
-<div class="activity-heading"><div><span class="eyebrow">CONTROLLO UTILIZZO · EUROPE/ROME</span><h1>Fasce orarie</h1><p>Accessi anche di un istante, operazioni ed esiti: clicca una fascia per aprire il registro della persona.</p></div><a class="btn2" href="/admin">← Pannello admin</a></div>
+<div class="activity-heading"><div><span class="eyebrow">CONTROLLO UTILIZZO · EUROPE/ROME</span><h1>Fasce orarie</h1><p>Accessi anche di un istante, operazioni ed esiti: clicca una fascia per aprire il registro della persona.</p></div><a class="btn2" href="/admin/controllo-live">🔴 Controllo live</a><a class="btn2" href="/admin">← Pannello admin</a></div>
 <form method="get" class="activity-filters"><label>Giorno<input type="date" name="day" value="{{ day }}" required></label><label>Negozio<select name="store"><option value="ALL" {% if store=='ALL' %}selected{% endif %}>Tutti i negozi</option>{% for key,name in stores.items() %}<option value="{{ key }}" {% if key==store %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label><button type="submit">Mostra report</button><a class="btn2" href="/admin/fasce-orarie?day={{ day }}&store={{ store }}&download=csv">↓ Esporta report CSV</a></form>
 <div id="activity-content" data-live="{{ 'true' if live else 'false' }}">
 <div class="activity-updated">{% if live %}<span class="live-dot"></span> Aggiornamento automatico ogni 15 secondi{% else %}Giornata storica{% endif %} · aggiornato alle {{ updated }}</div>

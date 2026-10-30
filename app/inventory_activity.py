@@ -32,7 +32,7 @@ def _create_activity_db():
         c.execute('CREATE INDEX IF NOT EXISTS ix_inventory_activity_day ON inventory_activity_intervals(store,ended,started)')
 
 def init_activity_db():
-    key = (database._database_url() or str(database.SQLITE_PATH.resolve())) + ':control-v2'
+    key = (database._database_url() or str(database.SQLITE_PATH.resolve())) + ':control-live-assist-v4'
     with _schema_lock:
         if key not in _schema_keys:
             _create_activity_db()
@@ -57,6 +57,8 @@ def merge_intervals(intervals):
 def register_inventory_activity(app, helpers):
     from .control_journal import register_control_detail
     register_control_detail(app, helpers)
+    from .control_live import register_live_control
+    register_live_control(app, helpers)
     @app.on_event('startup')
     def migrate_activity():
         init_activity_db()

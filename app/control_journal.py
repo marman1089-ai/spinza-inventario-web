@@ -22,6 +22,8 @@ def create_control_schema(c):
     c.execute('CREATE INDEX IF NOT EXISTS ix_control_activity_user ON control_activity_events(user_id,store,happened)')
     c.execute('CREATE INDEX IF NOT EXISTS ix_control_activity_time ON control_activity_events(happened,user_id)')
     c.execute('CREATE INDEX IF NOT EXISTS ix_control_log_time ON logs(ts,store,username)')
+    from .control_live import create_live_schema
+    create_live_schema(c)
 
 
 def describe_request(method, path, status):
@@ -63,8 +65,10 @@ def snapshot_target(request, user):
 
 
 def record_request(request, response, previous_user, started, helpers):
+    from .control_live import finish_operation
+    finish_operation(request,response,previous_user,started)
     path=request.url.path
-    if path.startswith(('/static/', '/admin/fasce-orarie', '/inventario/attivita')) or path in ('/favicon.ico','/health','/healthz'):
+    if path.startswith(('/static/', '/admin/fasce-orarie', '/admin/controllo-live', '/controllo/presenza', '/controllo/assistenza', '/inventario/attivita')) or path in ('/favicon.ico','/health','/healthz'):
         return
     if request.method not in ('GET','POST','PUT','PATCH','DELETE'): return
     user=request.session.get('user') or previous_user
