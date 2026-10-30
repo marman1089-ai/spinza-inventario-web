@@ -1,4 +1,19 @@
-# Assistenza: copia della pagina del telefono, aggiornamento continuo
+# Avvio rapido dell'assistenza dal telefono al PC
+
+Questa versione corregge l'attesa iniziale del pannello admin, mantenendo la copia fedele nelle proporzioni del telefono.
+
+- L'admin prepara il canale rapido subito dopo la richiesta, prima che il dipendente accetti. Nessun contenuto viene condiviso prima del consenso.
+- Il collegamento video tradizionale viene preparato soltanto se il dipendente sceglie davvero la condivisione schermo, senza ritardare la modalità del gestionale.
+- L'invio di riserva non blocca più i fotogrammi: quando il canale rapido è pronto, la pagina parte anche se una richiesta HTTP precedente è ancora in attesa.
+- I segnali di presenza del canale rapido sono indipendenti dalle richieste HTTP lente. Gli aggiornamenti superati vengono scartati, senza accumulare una coda.
+- Le operazioni del database dei comandi asincroni vengono eseguite fuori dal ciclo di invio dei fotogrammi.
+- Prima dell'arrivo della pagina compare un messaggio di attesa, al posto del riquadro video nero.
+
+Nel test locale mirato la prima copia è comparsa in **0,50 secondi dall'accettazione**, nonostante risposte HTTP artificialmente ritardate di **20 secondi**. La prova prolungata ha mantenuto circa 5,9–6 aggiornamenti al secondo per oltre un minuto. Scrittura, revoca e stop sono stati inoltre verificati con conferma del consenso ritardata di 2 secondi e comandi ritardati di 400 millisecondi. Questi tempi sono risultati di collaudo locale, non una garanzia sulla rete reale di Marco o sull'hosting.
+
+**Per applicarla:** carica questo ZIP completo sul progetto Render e completa il deploy. Poi chiudi e riapri le pagine su telefono e PC admin. I file hanno un nuovo identificativo per evitare la vecchia cache. Il sito online non è stato modificato durante questo lavoro.
+
+## Funzionamento della copia del telefono
 
 ## Novità
 La vista precedente con testi ricostruiti è stata sostituita. Ora la copia mantiene la struttura della pagina, gli stili del gestionale, i loghi, le immagini statiche, i campi compilati e i menu aperti. Usa la stessa larghezza e altezza della pagina sul telefono (per esempio 390 × 844), centrata e adattata allo spazio disponibile sullo schermo admin senza cambiare l'impaginazione mobile.

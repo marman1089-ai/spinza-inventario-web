@@ -1,7 +1,7 @@
 (() => {
 'use strict';
 const ctx=document.getElementById('assist-context');if(!ctx)return;
-const isAdmin=ctx.dataset.role==='admin';let session=null,pc=null,dc=null,stream=null,cursor=0,timer=null,pulseAt=0,remoteAllowed=false,capable=false,queue=Promise.resolve(),candidates=[],polling=false,stopping=false,startedAt=0,connectingAt=0,localGrant='',remoteGrant='';
+const isAdmin=ctx.dataset.role==='admin';let session=null,pc=null,dc=null,stream=null,cursor=0,timer=null,pulseAt=0,remoteAllowed=false,capable=false,queue=Promise.resolve(),candidates=[],polling=false,stopping=false,startedAt=0,connectingAt=0,localGrant='',remoteGrant='';let approvalPending=false,consentGeneration=0;
 const newId=()=>globalThis.crypto?.randomUUID?.()||Array.from(globalThis.crypto.getRandomValues(new Uint8Array(24)),n=>n.toString(16).padStart(2,'0')).join('');
 const handle=newId();
 try{navigator.mediaDevices?.setCaptureHandleConfig?.({handle,exposeOrigin:true,permittedOrigins:[location.origin]});}catch(_){}
@@ -22,7 +22,7 @@ const release=button('Rilascia controllo e mantieni il video',tools,async()=>{re
 const remoteHint=el('p','',dialog);remoteHint.textContent='Solo visualizzazione finché il dipendente non accetta il controllo. Nessun audio e nessuna registrazione.';
 dialog.addEventListener('cancel',event=>{event.preventDefault();stop('Assistenza conclusa.');});
 function currentTab(){if(bridgeMode)return true;try{const track=stream?.getVideoTracks()[0],h=track?.getCaptureHandle?.();return !!h&&h.handle===handle&&h.origin===location.origin&&track.getSettings().displaySurface==='browser';}catch(_){return false;}}
-async function post(path,body={}){const r=await fetch(path,{method:'POST',credentials:'same-origin',keepalive:path.endsWith('/stop'),headers:{'X-Control-Screen':'1'},body:new URLSearchParams(body)});if(!r.ok)throw new Error(await r.text());return r.json();}
+async function post(path,body={}){const abort=new AbortController(),deadline=setTimeout(()=>abort.abort(),6000);try{const r=await fetch(path,{method:'POST',credentials:'same-origin',signal:abort.signal,keepalive:path.endsWith('/stop'),headers:{'X-Control-Screen':'1'},body:new URLSearchParams(body)});if(!r.ok)throw new Error(await r.text());return await r.json();}finally{clearTimeout(deadline);}}
 function api(action,body={}){const rid=session?.id;if(!rid)return Promise.reject(new Error('Sessione conclusa'));const task=queue.catch(()=>{}).then(()=>post('/controllo/assistenza/'+rid+'/'+action,body));queue=task;return task;}
 function notice(message){info.textContent=message;banner.hidden=false;}
 function makePeer(ice){
@@ -81,27 +81,37 @@ async function flushCandidates(){if(!pc?.remoteDescription)return;while(candidat
 async function pollSession(){
  if(!session||polling)return;polling=true;const id=session.id;
  try{
-  const r=await fetch('/controllo/assistenza/'+id+'?cursor='+cursor,{credentials:'same-origin',cache:'no-store'});if(!r.ok)throw new Error('Sessione non raggiungibile');const data=await r.json();if(session?.id!==id)return;if((data.session.updated||0)<(session.updated||0))return;session=data.session;if(['accepted','active'].includes(session.state)&&!connectingAt)connectingAt=Date.now();
+  const abort=new AbortController(),timeout=setTimeout(()=>abort.abort(),5000);let r;try{r=await fetch('/controllo/assistenza/'+id+'?cursor='+cursor,{credentials:'same-origin',cache:'no-store',signal:abort.signal});}finally{clearTimeout(timeout);}if(!r.ok)throw new Error('Sessione non raggiungibile');const data=await r.json();if(session?.id!==id)return;if((data.session.updated||0)<(session.updated||0))return;session=data.session;if(['accepted','active'].includes(session.state)&&!connectingAt)connectingAt=Date.now();
   if(!['pending','accepted','active'].includes(session.state)){stop('Sessione '+session.state,false);return;}
   if(Date.now()-pulseAt>8000){await api('pulse');pulseAt=Date.now();}
+  if(isAdmin&&!data.bridge&&['accepted','active'].includes(session.state)&&!pc)await startVideoOffer(data.iceServers);
   if(!bridgeMode&&!isAdmin&&stream&&!pc&&data.offer){makePeer(data.iceServers);await pc.setRemoteDescription({type:'offer',sdp:data.offer});for(const track of stream.getTracks())pc.addTrack(track,stream);const answer=await pc.createAnswer();await pc.setLocalDescription(answer);await api('answer',{sdp:answer.sdp});}
   if(!bridgeMode&&isAdmin&&pc&&!pc.remoteDescription&&data.answer)await pc.setRemoteDescription({type:'answer',sdp:data.answer});
   if(data.bridge){
-   bridgeMode=true;video.hidden=true;video.style.setProperty('display','none','important');mirror.hidden=!isAdmin;liveConnect();
+   enterBridge();liveConnect();
    if(pc){pc.onconnectionstatechange=null;pc.close();pc=null;dc=null;}
    if(isAdmin){remoteGrant=session.control_state==='accepted'?data.bridge.grant:'';if(!lastLiveAt||Date.now()-lastLiveAt>3000)bridgeRender(data.bridge.frame);status.textContent='Pagina del gestionale collegata tramite server';}
    else{localGrant=session.control_state==='accepted'?data.bridge.grant:'';for(const entry of data.bridge.commands){if(entry.seq>bridgeAck){bridgeApply(entry.command);bridgeAck=entry.seq;}}}
   }
   for(const signal of data.signals){cursor=Math.max(cursor,signal.id);candidates.push(signal.candidate);}await flushCandidates();
-  if(!isAdmin){if(session.control_state==='requested'&&!remoteAllowed){notice(session.admin_name+' chiede anche il controllo di mouse e tastiera della scheda del gestionale. Puoi rifiutare.');allowButton.hidden=!currentTab();rejectControl.hidden=false;}else{allowButton.hidden=true;rejectControl.hidden=true;}if(session.control_state!=='accepted'){remoteAllowed=false;localGrant='';}revokeButton.hidden=!remoteAllowed;}
-  else{release.hidden=session.control_state!=='accepted';if(bridgeMode||pc?.connectionState==='connected')status.textContent=session.control_state==='accepted'?'Condivisione collegata · controllo della scheda autorizzato':session.control_state==='requested'?'Condivisione collegata · in attesa della seconda accettazione':'Condivisione collegata · sola visualizzazione';typing.hidden=session.control_state!=='accepted';controlButton.disabled=session.state!=='active'||!session.control_capable||['requested','accepted'].includes(session.control_state);remoteHint.textContent=bridgeMode?(session.control_state==='accepted'?'Controllo autorizzato della pagina condivisa. Seleziona un campo e usa la tastiera o Invia testo. File e password esclusi.':'Pagina condivisa tramite server, anche senza cattura schermo. Il controllo richiede una seconda accettazione.'):session.control_state==='accepted'?'Controllo autorizzato: clicca il video per usare i campi del gestionale. Password, altre applicazioni e comandi di sistema sono esclusi.':session.control_state==='requested'?'In attesa della seconda accettazione del dipendente.':session.control_capable?'Solo visualizzazione. Il controllo richiede una seconda accettazione.':'Solo visualizzazione: il controllo richiede la condivisione verificata di questa scheda del gestionale in un browser compatibile.';}
+  syncControls();
   if(!bridgeMode&&connectingAt&&Date.now()-connectingAt>45000&&pc?.connectionState!=='connected')stop('Collegamento non riuscito. Controllare HTTPS, rete e configurazione TURN.');
- }catch(e){status.textContent=e.message+'; riconnessione in corso.';if(Date.now()-pulseAt>40000)stop('Connessione persa: condivisione interrotta.');}
- finally{polling=false;if(session?.id===id)timer=setTimeout(pollSession,1200);}
+ }catch(e){if(!livePaired){status.textContent=e.message+'; riconnessione in corso.';if(Date.now()-pulseAt>40000)stop('Connessione persa: condivisione interrotta.');}}
+ finally{polling=false;if(session?.id===id)timer=setTimeout(pollSession,livePaired?6000:1200);}
 }
-async function allow(){if(!currentTab()){notice('Il controllo è disponibile solo condividendo questa scheda del gestionale.');return;}try{const r=await api('allow-control');session=r.session;localGrant=bridgeMode?(r.bridge?.grant||''):newId();remoteAllowed=true;if(liveSocket?.readyState===WebSocket.OPEN)liveSocket.send(JSON.stringify({type:'ping'}));if(dc?.readyState==='open')dc.send(JSON.stringify({type:'grant',nonce:localGrant}));allowButton.hidden=true;rejectControl.hidden=true;revokeButton.hidden=false;notice('Controllo mouse e tastiera autorizzato a '+session.admin_name+' SOLO per questa scheda. Puoi revocarlo subito.');}catch(e){notice(e.message);}}
-async function revoke(disable=false){remoteAllowed=false;localGrant='';if(dc?.readyState==='open')dc.send(JSON.stringify({type:'revoked'}));allowButton.hidden=true;rejectControl.hidden=true;revokeButton.hidden=true;try{const r=await api('revoke-control',disable?{disable:'1'}:{});session=r.session;}catch(_){}notice('Controllo revocato. La sola condivisione schermo continua fino a Interrompi.');}
-async function stop(message,notify=true){if(stopping)return;bridgeMode=false;clearTimeout(bridgeTimer);clearTimeout(liveRetry);if(liveSocket){liveSocket.onclose=null;liveSocket.close();liveSocket=null;}livePaired=false;liveConnecting=false;lastLiveAt=0;frameTimes=[];bridgeMaps.clear();bridgeFrame=null;bridgeSelected=null;bridgeAck=0;mirror.hidden=true;pendingReplica=null;lastReplicaHTML='';if(replicaReady)replica.contentDocument.body.replaceChildren();video.hidden=false;video.style.removeProperty('display');stopping=true;const old=session;remoteAllowed=false;localGrant='';remoteGrant='';session=null;connectingAt=0;clearTimeout(timer);if(notify&&old)post('/controllo/assistenza/'+old.id+'/stop').catch(()=>{});if(stream){for(const track of stream.getTracks())track.stop();stream=null;}pc?.close();pc=null;dc=null;candidates=[];cursor=0;video.srcObject=null;release.hidden=true;typingText.value='';typing.hidden=true;banner.hidden=true;allowButton.hidden=true;rejectControl.hidden=true;revokeButton.hidden=true;status.textContent=message;if(dialog.open)dialog.close();stopping=false;}
+function syncControls(){if(!session)return;
+  if(!isAdmin){if(session.control_state==='requested'&&!remoteAllowed){notice(session.admin_name+' chiede anche il controllo di mouse e tastiera della scheda del gestionale. Puoi rifiutare.');allowButton.hidden=!currentTab();rejectControl.hidden=false;}else{allowButton.hidden=true;rejectControl.hidden=true;}if(session.control_state!=='accepted'&&!approvalPending){remoteAllowed=false;localGrant='';}revokeButton.hidden=!remoteAllowed;}
+  else{release.hidden=session.control_state!=='accepted';if((bridgeMode&&bridgeFrame)||pc?.connectionState==='connected')status.textContent=session.control_state==='accepted'?'Condivisione collegata · controllo della scheda autorizzato':session.control_state==='requested'?'Condivisione collegata · in attesa della seconda accettazione':'Condivisione collegata · sola visualizzazione';typing.hidden=session.control_state!=='accepted';controlButton.disabled=(bridgeMode&&!bridgeFrame)||session.state!=='active'||!session.control_capable||['requested','accepted'].includes(session.control_state);remoteHint.textContent=bridgeMode?(session.control_state==='accepted'?'Controllo autorizzato della pagina condivisa. Seleziona un campo e usa la tastiera o Invia testo. File e password esclusi.':'Pagina condivisa tramite server, anche senza cattura schermo. Il controllo richiede una seconda accettazione.'):session.control_state==='accepted'?'Controllo autorizzato: clicca il video per usare i campi del gestionale. Password, altre applicazioni e comandi di sistema sono esclusi.':session.control_state==='requested'?'In attesa della seconda accettazione del dipendente.':session.control_capable?'Solo visualizzazione. Il controllo richiede una seconda accettazione.':'Solo visualizzazione: il controllo richiede la condivisione verificata di questa scheda del gestionale in un browser compatibile.';}
+}
+async function allow(){
+ if(!currentTab()){notice('Il controllo è disponibile solo condividendo questa scheda del gestionale.');return;}
+ const generation=++consentGeneration;approvalPending=true;remoteAllowed=true;localGrant='';allowButton.hidden=true;rejectControl.hidden=true;
+ try{const r=await api('allow-control');if(generation!==consentGeneration)return;session=r.session;localGrant=bridgeMode?(r.bridge?.grant||''):newId();remoteAllowed=true;if(liveSocket?.readyState===WebSocket.OPEN)liveSocket.send(JSON.stringify({type:'ping'}));if(dc?.readyState==='open')dc.send(JSON.stringify({type:'grant',nonce:localGrant}));revokeButton.hidden=false;notice('Controllo mouse e tastiera autorizzato a '+session.admin_name+' SOLO per questa scheda. Puoi revocarlo subito.');}
+ catch(e){if(generation===consentGeneration){remoteAllowed=false;localGrant='';notice(e.message);}}
+ finally{if(generation===consentGeneration)approvalPending=false;}
+}
+async function revoke(disable=false){consentGeneration++;approvalPending=false;remoteAllowed=false;localGrant='';if(dc?.readyState==='open')dc.send(JSON.stringify({type:'revoked'}));allowButton.hidden=true;rejectControl.hidden=true;revokeButton.hidden=true;try{const r=await api('revoke-control',disable?{disable:'1'}:{});session=r.session;}catch(_){}notice('Controllo revocato. La sola condivisione schermo continua fino a Interrompi.');}
+async function stop(message,notify=true){if(stopping)return;consentGeneration++;approvalPending=false;bridgeMode=false;clearTimeout(bridgeTimer);clearTimeout(liveRetry);clearTimeout(liveDeadline);clearInterval(liveHeartbeat);lastSnapshot=null;if(liveSocket){liveSocket.onclose=null;liveSocket.close();liveSocket=null;}livePaired=false;liveConnecting=false;lastLiveAt=0;frameTimes=[];bridgeMaps.clear();bridgeFrame=null;bridgeSelected=null;followSourceFocus=false;bridgeAck=0;mirror.hidden=true;loading.hidden=true;pendingReplica=null;lastReplicaHTML='';if(replicaReady)replica.contentDocument.body.replaceChildren();video.hidden=false;video.style.removeProperty('display');stopping=true;const old=session;remoteAllowed=false;localGrant='';remoteGrant='';session=null;connectingAt=0;clearTimeout(timer);if(notify&&old)post('/controllo/assistenza/'+old.id+'/stop').catch(()=>{});if(stream){for(const track of stream.getTracks())track.stop();stream=null;}pc?.close();pc=null;dc=null;candidates=[];cursor=0;video.srcObject=null;release.hidden=true;typingText.value='';typing.hidden=true;banner.hidden=true;allowButton.hidden=true;rejectControl.hidden=true;revokeButton.hidden=true;status.textContent=message;if(dialog.open)dialog.close();stopping=false;}
 async function accept(request){
  if(session||accepting)return;if(!window.isSecureContext||!navigator.mediaDevices?.getDisplayMedia){acceptBridge(request);return;}accepting=true;
  try{
@@ -115,13 +125,14 @@ async function accept(request){
 const invite=el('aside','',document.body,'assist-invite');invite.id='assist-invite';invite.hidden=true;const inviteText=el('p','',invite);let invitation=null;
 button('Accetta e condividi il gestionale',invite,()=>{if(invitation)acceptBridge(invitation);});button('Condividi schermo (se supportato)',invite,()=>{if(invitation)accept(invitation);});button('Rifiuta',invite,async()=>{const old=invitation;invitation=null;invite.hidden=true;if(old)try{await post('/controllo/assistenza/'+old.id+'/decline');}catch(_){};});
 async function invitations(){if(!isAdmin&&!session){try{const r=await fetch('/controllo/assistenza/inviti',{credentials:'same-origin',cache:'no-store'});if(r.ok){const data=await r.json();invitation=data.requests[0]||null;invite.hidden=!invitation;if(invitation)inviteText.textContent=invitation.admin_name+' richiede assistenza. Puoi condividere solo questa pagina del gestionale anche dal telefono, senza installazioni. Mouse e tastiera richiedono una seconda accettazione. La condivisione termina cambiando pagina.';}}catch(_){}}setTimeout(invitations,3000);}
-window.ControlAssist={request:async(id,name)=>{if(session){dialog.showModal();return;}try{const r=await post('/controllo/assistenza/richiedi',{target_id:id});session=r.session;cursor=0;startedAt=Date.now();pulseAt=Date.now();title.textContent='Assistenza a '+name;status.textContent='Richiesta inviata. In attesa che il dipendente accetti la condivisione del gestionale o dello schermo.';controlButton.disabled=true;dialog.showModal();if(window.RTCPeerConnection){makePeer(r.iceServers);pc.addTransceiver('video',{direction:'recvonly'});attachChannel(pc.createDataChannel('remote'));const offer=await pc.createOffer();await pc.setLocalDescription(offer);await api('offer',{sdp:offer.sdp});}pollSession();}catch(e){stop(e.message);alert(e.message);}}};
+window.ControlAssist={request:async(id,name)=>{if(session){dialog.showModal();return;}try{const r=await post('/controllo/assistenza/richiedi',{target_id:id});session=r.session;cursor=0;startedAt=Date.now();pulseAt=Date.now();title.textContent='Assistenza a '+name;status.textContent='Richiesta inviata. In attesa che il dipendente accetti la condivisione del gestionale o dello schermo.';controlButton.disabled=true;dialog.showModal();showWaiting();liveConnect();pollSession();}catch(e){stop(e.message);alert(e.message);}}};
 // Faithful, inert DOM replica at the employee viewport; live frames never execute code.
-let bridgeMode=false,bridgeAck=0,bridgeFrame=null,bridgeSelected=null,bridgeBusy=false,bridgeTimer=null,bridgeMaps=new Map(),accepting=false,bridgeNodeIds=new WeakMap(),bridgeNodeSerial=0;
-let liveSocket=null,liveRetry=null,livePaired=false,liveConnecting=false,lastLiveAt=0,frameTimes=[],lastReplicaHTML='',replicaHead='',replicaReady=false,pendingReplica=null,lastPublishedHTML='',replicaVersion=0;
+let bridgeMode=false,bridgeAck=0,bridgeFrame=null,bridgeSelected=null,bridgeBusy=false,bridgeTimer=null,bridgeMaps=new Map(),accepting=false,bridgeNodeIds=new WeakMap(),bridgeNodeSerial=0,followSourceFocus=false;
+let liveSocket=null,liveRetry=null,livePaired=false,liveConnecting=false,liveDeadline=null,liveHeartbeat=null,fallbackBusy=false,lastSnapshot=null,lastLiveAt=0,frameTimes=[],lastReplicaHTML='',replicaHead='',replicaReady=false,pendingReplica=null,lastPublishedHTML='',replicaVersion=0;
 const mirror=el('div','',dialog,'assist-mirror');mirror.hidden=true;mirror.tabIndex=0;mirror.setAttribute('aria-label','Pagina del gestionale condivisa');dialog.insertBefore(mirror,tools);
 const replica=el('iframe','',mirror,'assist-replica');replica.title='Copia della pagina del dipendente';replica.setAttribute('sandbox','allow-same-origin');replica.setAttribute('scrolling','no');
 const meter=el('p','In attesa della pagina del dipendente…',mirror,'assist-frame-meter');
+const loading=el('div','In attesa che il dipendente accetti…',mirror,'assist-replica-loading');loading.hidden=true;
 const privateSelector='#assist-banner,#assist-viewer,#assist-invite,[data-assist-private],script,noscript,iframe,object,embed,input[type="password"],input[type="hidden"],input[type="file"],input[autocomplete="one-time-code"],input[autocomplete*="password"]';
 const allowedTags=new Set('html head body div span p a button input textarea select option optgroup label form fieldset legend h1 h2 h3 h4 h5 h6 ul ol li table thead tbody tfoot tr th td caption colgroup col section article aside header footer nav main details summary dialog img picture source canvas br hr strong b em i u small time pre code blockquote dl dt dd style link'.split(' '));
 const allowedAttrs=new Set('id class style title role type name value placeholder disabled readonly multiple checked selected open min max step size rows cols colspan rowspan width height loading aria-label aria-expanded aria-hidden tabindex data-theme data-brand'.split(' '));
@@ -169,38 +180,45 @@ function bridgeSnapshot(){
  const head=doc.createElement('head');for(const node of document.head.querySelectorAll('style,link[rel="stylesheet"]')){const copy=cleanReplica(node,doc,true,map);if(copy)head.appendChild(copy);}
  const scrolls=[];for(const node of document.body.querySelectorAll('*'))if((node.scrollTop||node.scrollLeft)&&bridgeNodeIds.has(node)&&!bridgePrivate(node))scrolls.push({id:nodeId(node),x:node.scrollLeft,y:node.scrollTop});
  bridgeMaps.set(id,map);while(bridgeMaps.size>30)bridgeMaps.delete(bridgeMaps.keys().next().value);
- return {id,width:innerWidth,height:innerHeight,nodes:[],html:body.outerHTML,head:head.innerHTML,rootClass:document.documentElement.className,rootStyle:document.documentElement.getAttribute('style')||'',theme:document.documentElement.getAttribute('data-theme')||'',x:scrollX,y:scrollY,scrolls,focus:bridgeNodeIds.get(document.activeElement)||'',version:++replicaVersion};
+ return {id,width:innerWidth,height:innerHeight,nodes:[],html:body.outerHTML,head:head.innerHTML,rootClass:document.documentElement.className,rootStyle:document.documentElement.getAttribute('style')||'',theme:document.documentElement.getAttribute('data-theme')||'',x:scrollX,y:scrollY,scrolls,focus:document.activeElement?.matches('input,textarea,select,button,a,summary')?(bridgeNodeIds.get(document.activeElement)||''):'',version:++replicaVersion};
 }
+
+function showWaiting(){loading.textContent='In attesa che il dipendente accetti…';loading.hidden=false;video.hidden=true;video.style.setProperty('display','none','important');mirror.hidden=false;replica.hidden=true;mirror.style.width='min(390px,100%)';mirror.style.height='480px';meter.textContent='In attesa che il dipendente accetti…';}
+function enterBridge(){bridgeMode=true;if(isAdmin&&!bridgeFrame){loading.hidden=false;loading.textContent='Consenso ricevuto. Caricamento della pagina…';}video.hidden=true;video.style.setProperty('display','none','important');mirror.hidden=!isAdmin;}
+async function startVideoOffer(ice){if(pc||!window.RTCPeerConnection)return;mirror.hidden=true;video.hidden=false;video.style.removeProperty('display');makePeer(ice);pc.addTransceiver('video',{direction:'recvonly'});attachChannel(pc.createDataChannel('remote'));const offer=await pc.createOffer();await pc.setLocalDescription(offer);await api('offer',{sdp:offer.sdp});}
 function liveConnect(){
- if(!session||!bridgeMode||liveConnecting||liveSocket?.readyState===WebSocket.OPEN)return;
+ if(!session||(!bridgeMode&&!isAdmin)||liveConnecting||liveSocket?.readyState===WebSocket.OPEN)return;
  liveConnecting=true;const rid=session.id;
- const socket=new WebSocket((location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/controllo/assistenza/'+rid+'/live');liveSocket=socket;
- socket.onopen=()=>{liveConnecting=false;if(session?.id!==rid){socket.close();return;}socket.send(JSON.stringify({type:'ping'}));};
+ clearTimeout(liveDeadline);const socket=new WebSocket((location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/controllo/assistenza/'+rid+'/live');liveSocket=socket;liveDeadline=setTimeout(()=>{if(liveSocket===socket&&socket.readyState===WebSocket.CONNECTING)socket.close();},6000);
+ socket.onopen=()=>{clearTimeout(liveDeadline);liveConnecting=false;if(session?.id!==rid){socket.close();return;}socket.send(JSON.stringify({type:'ping'}));clearInterval(liveHeartbeat);liveHeartbeat=setInterval(()=>{if(socket.readyState===WebSocket.OPEN&&(isAdmin||document.visibilityState!=='hidden'))socket.send(JSON.stringify({type:'ping'}));},8000);};
  socket.onmessage=event=>{
   if(session?.id!==rid)return;
   try{const data=JSON.parse(event.data);
-   if(data.type==='ready'||data.type==='pong'){livePaired=!!data.paired;}
+   if(data.type==='ready'||data.type==='pong'){livePaired=!!data.paired;if(livePaired&&!isAdmin&&lastSnapshot&&socket.bufferedAmount===0)socket.send(JSON.stringify({type:'frame',frame:lastSnapshot}));}
    else if(data.type==='consent'){
-    if((data.updated||0)<(session.updated||0))return;session.updated=data.updated;session.control_state=data.state;
+    if((data.updated||0)<(session.updated||0))return;session.updated=data.updated;session.control_state=data.state;if(data.session)session=data.session;if(data.bridge)enterBridge();
     if(isAdmin)remoteGrant=data.state==='accepted'?data.grant:'';
-    else{localGrant=data.state==='accepted'?data.grant:'';if(data.state!=='accepted')remoteAllowed=false;}
-   }else if(data.type==='frame'&&isAdmin){lastLiveAt=Date.now();bridgeRender(data.frame);}
+    else{localGrant=data.state==='accepted'?data.grant:'';if(data.state!=='accepted'&&!approvalPending)remoteAllowed=false;}syncControls();
+   }else if(data.type==='frame'&&isAdmin){enterBridge();lastLiveAt=Date.now();bridgeRender(data.frame);status.textContent=session.control_state==='accepted'?'Condivisione collegata · controllo autorizzato':'Condivisione collegata · sola visualizzazione';controlButton.disabled=!session.control_capable||['requested','accepted'].includes(session.control_state);}
    else if(data.type==='command'&&!isAdmin)bridgeApply(data.command);
   }catch(e){meter.textContent='Impossibile aggiornare la vista: '+e.message;}
  };
- socket.onclose=()=>{if(liveSocket!==socket)return;liveSocket=null;liveConnecting=false;livePaired=false;if(bridgeMode&&session){meter.textContent='Collegamento rapido interrotto; riconnessione in corso. Vista temporanea più lenta.';clearTimeout(liveRetry);liveRetry=setTimeout(liveConnect,1500);}};
+ socket.onclose=event=>{clearTimeout(liveDeadline);clearInterval(liveHeartbeat);if(liveSocket!==socket)return;liveSocket=null;liveConnecting=false;livePaired=false;if(event.code===1008&&bridgeMode){stop('Sessione conclusa o autorizzazione scaduta.',false);return;}if(session&&(bridgeMode||isAdmin&&session.state==='pending')){meter.textContent='Collegamento rapido interrotto; riconnessione in corso. Vista temporanea più lenta.';clearTimeout(liveRetry);liveRetry=setTimeout(liveConnect,500);}};
  socket.onerror=()=>{};
 }
 async function bridgePublish(){
  if(!bridgeMode||isAdmin||!session||bridgeBusy)return;bridgeBusy=true;const started=performance.now();
  try{
   if(document.visibilityState!=='hidden'){
-   const frame=bridgeSnapshot();
+   const frame=bridgeSnapshot();lastSnapshot=frame;
    if(liveSocket?.readyState===WebSocket.OPEN&&livePaired){
     const raw=JSON.stringify({type:'frame',frame});
     if(new Blob([raw]).size>1400000)throw new Error('Pagina troppo grande per il collegamento rapido. Riduci il numero di articoli visualizzati.');
-    if(liveSocket.bufferedAmount<600000)liveSocket.send(raw);
-   }else if(Date.now()-lastLiveAt>1500){lastLiveAt=Date.now();await api('bridge-frame',{frame:JSON.stringify(frame),ack:bridgeAck});}
+    if(liveSocket.bufferedAmount===0)liveSocket.send(raw);
+   }else if(!fallbackBusy&&Date.now()-lastLiveAt>1500){
+    lastLiveAt=Date.now();fallbackBusy=true;const rid=session.id;
+    post('/controllo/assistenza/'+rid+'/bridge-frame',{frame:JSON.stringify(frame),ack:bridgeAck}).catch(e=>{if(session?.id===rid)notice('Connessione di riserva: '+e.message);}).finally(()=>{fallbackBusy=false;});
+   }
   }
  }catch(e){notice('Collegamento pagina: '+e.message);}
  finally{bridgeBusy=false;if(bridgeMode&&session)bridgeTimer=setTimeout(bridgePublish,Math.max(0,166-(performance.now()-started)));}
@@ -242,11 +260,11 @@ function paintReplica(frame){
  doc.documentElement.className=frame.rootClass||'';doc.documentElement.setAttribute('style',frame.rootStyle||'');doc.documentElement.setAttribute('data-theme',frame.theme||'');
  replica.contentWindow.scrollTo(frame.x||0,frame.y||0);
  for(const s of frame.scrolls||[]){const n=doc.querySelector('[data-assist-key="'+String(s.id).replace(/[^0-9]/g,'')+'"]');if(n){n.scrollLeft=s.x;n.scrollTop=s.y;}}
- if(frame.focus){const n=doc.querySelector('[data-assist-target="'+String(frame.focus).replace(/[^0-9]/g,'')+'"]');if(n&&doc.activeElement!==n)n.focus({preventScroll:true});}
+ // Do not move keyboard focus away from the admin text-entry box on each frame.
 }
 function bridgeRender(frame){
  if(!validFrame(frame))return;
- bridgeFrame=frame;bridgeSelected=frame.focus?{target:frame.focus,frame:frame.id}:bridgeSelected;if(bridgeSelected)bridgeSelected.frame=frame.id;
+ loading.hidden=true;replica.hidden=false;bridgeFrame=frame;if(frame.focus&&(!bridgeSelected||(followSourceFocus&&frame.focus!==bridgeSelected.target))){bridgeSelected={target:frame.focus,frame:frame.id};followSourceFocus=false;}if(bridgeSelected)bridgeSelected.frame=frame.id;
  sizeReplica(frame);paintReplica(frame);
  const now=performance.now();frameTimes.push(now);frameTimes=frameTimes.filter(t=>now-t<2000);
  const fps=frameTimes.length>1?(frameTimes.length-1)*1000/(frameTimes[frameTimes.length-1]-frameTimes[0]):0;
@@ -256,7 +274,7 @@ function bridgeRender(frame){
 function bridgeSend(cmd){
  if(!isAdmin||!bridgeMode||session?.control_state!=='accepted'||!remoteGrant)return;
  if(['text','key'].includes(cmd.type)&&!bridgeSelected){status.textContent='Seleziona prima un campo nella pagina condivisa.';return;}
- const selected=bridgeSelected||{},command={...selected,...cmd,frame:cmd.frame||selected.frame||bridgeFrame?.id,grant:remoteGrant};
+ if(cmd.type==='key'&&cmd.key==='Tab')followSourceFocus=true;const selected=bridgeSelected||{},command={...selected,...cmd,frame:cmd.frame||selected.frame||bridgeFrame?.id,grant:remoteGrant};
  if(liveSocket?.readyState===WebSocket.OPEN&&livePaired)liveSocket.send(JSON.stringify({type:'command',command}));
  else api('bridge-command',{command:JSON.stringify(command)}).catch(e=>{status.textContent=e.message;});
 }

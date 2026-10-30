@@ -16,16 +16,26 @@ def session_state(rid, uid):
     with connect() as conn:
         c = conn.cursor()
         row = c.execute(f'''SELECT s.*, b.grant_token FROM control_assist_sessions s
-            JOIN control_assist_bridge b ON b.session_id=s.id WHERE s.id={ph}''', (rid,)).fetchone()
+            LEFT JOIN control_assist_bridge b ON b.session_id=s.id WHERE s.id={ph}''', (rid,)).fetchone()
         user = c.execute(f'SELECT role FROM users WHERE id={ph}', (uid,)).fetchone()
     if not row or not user or uid not in (int(row['admin_id']), int(row['target_id'])):
         return None
     admin = uid == int(row['admin_id'])
     if admin and user['role'] != 'admin':
         return None
-    if row['state'] != 'active' or min(row['admin_ping'], row['target_ping']) < time.time()-45 or row['created'] < time.time()-3600:
+    if row['state']=='pending':
+        if not admin or row['created'] < time.time()-120:return None
+    elif row['state']!='active' or row['grant_token'] is None or min(row['admin_ping'],row['target_ping']) < time.time()-45 or row['created'] < time.time()-3600:
         return None
     return row, admin
+
+
+def touch_session(rid, uid, admin):
+    ph = '%s' if using_postgres() else '?'
+    column = 'admin_ping' if admin else 'target_ping'
+    participant = 'admin_id' if admin else 'target_id'
+    with connect() as conn:
+        conn.cursor().execute(f"UPDATE control_assist_sessions SET {column}={ph} WHERE id={ph} AND {participant}={ph} AND state IN ('pending','active')", (time.time(),rid,uid))
 
 
 class Peer:
@@ -91,7 +101,8 @@ def register_socket(app):
                 if not fresh:
                     await ws.close(code=1008)
                     return
-                peer.message(dict(type='consent', state=fresh[0]['control_state'], grant=fresh[0]['grant_token'], updated=fresh[0]['updated']))
+                from .control_assistance import public
+                peer.message(dict(type='consent', state=fresh[0]['control_state'], grant=fresh[0]['grant_token'] or '', updated=fresh[0]['updated'],session=public(fresh[0]),bridge=fresh[0]['grant_token'] is not None))
                 await asyncio.sleep(1)
 
         watchdog = asyncio.create_task(watch())
@@ -99,6 +110,8 @@ def register_socket(app):
         if other in room:
             room[other].message(dict(type='ready', paired=True))
         last_frame = 0
+        last_ping = 0
+        heartbeat_task = None
         try:
             while True:
                 raw = await ws.receive_text()
@@ -132,16 +145,20 @@ def register_socket(app):
                     if other in room:
                         room[other].message(msg)
                 elif msg.get('type') == 'ping':
+                    if time.monotonic()-last_ping>6 and (heartbeat_task is None or heartbeat_task.done()):
+                        last_ping=time.monotonic()
+                        heartbeat_task=asyncio.create_task(run_in_threadpool(touch_session,rid,uid,admin))
                     peer.message(dict(type='pong', paired=other in room))
         except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
             writer.cancel()
             watchdog.cancel()
+            if heartbeat_task is not None:heartbeat_task.cancel()
             if room.get(role) is peer:
                 room.pop(role, None)
             if other in room:
                 room[other].message(dict(type='ready', paired=False))
             if not room:
                 ROOMS.pop(rid, None)
-            await asyncio.gather(writer, watchdog, return_exceptions=True)
+            await asyncio.gather(writer, watchdog, *([heartbeat_task] if heartbeat_task is not None else []), return_exceptions=True)

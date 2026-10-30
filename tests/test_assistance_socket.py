@@ -8,9 +8,13 @@ class SocketTests(LiveAssistTests):
         return self.client.websocket_connect('/controllo/assistenza/'+rid+'/live',headers={'origin':origin})
     def test_socket_requires_consent_origin_and_participant(self):
         rid=self.request()
+        with self.socket(rid) as ws:
+            self.assertEqual(ws.receive_json()['type'],'ready')
+            self.assertEqual(ws.receive_json()['session']['state'],'pending')
+        self.login(2)
         with self.assertRaises(WebSocketDisconnect):
             with self.socket(rid):pass
-        self.login(2);self.command(rid,'accept',transport='bridge')
+        self.command(rid,'accept',transport='bridge')
         with self.assertRaises(WebSocketDisconnect):
             with self.socket(rid,'https://untrusted.invalid'):pass
         self.login(3)
