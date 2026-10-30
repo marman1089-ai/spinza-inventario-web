@@ -5,4 +5,4 @@ import uvicorn
 PORT = int(os.environ.get("PORT", "8000"))
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=PORT, log_level="info")
+    uvicorn.run("app.main:app", host="0.0.0.0", port=PORT, workers=1, log_level="info")

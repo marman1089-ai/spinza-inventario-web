@@ -33,7 +33,7 @@ class BridgeTests(LiveAssistTests):
     def test_bridge_limits_and_expiry(self):
         rid=self.connect_bridge()
         self.assertEqual(self.command(rid,'bridge-frame',frame='{}').status_code,400)
-        self.assertEqual(self.command(rid,'bridge-frame',frame='x'*450001).status_code,400)
+        self.assertEqual(self.command(rid,'bridge-frame',frame='x'*1500001).status_code,400)
         self.command(rid,'bridge-frame',frame=self.frame())
         self.sql('UPDATE control_assist_sessions SET target_ping=target_ping-60 WHERE id=?',(rid,))
         self.assertEqual(self.command(rid,'bridge-frame',frame=self.frame()).status_code,409)

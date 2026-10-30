@@ -590,7 +590,7 @@
 </script>
 
 <script defer src="/static/js/pro-ui-refresh.js?v=20260827c"></script>
-{% if user %}<div id="inventory-activity-context" hidden data-store="{{ store if store is defined and store else (active_store if active_store is defined else user.store) }}" data-area="{{ area if area is defined and area in ['prodotti','bibite'] else '' }}"></div><script src="/static/inventory_activity.js?v=20261030-live" defer></script><script src="/static/js/control-presence.js?v=20261030-live" defer></script><div id="assist-context" data-user="{{ user.id }}" data-role="{{ user.role }}" hidden></div><link rel="stylesheet" href="/static/css/control-assistance.css?v=mobile1-20261030"><script src="/static/js/control-assistance.js?v=mobile1-20261030" defer></script>{% endif %}
+{% if user %}<div id="inventory-activity-context" hidden data-store="{{ store if store is defined and store else (active_store if active_store is defined else user.store) }}" data-area="{{ area if area is defined and area in ['prodotti','bibite'] else '' }}"></div><script src="/static/inventory_activity.js?v=20261030-live" defer></script><script src="/static/js/control-presence.js?v=20261030-live" defer></script><div id="assist-context" data-user="{{ user.id }}" data-role="{{ user.role }}" hidden></div><link rel="stylesheet" href="/static/css/control-assistance.css?v=replica5fps-20261030b"><script src="/static/js/control-assistance.js?v=replica5fps-20261030b" defer></script>{% endif %}
 </body>
 
 </html>

@@ -1,29 +1,37 @@
-# Assistenza del gestionale anche da telefono
+# Assistenza: copia della pagina del telefono, aggiornamento continuo
 
-## Come usarla
-1. Carica questa versione del progetto su Render con la normale procedura di aggiornamento e completa il deploy. Non sovrascrivere il database online con i database di esempio contenuti nello ZIP.
-2. Admin e dipendente ricaricano il gestionale. Se compare ancora il vecchio pulsante, chiudere e riaprire la pagina.
-3. Admin: apri Controllo live e premi Richiedi schermo sul dipendente.
-4. Dipendente: premi **Accetta e condividi il gestionale**. Questa è la scelta principale, utilizzabile senza condivisione schermo del sistema operativo e senza WebRTC.
-5. L'admin vede una riproduzione della pagina visibile con testi, campi e pulsanti. Per agire preme **Richiedi controllo mouse e tastiera**; il dipendente accetta la seconda richiesta.
-6. L'admin seleziona un campo nella pagina condivisa e usa la tastiera oppure il riquadro Invia testo. Su un elenco a discesa usa le frecce dopo averlo selezionato. Può cliccare pulsanti, selezioni e scorrere con la rotella.
-7. Il dipendente può sempre premere Revoca controllo o Interrompi condivisione.
+## Novità
+La vista precedente con testi ricostruiti è stata sostituita. Ora la copia mantiene la struttura della pagina, gli stili del gestionale, i loghi, le immagini statiche, i campi compilati e i menu aperti. Usa la stessa larghezza e altezza della pagina sul telefono (per esempio 390 × 844), centrata e adattata allo spazio disponibile sullo schermo admin senza cambiare l'impaginazione mobile.
 
-## Collegamento
-Il ponte usa le normali richieste HTTPS allo stesso gestionale. Per questa modalità non servono TURN, abbonamenti di assistenza o chiavi esterne. Richiede una connessione funzionante, un browser moderno con JavaScript e la pagina del gestionale aperta in primo piano. Il sito online non è stato modificato da questo lavoro: occorre il deploy dello ZIP.
+Il collegamento rapido invia fino a circa 6 aggiornamenti al secondo, con un margine sull'obiettivo di 5. Sotto la copia sono visibili le dimensioni originali e la frequenza effettivamente ricevuta. Durante il collaudo locale sono stati misurati 5,94 aggiornamenti al secondo con contenuto che cambiava continuamente. La frequenza reale dipende da telefono, pagina, rete e carico del servizio; non è una garanzia di 5 FPS su qualunque connessione.
 
-La visualizzazione si aggiorna circa ogni 1,6 secondi; i comandi vengono ricevuti nel ciclo di controllo di circa 1,2 secondi. Il ritardo reale dipende dalla rete e dal server. La modalità video precedente resta disponibile come scelta secondaria sui dispositivi compatibili.
+## Aggiornamento su Render
+1. Aggiorna il progetto con questo ZIP completo e completa il deploy. Conserva DATABASE_URL e SESSION_SECRET esistenti. Non importare sul sito i database contenuti nel pacchetto: sono rimasti invariati rispetto al tuo archivio.
+2. Il comando di avvio previsto è `uvicorn app.main:app --workers 1 --host 0.0.0.0 --port $PORT`. Il file render.yaml incluso lo imposta; anche run.py usa un solo processo. La configurazione del sito deve usare una sola istanza del servizio: il collegamento rapido connette i due partecipanti nello stesso processo. Più istanze richiedono un relay condiviso aggiuntivo.
+3. La libreria WebSocket è già inclusa nelle dipendenze uvicorn[standard]. Non occorrono chiavi esterne o TURN per questa modalità. Render deve consentire il normale collegamento WebSocket HTTPS.
+4. Chiudi le precedenti pagine aperte e riapri il gestionale su admin e dipendente, così entrambi caricano la nuova versione. Gli indirizzi dei file sono stati aggiornati per evitare la vecchia cache.
 
-## Limiti visibili
-- È una riproduzione semplificata dei contenuti visibili del gestionale: foto, canvas, PDF incorporati e video sono indicati come contenuti grafici, senza riprodurli. Password, campi nascosti e caricamento file sono esclusi. Le sezioni marcate data-assist-private sono escluse.
-- La selezione di file, i messaggi nativi del browser e le altre applicazioni rimangono al dipendente.
-- Un cambio pagina con ricaricamento termina la sessione: l'admin invia una nuova richiesta. Questo comportamento conserva il consenso esplicito per ogni nuova pagina.
-- Non è stata verificata ogni marca e versione di telefono: il collaudo ha simulato un dispositivo mobile senza API di cattura schermo né WebRTC. È necessaria una prova finale sul telefono reale dopo il deploy.
+## Uso
+Admin: Controllo live → Richiedi schermo.
+Dipendente: Accetta e condividi il gestionale.
+Admin: la copia appare subito sotto lo stato della connessione, nelle proporzioni del telefono. Il contatore mostra dimensioni e aggiornamenti/s. Puoi osservare i cambiamenti fatti dal dipendente.
+Per agire: Richiedi controllo mouse e tastiera → seconda accettazione del dipendente. Clicca un campo nella copia e usa la tastiera o Invia testo. La rotella, o un gesto verticale su un admin touch, scorre la pagina del dipendente dopo l'autorizzazione.
+Revoca controllo e Interrompi condivisione rimangono disponibili al dipendente.
 
-## Dati e consensi
-Le informazioni della pagina attraversano il server del gestionale. Il database conserva soltanto l'ultima rappresentazione e una piccola coda di comandi, senza uno storico delle schermate. Questi dati vengono eliminati allo stop o alla successiva verifica della scadenza. I consensi restano nei registri attività, senza riportare il contenuto della pagina o i testi inviati. Le sessioni cessano dopo assenza dei segnali per 45 secondi, o dopo un'ora. Il secondo consenso usa un codice nuovo a ogni approvazione; la revoca svuota i comandi in attesa.
+## Cosa viene copiato
+È una replica della pagina del gestionale, non una cattura del sistema operativo. Comprende impaginazione, colori, stili, immagini statiche, valori dei campi, selezioni, menu della pagina e posizione di scorrimento. I grafici canvas vengono riprodotti come immagini quando il browser ne consente la lettura.
+Password, campi nascosti, campi file e sezioni data-assist-private sono esclusi. I popup nativi del sistema (tastiera del telefono, selettore file, lista nativa di un select), video, iframe/PDF incorporati, immagini esterne protette e altre applicazioni non sono riprodotti. Non vengono eseguiti gli script del dipendente nella copia admin; i comandi agiscono soltanto sulla pagina sorgente dopo il secondo consenso.
 
-## Verifica eseguita
-- Test delle autorizzazioni, doppio consenso, isolamento tra utenti, consegna dei comandi, revoca, nuova approvazione e scadenza su database isolati.
-- Due browser locali, dipendente con dimensioni e interazione mobile e API di cattura schermo/WebRTC disabilitate: accettazione, visualizzazione della pagina, esclusione password e contenuti nascosti, digitazione remota dopo il secondo consenso, revoca e stop.
-- Nessuna lettura o modifica del database di produzione.
+## Connessione e interruzioni
+La pagina del dipendente deve rimanere aperta in primo piano. Un cambio pagina che ricarica il gestionale termina la sessione e richiede una nuova richiesta.
+Se il collegamento rapido non è disponibile, viene indicata la modalità di riserva più lenta: non viene presentata come una connessione a 5 FPS. Il sistema ritenta il collegamento rapido automaticamente. In tal caso verificare WebSocket, connessione e singola istanza/processo del servizio.
+Il ponte scarta gli aggiornamenti ormai superati anziché accumulare ritardo.
+
+## Dati
+Gli aggiornamenti rapidi transitano in memoria attraverso il server e non vengono salvati come un filmato o come una cronologia di pagine. La modalità di riserva conserva soltanto l'ultima copia e una piccola coda di comandi, cancellati allo stop o alla successiva verifica di scadenza. I registri conservano le accettazioni e revoche, senza i contenuti condivisi. Entrambi i collegamenti richiedono una sessione autenticata e l'appartenenza all'assistenza; i comandi richiedono il secondo consenso e un codice nuovo a ogni approvazione.
+
+## Collaudo
+- 29 verifiche locali superate sui percorsi di assistenza: autorizzazioni, doppio consenso, estranei esclusi, origine del collegamento, revoca, rinnovo del consenso, scadenza e pulizia delle connessioni.
+- Due browser locali, dipendente simulato 390 × 844 senza cattura schermo né WebRTC: copia ricevuta a 5,94 aggiornamenti/s, valori dei campi identici, colori/font/misure/posizioni verificati, contenuti riservati esclusi, scrittura remota, revoca e stop.
+- Confronto visivo delle schermate originale/copia eseguito. Sono possibili lievi differenze di rendering tra browser diversi.
+- Nessun accesso al database di produzione e nessun deploy effettuato. Rimane necessaria la prova sul telefono reale dopo l'aggiornamento.

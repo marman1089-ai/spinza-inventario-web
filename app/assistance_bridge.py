@@ -29,7 +29,7 @@ def action(c, row, name, form, admin, ph):
             if admin:
                 return PlainTextResponse('Solo il dipendente condivide la pagina', status_code=403)
             raw = str(form.get('frame', ''))
-            if len(raw.encode('utf-8')) > 450000:
+            if len(raw.encode('utf-8')) > 1500000:
                 raise ValueError()
             frame = json.loads(raw)
             if not isinstance(frame, dict) or not isinstance(frame.get('nodes'), list) or len(frame['nodes']) > 1400:

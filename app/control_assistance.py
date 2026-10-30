@@ -49,10 +49,12 @@ def audit(c,user,row,description):
 
 
 def public(row):
-    return {k:row[k] for k in ('id','admin_id','target_id','admin_name','target_name','state','control_state','control_capable','created')}
+    return {k:row[k] for k in ('id','admin_id','target_id','admin_name','target_name','state','control_state','control_capable','created','updated')}
 
 
 def register_assistance(app,helpers):
+    from .assistance_socket import register_socket
+    register_socket(app)
     def authenticated(request):return helpers['require_login'](request)
     def init():
         from .inventory_activity import init_activity_db
@@ -181,4 +183,6 @@ def register_assistance(app,helpers):
             c.execute(f'UPDATE control_assist_sessions SET updated={ph} WHERE id={ph}',(now,rid))
             if description:audit(c,user,row,description)
             updated=c.execute(f'SELECT * FROM control_assist_sessions WHERE id={ph}',(rid,)).fetchone()
-        return result({'session':public(updated)})
+            from .assistance_bridge import read as read_bridge
+            bridge=read_bridge(c,rid,admin,ph)
+        return result({'session':public(updated),'bridge':bridge})
