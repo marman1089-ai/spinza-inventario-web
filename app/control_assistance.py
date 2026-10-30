@@ -18,6 +18,8 @@ def schema(c):
     c.execute(f'''CREATE TABLE IF NOT EXISTS control_assist_signals (
         id {pk},session_id TEXT NOT NULL,sender_id BIGINT NOT NULL,payload TEXT NOT NULL)''')
     c.execute('CREATE INDEX IF NOT EXISTS ix_control_assist_signals ON control_assist_signals(session_id,id)')
+    from .assistance_bridge import schema as bridge_schema
+    bridge_schema(c)
 
 
 def ice_config():
@@ -38,6 +40,7 @@ def expire(c,now):
     ph='%s' if using_postgres() else '?'
     c.execute(f"UPDATE control_assist_sessions SET state='expired',control_state='revoked',offer='',answer='' WHERE (state='pending' AND created<{ph}) OR (state IN ('accepted','active') AND (admin_ping<{ph} OR target_ping<{ph} OR created<{ph}))",(now-120,now-45,now-45,now-3600))
     c.execute("DELETE FROM control_assist_signals WHERE session_id IN (SELECT id FROM control_assist_sessions WHERE state NOT IN ('pending','accepted','active'))")
+    c.execute("DELETE FROM control_assist_bridge WHERE session_id IN (SELECT id FROM control_assist_sessions WHERE state NOT IN ('pending','accepted','active'))")
 
 
 def audit(c,user,row,description):
@@ -100,7 +103,9 @@ def register_assistance(app,helpers):
             row=c.execute(f'SELECT * FROM control_assist_sessions WHERE id={ph}',(rid,)).fetchone()
             if not row or int(user['id']) not in (int(row['admin_id']),int(row['target_id'])):return PlainTextResponse('Sessione non accessibile',status_code=403)
             signals=c.execute(f'SELECT id,payload FROM control_assist_signals WHERE session_id={ph} AND sender_id<>{ph} AND id>{ph} ORDER BY id LIMIT 200',(rid,int(user['id']),cursor)).fetchall()
-        return result({'session':public(row),'offer':row['offer'],'answer':row['answer'],'signals':[{'id':r['id'],'candidate':json.loads(r['payload'])} for r in signals],'iceServers':ice_config()})
+            from .assistance_bridge import read as read_bridge
+            bridge=read_bridge(c,rid,int(user['id'])==int(row['admin_id']),ph)
+        return result({'bridge':bridge,'session':public(row),'offer':row['offer'],'answer':row['answer'],'signals':[{'id':r['id'],'candidate':json.loads(r['payload'])} for r in signals],'iceServers':ice_config()})
 
     @app.post('/controllo/assistenza/{rid}/{action}')
     async def command(request:Request,rid:str,action:str):
@@ -118,12 +123,22 @@ def register_assistance(app,helpers):
             active=row['state'] in ('pending','accepted','active')
             if not active:return PlainTextResponse('Sessione conclusa',status_code=409)
             description=None
-            if action=='accept':
+            if action in ('bridge-frame','bridge-command'):
+                from .assistance_bridge import action as bridge_action
+                error=bridge_action(c,row,action,form,admin,ph)
+                if error is not None:return error
+            elif action=='accept':
                 if not target or row['state']!='pending':return PlainTextResponse('Accettazione non consentita',status_code=403)
-                capable=1 if form.get('capable')=='1' else 0
+                bridge_mode=form.get('transport')=='bridge'
+                capable=1 if bridge_mode or form.get('capable')=='1' else 0
                 c.execute(f"UPDATE control_assist_sessions SET state='accepted',control_capable={ph},admin_ping={ph},target_ping={ph} WHERE id={ph}",(capable,now,now,rid));description='Condivisione schermo accettata da '+user['username']
+                if bridge_mode:
+                    description='Condivisione pagina gestionale accettata da '+user['username']
+                    c.execute(f'INSERT INTO control_assist_bridge(session_id) VALUES({ph})',(rid,))
+                    c.execute(f"UPDATE control_assist_sessions SET state='active' WHERE id={ph}",(rid,))
             elif action in ('decline','stop'):
                 if action=='decline' and not target:return PlainTextResponse('Solo il destinatario può rifiutare',status_code=403)
+                c.execute(f'DELETE FROM control_assist_bridge WHERE session_id={ph}',(rid,))
                 state='declined' if action=='decline' else 'stopped'
                 c.execute(f"UPDATE control_assist_sessions SET state={ph},control_state='revoked',offer='',answer='' WHERE id={ph}",(state,rid));c.execute(f'DELETE FROM control_assist_signals WHERE session_id={ph}',(rid,));description=('Condivisione rifiutata da ' if action=='decline' else 'Condivisione interrotta da ')+user['username']
             elif action=='offer':
@@ -154,9 +169,13 @@ def register_assistance(app,helpers):
                 c.execute(f"UPDATE control_assist_sessions SET control_state='requested' WHERE id={ph}",(rid,));description='Richiesta separata controllo mouse e tastiera a '+row['target_name']
             elif action=='allow-control':
                 if not target or row['state']!='active' or not row['control_capable'] or row['control_state']!='requested':return PlainTextResponse('Consenso separato richiesto',status_code=403)
+                from .assistance_bridge import grant
+                grant(c,rid,ph,True)
                 c.execute(f"UPDATE control_assist_sessions SET control_state='accepted' WHERE id={ph}",(rid,));description='Controllo della scheda gestionale accettato da '+user['username']
             elif action=='revoke-control':
                 if not target and row['control_state']!='accepted':return PlainTextResponse('Operazione non consentita',status_code=403)
+                from .assistance_bridge import grant
+                grant(c,rid,ph,False)
                 c.execute(f"UPDATE control_assist_sessions SET control_state='revoked'"+(",control_capable=0" if target and form.get('disable')=='1' else '')+f" WHERE id={ph}",(rid,));description='Controllo remoto revocato da '+user['username']
             else:return PlainTextResponse('Comando non valido',status_code=404)
             c.execute(f'UPDATE control_assist_sessions SET updated={ph} WHERE id={ph}',(now,rid))
