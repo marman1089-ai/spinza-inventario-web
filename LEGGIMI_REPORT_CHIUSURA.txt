@@ -8,6 +8,10 @@ dalle nuove chiusure senza modificare lo storico o le entrate. POS e Cash restan
 Il calendario mensile evidenzia i giorni con chiusure salvate per negozio.
 Seleziona un giorno per consultare i report: il modulo propone quella data.
 Il riepilogo cumulativo degli incassi è stato rimosso.
+Sotto gli incassi puoi aggiungere spese con nome e importo, anche più voci.
+Le spese vengono conservate nel report e registrate nelle uscite admin una sola volta.
+Incassi, totale spese e saldo sono separati: le spese non riducono il totale entrate.
+Il saldo è incassi meno spese e non indica la giacenza fisica del cassetto.
 La pagina mantiene i colori e lo stile distintivi di Spinza e Reburger. Salva la chiusura prima di aggiungere un canale.
 Lo storico si puÃ² filtrare per data e conserva autore, importi e note.
 PiÃ¹ report nella stessa giornata vengono sommati: registra ogni chiusura una sola volta.

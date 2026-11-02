@@ -24,9 +24,12 @@ class ReportsTest(unittest.TestCase):
                 return env.get_template(name).render(**ctx)
             def insert(cur,store,day,method,amount,notes,user):
                 cur.execute('INSERT INTO cash_entries(store,flow_date,payment_method,amount,notes,created_by) VALUES(?,?,?,?,?,?)',(store,day,method,amount,notes,user))
-            cr.install(app,{'_insert_cash_entry_compat':insert,'_ensure_payment_method':lambda *args:None,'_log':lambda *args,**kw:None,'_ph':lambda:'?','STORES':{'spinza':'Spinza','other':'Altro'},'require_login':lambda r:user,'_effective_store':lambda r,u:scope[0],'render':render})
+            def insert_expense(cur,store,day,category,supplier,method,amount,notes,user):
+                cur.execute('INSERT INTO cash_expenses(store,flow_date,amount,notes) VALUES(?,?,?,?)',(store,day,amount,notes))
+            cr.install(app,{'_insert_cash_expense_compat':insert_expense,'_insert_cash_entry_compat':insert,'_ensure_payment_method':lambda *args:None,'_log':lambda *args,**kw:None,'_ph':lambda:'?','STORES':{'spinza':'Spinza','other':'Altro'},'require_login':lambda r:user,'_effective_store':lambda r,u:scope[0],'render':render})
             cr.init_reports(); cr.init_reports()
             with db.connect() as c:
+                c.cursor().execute('CREATE TABLE cash_expenses (store TEXT,flow_date TEXT,amount REAL,notes TEXT)')
                 c.cursor().execute('CREATE TABLE cash_entries (store TEXT,flow_date TEXT,payment_method TEXT,amount REAL,notes TEXT,created_by TEXT)')
             routes={r.path:r.endpoint for r in app.routes if r.path.startswith('/report-chiusura')}
             session={}; page=routes['/report-chiusura'](Request(session)); self.assertIn('Report chiusura',page)
@@ -85,6 +88,24 @@ class ReportsTest(unittest.TestCase):
             with self.assertRaises(HTTPException):run(routes['/report-chiusura/canali/elimina'](Request(session,[('csrf','bad'),('store','spinza'),('name','Glovo')])))
             send('/report-chiusura/canali',[('name','Glovo')])
             self.assertIn('Glovo',routes['/report-chiusura'](Request(session)))
+            spending=[(k,'b'*43 if k=='submission' else v) for k,v in data]+[('expense_name','Ghiaccio'),('expense_amount','2,30'),('expense_name','Pane'),('expense_amount','1.20')]
+            self.assertEqual(send('/report-chiusura/salva',spending).status_code,303)
+            send('/report-chiusura/salva',spending)
+            app.router.on_startup[-1]()
+            with db.connect() as c:
+                expense_rows=c.cursor().execute('SELECT * FROM cash_expenses').fetchall()
+                self.assertEqual(len(expense_rows),2)
+                self.assertAlmostEqual(sum(e['amount'] for e in expense_rows),3.5)
+                self.assertTrue(all(e['store']=='spinza' for e in expense_rows))
+                self.assertIn('Ghiaccio',expense_rows[0]['notes'])
+            page=routes['/report-chiusura'](Request(session))
+            self.assertIn('Ghiaccio',page);self.assertIn('13,00',page)
+            for name,amount in [('', '2'),('Pane',''),('Pane','-2'),('Pane','0'),('Pane','1.234')]:
+                invalid=[(k,'c'*43 if k=='submission' else v) for k,v in data]+[('expense_name',name),('expense_amount',amount)]
+                with self.assertRaises(HTTPException):send('/report-chiusura/salva',invalid)
+            with db.connect() as c:
+                self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM closure_reports').fetchone()['n'],2)
+                self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM cash_expenses').fetchone()['n'],2)
             user.clear()
             with self.assertRaises(HTTPException):routes['/report-chiusura'](Request(session))
 if __name__=='__main__': unittest.main()
