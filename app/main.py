@@ -5598,7 +5598,7 @@ def set_active_store(request: Request, store: str = Form(...), next_url: str = F
     # Keep the selected page's filters, but discard identifiers from the old store.
     target = urlsplit(next_url or '/inventario')
     safe_pages = {'/inventario','/inventario/conteggio','/inventario/report',
-        '/admin','/admin/fasce-orarie','/logs','/gestionale','/fatture','/chiusure','/spese-secondarie'}
+        '/admin','/admin/fasce-orarie','/logs','/gestionale','/fatture','/chiusure','/report-chiusura','/spese-secondarie'}
     path = target.path if not target.netloc and not target.scheme and target.path in safe_pages else '/inventario'
     params = [(k,v) for k,v in parse_qsl(target.query) if k in ('area','day','start','end','q')]
     if path in ('/inventario/conteggio','/inventario/report') and store == 'ALL':
@@ -9866,3 +9866,7 @@ async def delete_inventory_report(request: Request, count_id: int):
         c.execute(f'DELETE FROM inventory_period_count_headers WHERE id={ph} AND store={ph} AND area={ph}',(count_id,store,area))
         _log(c,store=store,username=user['username'],action='REPORT_INVENTARIO_ELIMINATO',category='REPORT',name=f"Report #{count_id} · {area} · {head['counted_at']}",delta=0)
     return RedirectResponse('/inventario/report?'+urlencode({'store':store,'area':area,'deleted':'1'}),status_code=303)
+
+
+from .closure_reports import install as install_closure_reports
+install_closure_reports(app, globals())

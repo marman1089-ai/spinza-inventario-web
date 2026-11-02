@@ -1,0 +1,27 @@
+AGGIORNAMENTO REPORT CHIUSURA
+
+Nel menu Gestionale trovi la nuova voce Report chiusura.
+Inserisci data, POS, Cash e gli altri canali; il totale viene calcolato automaticamente.
+Premi Altro canale per aggiungere Glovo, Deliveroo o un nome libero.
+I canali sono conservati per negozio. Salva la chiusura prima di aggiungere un canale.
+Lo storico si può filtrare per data e conserva autore, importi e note.
+Più report nella stessa giornata vengono sommati: registra ogni chiusura una sola volta.
+Ogni report alimenta automaticamente cash_entries: entrate, dashboard e totali admin per negozio.
+Cash viene registrato come Contanti; gli altri canali mantengono il proprio nome.
+Non registrare nuovamente a mano gli stessi incassi. Le righe mostrano il numero del report.
+Anche i report della prima versione vengono trasferiti una sola volta al riavvio.
+
+INSTALLAZIONE SU GESTIONALE ESISTENTE
+Fai una copia di sicurezza e usa il pacchetto aggiornamento_report_chiusura.zip.
+Copia i suoi file nella cartella principale del progetto, mantenendo le sottocartelle,
+e riavvia il servizio. Le nuove tabelle vengono create automaticamente all'avvio.
+Il pacchetto di aggiornamento non contiene database e non sostituisce i dati esistenti.
+
+Il file gestionale_con_report_chiusura.zip contiene invece tutto l'archivio ricevuto
+con i file aggiornati. Non sovrascrivere un database attivo con quello dell'archivio.
+
+VERIFICHE
+Verificati su database SQLite temporaneo: salvataggio e totale in centesimi,
+doppi invii, canali persistenti e duplicati, importi errati, accesso tra negozi,
+token del modulo e visualizzazione dello storico. Sintassi Python verificata.
+Non eseguita una prova nel browser né sul database PostgreSQL del servizio online.
