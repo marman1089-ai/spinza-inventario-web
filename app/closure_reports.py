@@ -52,7 +52,7 @@ def install(app, api):
             if not line['cents']: continue
             method='Contanti' if line['name']=='Cash' else line['name']
             api['_ensure_payment_method'](cur,method,row['created_by'])
-            notes=f"Report chiusura #{row['id']}" + (' · '+row['notes'] if row['notes'] else '')
+            notes=f"Report chiusura #{row['id']}" + (' Â· '+row['notes'] if row['notes'] else '')
             api['_insert_cash_entry_compat'](cur,row['store'],row['closure_date'],method,line['cents']/100,notes,row['created_by'])
             api['_log'](cur,store=row['store'],username=row['created_by'],action='CREATE',category='CASSA',name=f"Report chiusura #{row['id']} - {method}",delta=line['cents']/100)
     @app.on_event('startup')
@@ -87,9 +87,20 @@ def install(app, api):
         name=' '.join(str(form.get('name','')).split())
         if not name or len(name)>60: raise HTTPException(422,'Il nome del canale deve contenere da 1 a 60 caratteri.')
         key=name.casefold()
-        if key in ('pos','cash','contanti'): raise HTTPException(422,'POS e Cash sono già presenti.')
+        if key in ('pos','cash','contanti'): raise HTTPException(422,'POS e Cash sono giÃ  presenti.')
         with connect() as conn:
             conn.cursor().execute(f'INSERT INTO closure_report_channels(store,name,channel_key) VALUES({ph()},{ph()},{ph()}) ON CONFLICT(store,channel_key) DO NOTHING',(store,name,key))
+        return RedirectResponse('/report-chiusura?store='+store,303)
+    @app.post('/report-chiusura/canali/elimina')
+    async def delete_channel(request:Request):
+        user,scope=auth(request); form=await request.form(); check(request,form)
+        store=str(form.get('store','')); allowed(scope,store)
+        key=' '.join(str(form.get('name','')).split()).casefold()
+        if not key or key in ('pos','cash','contanti'):
+            raise HTTPException(422,'POS e Cash sono canali di base e non possono essere eliminati.')
+        with connect() as conn:
+            # Historical report snapshots and accounting entries remain intact.
+            conn.cursor().execute(f'DELETE FROM closure_report_channels WHERE store={ph()} AND channel_key={ph()}',(store,key))
         return RedirectResponse('/report-chiusura?store='+store,303)
     @app.post('/report-chiusura/salva')
     async def save(request:Request):

@@ -52,6 +52,20 @@ class ReportsTest(unittest.TestCase):
             self.assertNotIn('16,50',routes['/report-chiusura'](Request(session)))
             scope[0]='spinza'
             with self.assertRaises(HTTPException): run(routes['/report-chiusura/salva'](Request(session,[('csrf','wrong')])))
+            # Deleting a custom channel preserves historical reports and finance.
+            self.assertEqual(send('/report-chiusura/canali/elimina',[('name','Glovo')]).status_code,303)
+            with db.connect() as c:
+                self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM closure_report_channels').fetchone()['n'],0)
+                self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM cash_entries').fetchone()['n'],3)
+                self.assertIn('Glovo',c.cursor().execute('SELECT lines_json FROM closure_reports').fetchone()['lines_json'])
+            for name in ('POS','Cash','Contanti'):
+                with self.assertRaises(HTTPException):send('/report-chiusura/canali/elimina',[('name',name)])
+            scope[0]='other'
+            with self.assertRaises(HTTPException):send('/report-chiusura/canali/elimina',[('name','Glovo')])
+            scope[0]='spinza'
+            with self.assertRaises(HTTPException):run(routes['/report-chiusura/canali/elimina'](Request(session,[('csrf','bad'),('store','spinza'),('name','Glovo')])))
+            send('/report-chiusura/canali',[('name','Glovo')])
+            self.assertIn('Glovo',routes['/report-chiusura'](Request(session)))
             user.clear()
             with self.assertRaises(HTTPException):routes['/report-chiusura'](Request(session))
 if __name__=='__main__': unittest.main()
