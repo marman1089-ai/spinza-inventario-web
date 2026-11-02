@@ -42,6 +42,25 @@ class ReportsTest(unittest.TestCase):
                 income=c.cursor().execute('SELECT * FROM cash_entries').fetchall();self.assertEqual(len(income),3);self.assertAlmostEqual(sum(r['amount'] for r in income),16.5);self.assertEqual(income[1]['payment_method'],'Contanti');self.assertTrue(all(r['store']=='spinza' for r in income))
                 self.assertEqual(len(c.cursor().execute('SELECT * FROM closure_report_channels').fetchall()),1)
             page=routes['/report-chiusura'](Request(session));self.assertIn('16,50',page);self.assertIn('&lt;script&gt;',page)
+            cal=routes['/report-chiusura'](Request(session),month='2026-11',day='2026-11-02')
+            self.assertIn('data-date="2026-11-02" data-count="1"',cal)
+            self.assertIn('Chiusure del 02/11/2026',cal)
+            self.assertNotIn('Incassi nel periodo',cal)
+            self.assertIn('value="2026-11-02"',cal)
+            missing=routes['/report-chiusura'](Request(session),month='2026-11',day='2026-11-03')
+            self.assertIn('Nessuna chiusura inserita per questo giorno',missing)
+            self.assertIn('data-date="2026-11-02" data-count="1"',missing)
+            self.assertNotIn('Report #1',missing)
+            leap=routes['/report-chiusura'](Request(session),month='2028-02')
+            self.assertIn('data-date="2028-02-29"',leap)
+            december=routes['/report-chiusura'](Request(session),month='2026-12')
+            self.assertIn('month=2027-01',december)
+            for month in ('bad','2026-13','2026-1'):
+                with self.assertRaises(HTTPException):routes['/report-chiusura'](Request(session),month=month)
+            scope[0]='other'
+            other_cal=routes['/report-chiusura'](Request(session),month='2026-11')
+            self.assertIn('data-date="2026-11-02" data-count="0"',other_cal)
+            scope[0]='spinza'
             for bad in ['-1','NaN','Infinity','1.999','1.000,00','']:
                 with self.assertRaises(HTTPException):cr.cents(bad)
             with self.assertRaises(HTTPException):send('/report-chiusura/salva',[(k,'bad' if k=='closure_date' else v) for k,v in data])

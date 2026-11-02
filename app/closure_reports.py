@@ -1,5 +1,7 @@
 """Manual closing reports: integer cents and store-scoped persistent channels."""
 import json
+import calendar
+from urllib.parse import urlencode
 import re
 import secrets
 from datetime import date, datetime
@@ -63,10 +65,17 @@ def install(app, api):
             pending=cur.execute('SELECT r.* FROM closure_reports r LEFT JOIN closure_report_exports e ON e.report_id=r.id WHERE e.report_id IS NULL ORDER BY r.id').fetchall()
             for row in pending: export_report(cur,row)
     @app.get('/report-chiusura')
-    def index(request:Request, store:str='', start:str='', end:str='', saved:bool=False):
+    def index(request:Request, store:str='', start:str='', end:str='', saved:bool=False, month:str='', day:str=''):
         user,scope=auth(request)
         selected=store or (scope if scope!='ALL' else next(s for s in stores if s!='ALL'))
         allowed(scope,selected)
+        today=datetime.now(ZoneInfo('Europe/Rome')).date()
+        try:
+            selected_day=date.fromisoformat(day) if day else None
+            if month and not re.fullmatch(r'\d{4}-\d{2}',month): raise ValueError()
+            anchor=date.fromisoformat(month+'-01') if month else (selected_day or today).replace(day=1)
+            if not 2<=anchor.year<=9998: raise ValueError()
+        except ValueError: raise HTTPException(422,'Mese o giorno non valido.')
         for d in (start,end):
             if d:
                 try: date.fromisoformat(d)
@@ -75,11 +84,27 @@ def install(app, api):
         with connect() as conn:
             cur=conn.cursor(); names=channels(cur,selected)
             sql=f'SELECT * FROM closure_reports WHERE store={ph()}'; params=[selected]
+            if selected_day: sql+=f' AND closure_date={ph()}'; params.append(selected_day.isoformat())
             if start: sql+=f' AND closure_date>={ph()}'; params.append(start)
             if end: sql+=f' AND closure_date<={ph()}'; params.append(end)
             rows=cur.execute(sql+' ORDER BY closure_date DESC,id DESC',tuple(params)).fetchall()
+            counts=cur.execute(f'SELECT closure_date,COUNT(*) AS n FROM closure_reports WHERE store={ph()} AND closure_date>={ph()} AND closure_date<={ph()} GROUP BY closure_date',(selected,anchor.isoformat(),anchor.replace(day=calendar.monthrange(anchor.year,anchor.month)[1]).isoformat())).fetchall()
+        by_day={str(r['closure_date']):r['n'] for r in counts}
+        def link(**kw): return '/report-chiusura?'+urlencode(dict(store=selected,**kw))
+        weeks=[]
+        for week in calendar.Calendar(firstweekday=0).monthdayscalendar(anchor.year,anchor.month):
+            cells=[]
+            for number in week:
+                if not number: cells.append(None); continue
+                value=anchor.replace(day=number).isoformat()
+                cells.append(dict(number=number,date=value,count=by_day.get(value,0),today=value==today.isoformat(),selected=selected_day is not None and value==selected_day.isoformat(),url=link(month=anchor.strftime('%Y-%m'),day=value)+'#closing-history'))
+            weeks.append(cells)
+        prev=(anchor.replace(year=anchor.year-1,month=12) if anchor.month==1 else anchor.replace(month=anchor.month-1))
+        next_month=(anchor.replace(year=anchor.year+1,month=1) if anchor.month==12 else anchor.replace(month=anchor.month+1))
+        month_names=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre']
+        calendar_ctx=dict(weeks=weeks,month_label=month_names[anchor.month-1]+' '+str(anchor.year),month_value=anchor.strftime('%Y-%m'),prev_month=link(month=prev.strftime('%Y-%m'))+'#closing-calendar',next_month=link(month=next_month.strftime('%Y-%m'))+'#closing-calendar',current_month=link(month=today.strftime('%Y-%m'))+'#closing-calendar',selected_day=selected_day.isoformat() if selected_day else '',form_date=selected_day.isoformat() if selected_day else today.isoformat(),days_saved=len(by_day))
         for r in rows: r['lines']=json.loads(r['lines_json'])
-        return api['render']('closure_reports.html',request=request,user=user,brand=scope,stores=stores,selected=selected,channels=names,rows=rows,start=start,end=end,saved=saved,today=datetime.now(ZoneInfo('Europe/Rome')).date().isoformat(),csrf=token(request),submission=secrets.token_urlsafe(32),period_total=sum(r['total_cents'] for r in rows))
+        return api['render']('closure_reports.html',**calendar_ctx,request=request,user=user,brand=scope,stores=stores,selected=selected,channels=names,rows=rows,start=start,end=end,saved=saved,today=datetime.now(ZoneInfo('Europe/Rome')).date().isoformat(),csrf=token(request),submission=secrets.token_urlsafe(32),period_total=sum(r['total_cents'] for r in rows))
     @app.post('/report-chiusura/canali')
     async def add_channel(request:Request):
         user,scope=auth(request); form=await request.form(); check(request,form)
