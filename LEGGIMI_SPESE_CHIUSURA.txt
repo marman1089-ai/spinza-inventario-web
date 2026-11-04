@@ -1,0 +1,18 @@
+CORREZIONE SPESE REPORT CHIUSURA
+
+Nelle nuove chiusure, inserire in Cash i contanti rimasti dopo le spese.
+Esempio: Cash 100 euro + spese 20 euro = incasso Cash 120 euro.
+Il totale incassi comprende le spese; il saldo le sottrae una sola volta.
+Le entrate admin ricevono il Cash comprensivo delle spese; le uscite
+continuano a registrare le singole spese.
+
+Installazione: a gestionale fermo, estrarre lo ZIP aggiornamento nella
+cartella del progetto (quella con run.py), sovrascrivere i tre file app/
+e riavviare il gestionale. Conservare una copia dei file precedenti.
+Non sostituire il database spinza.db della propria installazione.
+
+La modifica si applica alle nuove chiusure. Report e movimenti gia salvati
+non vengono ricalcolati o modificati automaticamente.
+
+Verifica: test report chiusura superato, inclusi importi, spese,
+esportazione contabile e assenza di duplicati; sintassi JavaScript valida.

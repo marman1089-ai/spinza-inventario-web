@@ -26,8 +26,8 @@
     });
     const money=c=>new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR'}).format(c/100);
     document.getElementById('closing-expense-total').textContent=expensesValid?money(expenses):'Controlla le spese';
-    document.getElementById('closing-net-total').textContent=valid&&expensesValid?money(total-expenses):'Controlla gli importi';
-    out.textContent=valid?new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR'}).format(total/100):'Controlla gli importi';
+    document.getElementById('closing-net-total').textContent=valid&&expensesValid?money(total):'Controlla gli importi';
+    out.textContent=valid&&expensesValid?money(total+expenses):'Controlla gli importi';
   }
   form.addEventListener('input',()=>{dirty=true;update();});
   form.addEventListener('submit',()=>{dirty=false;document.getElementById('save-closing').disabled=true;});
@@ -38,6 +38,13 @@
         const name=channelForm.querySelector('[name=name]').value;
         if(!window.confirm('Eliminare il canale «'+name+'» dalle nuove chiusure? I report salvati e le entrate restano invariati.'))event.preventDefault();
       }
+    });
+  });
+  document.querySelectorAll('.closing-report-delete').forEach(deleteForm=>{
+    deleteForm.addEventListener('submit',event=>{
+      const warning='Eliminare questo report e le relative entrate e uscite?'+(dirty?' Gli importi non salvati nel modulo andranno persi.':'');
+      if(!window.confirm(warning)){event.preventDefault();return;}
+      deleteForm.querySelector('button[type=submit]').disabled=true;
     });
   });
   const expenseRows=document.getElementById('closing-expense-rows');

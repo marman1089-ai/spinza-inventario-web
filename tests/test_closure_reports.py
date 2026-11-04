@@ -1,5 +1,5 @@
 import asyncio, os, sys, tempfile, unittest
-from datetime import timezone
+from datetime import timezone, datetime
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -98,14 +98,72 @@ class ReportsTest(unittest.TestCase):
                 self.assertAlmostEqual(sum(e['amount'] for e in expense_rows),3.5)
                 self.assertTrue(all(e['store']=='spinza' for e in expense_rows))
                 self.assertIn('Ghiaccio',expense_rows[0]['notes'])
+                report=c.cursor().execute('SELECT * FROM closure_reports WHERE submission_token=?',('b'*43,)).fetchone()
+                self.assertEqual(report['total_cents'],2000)
+                income=c.cursor().execute('SELECT * FROM cash_entries').fetchall()
+                self.assertEqual(len(income),6)
+                self.assertAlmostEqual(sum(r['amount'] for r in income),36.5)
+                cash=[r['amount'] for r in income if r['payment_method']=='Contanti']
+                self.assertEqual(cash,[0.2,3.7])
             page=routes['/report-chiusura'](Request(session))
-            self.assertIn('Ghiaccio',page);self.assertIn('13,00',page)
+            self.assertIn('Ghiaccio',page);self.assertIn('20,00',page);self.assertIn('16,50',page)
             for name,amount in [('', '2'),('Pane',''),('Pane','-2'),('Pane','0'),('Pane','1.234')]:
                 invalid=[(k,'c'*43 if k=='submission' else v) for k,v in data]+[('expense_name',name),('expense_amount',amount)]
                 with self.assertRaises(HTTPException):send('/report-chiusura/salva',invalid)
             with db.connect() as c:
                 self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM closure_reports').fetchone()['n'],2)
                 self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM cash_expenses').fetchone()['n'],2)
+            # Deletion permissions are enforced by the server as well as the UI.
+            spending_id=report['id']
+            delete_path='/report-chiusura/elimina'
+            def delete(report_id): return send(delete_path,[('report_id',str(report_id))])
+            with self.assertRaises(HTTPException) as error:
+                run(routes[delete_path](Request(session,[('csrf','wrong'),('store','spinza'),('report_id',str(spending_id))])))
+            self.assertEqual(error.exception.status_code,403)
+            scope[0]='other'
+            with self.assertRaises(HTTPException): delete(spending_id)
+            scope[0]='spinza'; user['role']='staff'
+            with patch.object(cr,'datetime') as clock:
+                clock.now.return_value=datetime.fromisoformat('2026-11-03T00:00:00+01:00')
+                with self.assertRaises(HTTPException) as error: delete(spending_id)
+                self.assertEqual(error.exception.status_code,403)
+                page=routes['/report-chiusura'](Request(session))
+                self.assertNotIn('class="closing-report-delete"',page)
+                self.assertIn('solo un admin',page)
+                with db.connect() as c:
+                    self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM cash_entries').fetchone()['n'],6)
+                # The rule follows the closure date even for reports entered later.
+                clock.now.return_value=datetime.fromisoformat('2026-11-02T23:59:59+01:00')
+                page=routes['/report-chiusura'](Request(session))
+                self.assertIn(f'Elimina report #{spending_id}',page)
+                # Other references and stores must survive the deletion.
+                with db.connect() as c:
+                    c.cursor().execute('INSERT INTO cash_entries VALUES(?,?,?,?,?,?)',('spinza','2026-11-02','POS',99,f'Report chiusura #{spending_id}0','test'))
+                    c.cursor().execute('INSERT INTO cash_expenses VALUES(?,?,?,?)',('other','2026-11-02',99,f'Report chiusura #{spending_id} - Ghiaccio'))
+                self.assertEqual(delete(spending_id).status_code,303)
+                with db.connect() as c:
+                    self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM closure_reports').fetchone()['n'],1)
+                    self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM cash_entries').fetchone()['n'],4)
+                    self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM cash_expenses').fetchone()['n'],1)
+                    self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM closure_report_expenses WHERE report_id=?',(spending_id,)).fetchone()['n'],0)
+                    self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM closure_report_exports WHERE report_id=?',(spending_id,)).fetchone()['n'],0)
+                with self.assertRaises(HTTPException) as error: delete(spending_id)
+                self.assertEqual(error.exception.status_code,404)
+                with self.assertRaises(HTTPException) as error: send('/report-chiusura/salva',spending)
+                self.assertEqual(error.exception.status_code,409)
+                clock.now.return_value=datetime.fromisoformat('2026-11-01T23:59:59+01:00')
+                with self.assertRaises(HTTPException): delete(1)
+                clock.now.return_value=datetime.fromisoformat('2026-12-02T12:00:00+01:00')
+                user['role']='admin'
+                self.assertIn('Elimina report #1',routes['/report-chiusura'](Request(session)))
+                self.assertEqual(delete(1).status_code,303)
+            app.router.on_startup[-1]()
+            with db.connect() as c:
+                self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM closure_reports').fetchone()['n'],0)
+                self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM cash_entries').fetchone()['n'],1)
+            page=routes['/report-chiusura'](Request(session),month='2026-11',deleted=True)
+            self.assertIn('data-date="2026-11-02" data-count="0"',page)
+            self.assertIn('Report eliminato',page)
             user.clear()
             with self.assertRaises(HTTPException):routes['/report-chiusura'](Request(session))
 if __name__=='__main__': unittest.main()

@@ -1,0 +1,28 @@
+AGGIORNAMENTO ELIMINAZIONE REPORT CHIUSURA
+
+Aprire un report nello storico e premere Elimina report.
+Viene richiesta conferma: vengono eliminati anche le entrate e le uscite
+collegate al report, e aggiornato il calendario delle chiusure.
+
+Utenti: eliminazione consentita solo se la data della chiusura coincide
+con il giorno corrente, fino alle 23:59:59 (fuso Europe/Rome).
+Admin: nessun limite di data, nei negozi accessibili.
+La verifica dei permessi avviene anche sul server.
+L'invio ripetuto di un vecchio modulo non ricrea un report eliminato.
+
+INSTALLAZIONE
+A gestionale fermo, estrarre aggiornamento_eliminazione_chiusura.zip
+nella cartella con run.py, sovrascrivendo i tre file app/ inclusi,
+e riavviare il gestionale. Le nuove tabelle vengono create al riavvio.
+Conservare una copia dei file precedenti.
+Non sostituire il database spinza.db della propria installazione.
+
+Include la precedente correzione che somma le spese al Cash incassato
+nelle nuove chiusure. Cash deve contenere i contanti rimasti dopo le spese.
+Esempio: Cash 100 + spese 20 = incasso Cash 120; saldo 100.
+
+Verificati con test: eliminazione in giornata, blocco dopo mezzanotte
+e per date future, admin su report passati, accesso al negozio, CSRF,
+rimozione movimenti e storico, assenza di effetti su altri riferimenti
+e negozi, blocco reinvio del report eliminato, calendario aggiornato.
+Sintassi JavaScript verificata. Test eseguiti su SQLite locale.

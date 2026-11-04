@@ -28,6 +28,7 @@ def init_reports():
         cur.execute('CREATE INDEX IF NOT EXISTS ix_closure_reports_scope ON closure_reports(store,closure_date)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_exports (report_id INTEGER PRIMARY KEY)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_expenses (report_id INTEGER PRIMARY KEY, lines_json TEXT NOT NULL)')
+        cur.execute('CREATE TABLE IF NOT EXISTS closure_report_deleted_tokens (submission_token TEXT PRIMARY KEY)')
 
 
 def install(app, api):
@@ -47,6 +48,8 @@ def install(app, api):
     def check(request,form):
         if not secrets.compare_digest(str(form.get('csrf','')),token(request)):
             raise HTTPException(403, 'Sessione scaduta: ricarica la pagina.')
+    def can_delete(user,row):
+        return user.get('role')=='admin' or str(row['closure_date'])==datetime.now(ZoneInfo('Europe/Rome')).date().isoformat()
     def export_report(cur, row):
         # Claim and accounting rows commit together; retries cannot duplicate income.
         claimed=cur.execute(f'INSERT INTO closure_report_exports(report_id) VALUES({ph()}) ON CONFLICT(report_id) DO NOTHING RETURNING report_id',(row['id'],)).fetchone()
@@ -71,7 +74,7 @@ def install(app, api):
             pending=cur.execute('SELECT r.* FROM closure_reports r LEFT JOIN closure_report_exports e ON e.report_id=r.id WHERE e.report_id IS NULL ORDER BY r.id').fetchall()
             for row in pending: export_report(cur,row)
     @app.get('/report-chiusura')
-    def index(request:Request, store:str='', start:str='', end:str='', saved:bool=False, month:str='', day:str=''):
+    def index(request:Request, store:str='', start:str='', end:str='', saved:bool=False, month:str='', day:str='', deleted:bool=False):
         user,scope=auth(request)
         selected=store or (scope if scope!='ALL' else next(s for s in stores if s!='ALL'))
         allowed(scope,selected)
@@ -116,7 +119,8 @@ def install(app, api):
             r['expenses']=expenses_by_id.get(r['id'],[])
             r['expense_total']=sum(e['cents'] for e in r['expenses'])
             r['net_cents']=r['total_cents']-r['expense_total']
-        return api['render']('closure_reports.html',**calendar_ctx,request=request,user=user,brand=scope,stores=stores,selected=selected,channels=names,rows=rows,start=start,end=end,saved=saved,today=datetime.now(ZoneInfo('Europe/Rome')).date().isoformat(),csrf=token(request),submission=secrets.token_urlsafe(32),period_total=sum(r['total_cents'] for r in rows))
+            r['can_delete']=can_delete(user,r)
+        return api['render']('closure_reports.html',**calendar_ctx,request=request,user=user,brand=scope,stores=stores,selected=selected,channels=names,rows=rows,start=start,end=end,saved=saved,deleted=deleted,today=datetime.now(ZoneInfo('Europe/Rome')).date().isoformat(),csrf=token(request),submission=secrets.token_urlsafe(32),period_total=sum(r['total_cents'] for r in rows))
     @app.post('/report-chiusura/canali')
     async def add_channel(request:Request):
         user,scope=auth(request); form=await request.form(); check(request,form)
@@ -139,6 +143,34 @@ def install(app, api):
             # Historical report snapshots and accounting entries remain intact.
             conn.cursor().execute(f'DELETE FROM closure_report_channels WHERE store={ph()} AND channel_key={ph()}',(store,key))
         return RedirectResponse('/report-chiusura?store='+store,303)
+    @app.post('/report-chiusura/elimina')
+    async def delete_report(request:Request):
+        user,scope=auth(request); form=await request.form(); check(request,form)
+        store=str(form.get('store','')); allowed(scope,store)
+        try: report_id=int(str(form.get('report_id','')))
+        except ValueError: raise HTTPException(422,'Report non valido.')
+        with connect() as conn:
+            cur=conn.cursor()
+            if not using_postgres(): cur.execute('BEGIN IMMEDIATE')
+            lock=' FOR UPDATE' if using_postgres() else ''
+            row=cur.execute(f'SELECT * FROM closure_reports WHERE id={ph()} AND store={ph()}'+lock,(report_id,store)).fetchone()
+            if not row: raise HTTPException(404,'Report non trovato.')
+            if not can_delete(user,row):
+                raise HTTPException(403,'Puoi eliminare un report solo nel giorno della chiusura. Per le altre date serve un admin.')
+            # Match the complete report reference, never #1 against #10.
+            prefix=f"Report chiusura #{report_id}"
+            income_prefixes=(prefix+' · ',prefix+' Â· ')
+            cur.execute(f'DELETE FROM cash_entries WHERE store={ph()} AND flow_date={ph()} AND (notes={ph()} OR substr(notes,1,{ph()})={ph()} OR substr(notes,1,{ph()})={ph()})',
+                        (store,row['closure_date'],prefix,len(income_prefixes[0]),income_prefixes[0],len(income_prefixes[1]),income_prefixes[1]))
+            expense_prefix=prefix+' - '
+            cur.execute(f'DELETE FROM cash_expenses WHERE store={ph()} AND flow_date={ph()} AND substr(notes,1,{ph()})={ph()}',
+                        (store,row['closure_date'],len(expense_prefix),expense_prefix))
+            cur.execute(f'INSERT INTO closure_report_deleted_tokens(submission_token) VALUES({ph()}) ON CONFLICT(submission_token) DO NOTHING',(row['submission_token'],))
+            cur.execute(f'DELETE FROM closure_report_expenses WHERE report_id={ph()}',(report_id,))
+            cur.execute(f'DELETE FROM closure_report_exports WHERE report_id={ph()}',(report_id,))
+            cur.execute(f'DELETE FROM closure_reports WHERE id={ph()} AND store={ph()}',(report_id,store))
+            api['_log'](cur,store=store,username=user['username'],action='DELETE',category='CASSA',name=prefix+' - eliminato con entrate e uscite collegate',delta=0)
+        return RedirectResponse('/report-chiusura?'+urlencode(dict(store=store,deleted='true'))+'#closing-history',303)
     @app.post('/report-chiusura/salva')
     async def save(request:Request):
         user,scope=auth(request); form=await request.form(); check(request,form)
@@ -163,10 +195,18 @@ def install(app, api):
             if value<=0: raise HTTPException(422,'Inserisci un importo maggiore di zero per la spesa.')
             expenses.append(dict(name=name,cents=value))
         with connect() as conn:
-            cur=conn.cursor(); known=channels(cur,store)
+            cur=conn.cursor()
+            if not using_postgres(): cur.execute('BEGIN IMMEDIATE')
+            if cur.execute(f'SELECT submission_token FROM closure_report_deleted_tokens WHERE submission_token={ph()}',(submission,)).fetchone():
+                raise HTTPException(409,'Questo report è stato eliminato. Ricarica la pagina per inserire una nuova chiusura.')
+            known=channels(cur,store)
             if len(set(raw_names))!=len(raw_names) or not {'POS','Cash'}.issubset(raw_names) or any(n not in known for n in raw_names):
                 raise HTTPException(422,'Canali non validi: ricarica il modulo.')
             lines=[dict(name=n,cents=cents(v)) for n,v in zip(raw_names,raw_amounts)]
+            # Cash entered is the money left after paying the daily expenses.
+            expense_total=sum(e['cents'] for e in expenses)
+            for line in lines:
+                if line['name']=='Cash': line['cents']+=expense_total
             total=sum(r['cents'] for r in lines)
             cur.execute(f"INSERT INTO closure_reports(store,closure_date,lines_json,total_cents,notes,created_by,created_at,submission_token) VALUES({','.join([ph()]*8)}) ON CONFLICT(submission_token) DO NOTHING RETURNING id",(store,day,json.dumps(lines,ensure_ascii=False),total,notes,user['username'],datetime.now(ZoneInfo('Europe/Rome')).isoformat(timespec='seconds'),submission))
             inserted=cur.fetchone()
