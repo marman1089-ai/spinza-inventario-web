@@ -1,0 +1,22 @@
+AGGIORNAMENTO CAMBIO NEGOZIO ADMIN
+
+Il selettore Negozio attivo mantiene la sezione aperta: incassi, uscite,
+storico mensile, report vendite, report chiusura, ordini, inventario,
+fatture, log e altre sezioni principali.
+Conserva date, periodo, filtri riutilizzabili, ancora e posizione di scorrimento.
+I riferimenti a singoli record del vecchio negozio vengono rimossi.
+I dati visualizzati vengono ricaricati per il nuovo negozio selezionato.
+
+INSTALLAZIONE
+A gestionale fermo, estrarre lo ZIP aggiornamento nella cartella con run.py,
+sovrascrivere i cinque file app/ inclusi e riavviare il gestionale.
+Conservare una copia dei file precedenti.
+Non sostituire il database spinza.db della propria installazione.
+
+Include le modifiche precedenti: spese sommate al Cash nelle nuove chiusure;
+eliminazione report in giornata per utenti, senza limite di data per admin,
+con eliminazione delle entrate e uscite collegate.
+
+Verifiche superate: mantenimento delle sezioni e dei filtri, cambio store,
+rimozione identificativi precedenti, sicurezza dei redirect e test report
+chiusura (salvataggio, importi, eliminazione e permessi).

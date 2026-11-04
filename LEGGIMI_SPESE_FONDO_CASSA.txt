@@ -1,0 +1,37 @@
+SPESE CON MODALITA E FONDO CASSA - REPORT CHIUSURA
+
+Per ogni spesa scegliere una delle tre modalita:
+1. Da sommare all'incasso Cash: se l'importo inserito in Cash non comprende
+   la spesa, il gestionale la aggiunge per ricostruire l'incasso.
+   Esempio Cash 100 + spesa 20: incasso Cash 120, netto incasso 100.
+2. Gia compresa nell'incasso: l'incasso inserito resta invariato.
+   Esempio Cash 100 + spesa 20 gia compresa: incasso Cash 100, netto 80.
+3. Dal fondo cassa: la spesa non modifica l'incasso e viene scalata dal
+   fondo iniziale richiesto dal modulo. Esempio fondo 100, spesa 20:
+   fondo rimasto 80. Il Cash inserito deve escludere il fondo cassa.
+Le modalita possono essere combinate nello stesso report.
+
+Il fondo iniziale e obbligatorio quando vi sono spese dal fondo.
+Le spese dal fondo non possono superare il fondo iniziale.
+Il fondo e riferito al singolo report: il residuo viene mostrato e salvato,
+non viene trasferito automaticamente alle chiusure successive.
+Tutte le spese rimangono registrate nelle uscite admin, anche quelle dal
+fondo, con indicazione della provenienza. Il fondo non crea un incasso.
+Il netto del report sottrae solo le spese sostenute sull'incasso;
+la disponibilita del fondo viene mostrata separatamente.
+I report precedenti mantengono importi e calcoli storici.
+
+INSTALLAZIONE
+A gestionale fermo, estrarre aggiornamento_spese_fondo_cassa.zip nella
+cartella con run.py, sovrascrivere i sei file app/ inclusi e riavviare.
+Conservare una copia dei file precedenti.
+Non sostituire il database spinza.db della propria installazione.
+La tabella del fondo viene creata automaticamente al riavvio.
+Aggiornare la pagina del browser dopo il riavvio.
+
+Include eliminazione report con permessi e movimenti collegati,
+e mantenimento della pagina nel cambio negozio admin.
+Verifiche superate su SQLite: tre modalita, modalita miste, fondo esaurito,
+fondo mancante/insufficiente, valori non validi, salvataggi ripetuti,
+storico ed eliminazione. Verificati anche calcoli JavaScript del modulo,
+validazione del fondo e test cambio negozio.

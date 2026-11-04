@@ -2615,13 +2615,14 @@ def _query_url(path: str, **params) -> str:
 
 
 def _month_options_for_scope(cur, scope_store: str, selected_month: str = ''):
-    months = {selected_month or date.today().strftime('%Y-%m'), date.today().strftime('%Y-%m')}
+    months = {_rome_today().strftime('%Y-%m')}
+    if _valid_month_key(selected_month): months.add(selected_month)
     where_sql, params = _cash_scope_where(scope_store)
     for table_name in ('cash_entries', 'cash_expenses'):
         rows = _dict_rows(cur, f"SELECT flow_date FROM {table_name} WHERE {where_sql} ORDER BY flow_date DESC", params)
         for row in rows:
             flow_date = str(row.get('flow_date') or '').strip()
-            if len(flow_date) >= 7:
+            if _valid_month_key(flow_date[:7]):
                 months.add(flow_date[:7])
     ph = _ph()
     if scope_store == 'ALL':
@@ -2630,33 +2631,22 @@ def _month_options_for_scope(cur, scope_store: str, selected_month: str = ''):
         report_rows = _dict_rows(cur, f'SELECT month_key FROM sales_report_periods WHERE store={ph} ORDER BY month_key DESC', (scope_store,))
     for row in report_rows:
         key = str(row.get('month_key') or '').strip()
-        if len(key) == 7:
+        if _valid_month_key(key):
             months.add(key)
     if months:
         first_key = min(months)
         last_key = max(months)
-        first_d = _parse_date_safe(first_key + '-01', date.today().replace(month=1, day=1)).replace(day=1)
-        last_d = _parse_date_safe(last_key + '-01', date.today().replace(month=12, day=1)).replace(day=1)
+        first_d = _parse_date_safe(first_key + '-01', _rome_today().replace(month=1, day=1)).replace(day=1)
+        last_d = _parse_date_safe(last_key + '-01', _rome_today().replace(month=12, day=1)).replace(day=1)
     else:
-        today = date.today()
+        today = _rome_today()
         first_d = today.replace(month=1, day=1)
         last_d = today.replace(month=12, day=1)
     if first_d.year == last_d.year:
         first_d = first_d.replace(month=1, day=1)
         last_d = last_d.replace(month=12, day=1)
-    options = []
-    cursor = first_d
-    safety = 0
-    while cursor <= last_d and safety < 120:
-        key = cursor.strftime('%Y-%m')
-        options.append({'key': key, 'label': _month_label(key)})
-        safety += 1
-        if cursor.month == 12:
-            cursor = date(cursor.year + 1, 1, 1)
-        else:
-            cursor = date(cursor.year, cursor.month + 1, 1)
-    options.sort(key=lambda x: x['key'], reverse=True)
-    return options[:60]
+    keys=_month_keys_between(first_d.isoformat()[:7],last_d.isoformat()[:7])
+    return [{'key':key,'label':_month_label(key)} for key in reversed(keys)]
 
 
 
@@ -2698,6 +2688,7 @@ def _cash_month_summaries(cur, scope_store: str, limit: int | None = 120):
         if len(flow_date) < 7:
             continue
         month_key = flow_date[:7]
+        if not _valid_month_key(month_key): continue
         item = slot(month_key)
         item['income_total'] += float(row.get('amount') or 0)
         item['income_count'] += 1
@@ -2711,6 +2702,7 @@ def _cash_month_summaries(cur, scope_store: str, limit: int | None = 120):
             continue
         amount = float(row.get('amount') or 0)
         month_key = flow_date[:7]
+        if not _valid_month_key(month_key): continue
         item = slot(month_key)
         item['expense_total'] += amount
         item['expense_count'] += 1
@@ -2752,25 +2744,24 @@ def _cash_month_summaries(cur, scope_store: str, limit: int | None = 120):
     return rows[:safe_limit]
 
 
-def _month_keys_between(start_key: str, end_key: str, max_months: int = 600):
-    """Restituisce mesi YYYY-MM inclusivi, senza dipendere dal database."""
-    start_key = _month_key_from_value(start_key)
-    end_key = _month_key_from_value(end_key)
-    try:
-        cursor = datetime.strptime(start_key + '-01', '%Y-%m-%d').date()
-        end_d = datetime.strptime(end_key + '-01', '%Y-%m-%d').date()
-    except Exception:
-        cursor = date.today().replace(day=1)
-        end_d = cursor
-    if cursor > end_d:
-        cursor, end_d = end_d, cursor
-    out = []
-    safety = 0
-    while cursor <= end_d and safety < max(1, int(max_months or 600)):
-        out.append(cursor.strftime('%Y-%m'))
-        safety += 1
-        cursor = _next_month_start(cursor.strftime('%Y-%m'))
-    return out
+def _valid_month_key(value: str) -> bool:
+    if not re.fullmatch(r'[0-9]{4}-[0-9]{2}',value): return False
+    try: date.fromisoformat(value+'-01')
+    except ValueError: return False
+    return True
+
+
+def _month_keys_between(start_key: str, end_key: str, max_months: int | None = None):
+    """Inclusive calendar months, without silently dropping the newest months."""
+    if not _valid_month_key(start_key) or not _valid_month_key(end_key):
+        raise ValueError('Mese non valido.')
+    def ordinal(key):
+        year,month=map(int,key.split('-'))
+        return (year-1)*12+month-1
+    first,last=sorted((ordinal(start_key),ordinal(end_key)))
+    if max_months is not None and last-first+1>max_months:
+        raise ValueError('Intervallo mensile troppo ampio.')
+    return [f'{number//12+1:04d}-{number%12+1:02d}' for number in range(first,last+1)]
 
 
 def _cash_month_timeline(cur, scope_store: str, from_month: str = '', to_month: str = ''):
@@ -2778,13 +2769,13 @@ def _cash_month_timeline(cur, scope_store: str, from_month: str = '', to_month: 
     raw_rows = _cash_month_summaries(cur, scope_store, limit=None)
     by_key = {str(row.get('key') or ''): dict(row) for row in raw_rows if row.get('key')}
     existing_keys = sorted(by_key)
-    today_key = date.today().strftime('%Y-%m')
-    available_from = existing_keys[0] if existing_keys else today_key
-    available_to = existing_keys[-1] if existing_keys else today_key
+    today_key = _rome_today().strftime('%Y-%m')
+    available_from = min(existing_keys+[today_key])
+    available_to = max(existing_keys+[today_key])
 
     def valid_or(raw, fallback):
         raw = str(raw or '').strip()
-        return raw if re.match(r'^\d{4}-\d{2}$', raw) else fallback
+        return raw if _valid_month_key(raw) else fallback
 
     selected_from = valid_or(from_month, available_from)
     selected_to = valid_or(to_month, available_to)
@@ -2816,6 +2807,7 @@ def _cash_month_timeline(cur, scope_store: str, from_month: str = '', to_month: 
                 'expense_breakdown_count': 0,
                 'expense_top_family': {'name': '—', 'total': 0.0, 'share_pct': 0.0},
             }
+        row['is_current']=key==today_key
         row['detail_url'] = _query_url(
             '/gestionale',
             period_type='month',
@@ -2836,9 +2828,16 @@ def _cash_month_timeline(cur, scope_store: str, from_month: str = '', to_month: 
     totals['avg_income'] = round(totals['income_total'] / len(rows), 2) if rows else 0.0
     totals['avg_expense'] = round(totals['expense_total'] / len(rows), 2) if rows else 0.0
 
-    options = [{'key': key, 'label': _month_label(key)} for key in all_keys]
+    current_year,current_month=map(int,today_key.split('-'))
+    current_index=current_year*12+current_month
+    def proximity(key):
+        year,month=map(int,key.split('-'))
+        offset=year*12+month-current_index
+        return abs(offset),offset>0
+    rows.sort(key=lambda row:proximity(row['key']))
+    options = [{'key': key, 'label': _month_label(key)} for key in sorted(all_keys,key=proximity)]
     return {
-        'rows': rows,  # ordine cronologico: dal più vecchio al più recente
+        'rows': rows,
         'totals': totals,
         'options': options,
         'selected_from': selected_from,
@@ -5582,6 +5581,45 @@ def logout(request: Request):
     request.session.clear()
     return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
+def _store_switch_url(next_url: str, store: str) -> str:
+    """Keep the current section and reusable filters when changing store."""
+    fallback='/inventario'
+    try:
+        target=urlsplit(next_url or fallback)
+    except ValueError:
+        return fallback
+    pages={
+        '/workspace','/inventario-home','/inventario','/inventario/conteggio',
+        '/inventario/report','/inventario/fatture-settimana','/inventario-controllo',
+        '/admin','/admin/fasce-orarie','/admin/cassa','/admin/cassa/report',
+        '/admin/controllo','/admin/digitalizzazione','/report-documenti',
+        '/logs','/logs/inventario','/logs/ordini','/logs/documenti',
+        '/gestionale','/gestionale/dashboard','/gestionale/incassi','/gestionale/uscite',
+        '/gestionale/storico-mensile','/gestionale/report-vendite',
+        '/gestionale/archiviati','/gestionale/panoramica-totale',
+        '/fatture','/fatture/importa-prodotti','/chiusure','/report-chiusura',
+        '/spese-secondarie','/ordini','/ordini/preparazione','/ordinati',
+        '/storico-ordini','/scambi','/file-archiviati','/profile','/updates',
+        '/digitalizza/archivio/tutti',
+    }
+    if target.scheme or target.netloc or target.path not in pages or '\\' in next_url:
+        return fallback
+    path=target.path
+    # Entity IDs and success/error messages belong to the previous store.
+    filters={'area','day','start','end','q','month','month_key','period_type',
+        'anchor_date','flow_date','payment_method','category','cat','loc','only_low',
+        'from_month','to_month','year','week','days','supplier','q_date','kind',
+        'limit','q_user','q_day','q_area','q_group'}
+    params=[(k,v) for k,v in parse_qsl(target.query,keep_blank_values=True) if k in filters]
+    store_pages={'/inventario','/inventario/conteggio','/inventario/report',
+        '/inventario/fatture-settimana','/inventario-controllo','/admin',
+        '/admin/fasce-orarie','/gestionale/report-vendite',
+        '/gestionale/panoramica-totale','/report-chiusura'}
+    if path in store_pages:
+        params.append(('store',store))
+    return path+('?' + urlencode(params) if params else '')+('#'+quote(target.fragment,safe='-_.~') if target.fragment else '')
+
+
 @app.post("/set-active-store")
 def set_active_store(request: Request, store: str = Form(...), next_url: str = Form("/inventario")):
     user = require_login(request)
@@ -5595,17 +5633,7 @@ def set_active_store(request: Request, store: str = Form(...), next_url: str = F
         store = "spinza"
     request.session["active_store"] = store
 
-    # Keep the selected page's filters, but discard identifiers from the old store.
-    target = urlsplit(next_url or '/inventario')
-    safe_pages = {'/inventario','/inventario/conteggio','/inventario/report',
-        '/admin','/admin/fasce-orarie','/logs','/gestionale','/fatture','/chiusure','/report-chiusura','/spese-secondarie'}
-    path = target.path if not target.netloc and not target.scheme and target.path in safe_pages else '/inventario'
-    params = [(k,v) for k,v in parse_qsl(target.query) if k in ('area','day','start','end','q')]
-    if path in ('/inventario/conteggio','/inventario/report') and store == 'ALL':
-        path = '/inventario'
-    if path in ('/inventario/conteggio','/inventario/report','/admin/fasce-orarie'):
-        params.append(('store',store))
-    return RedirectResponse(path + ('?' + urlencode(params) if params else ''),status_code=303)
+    return RedirectResponse(_store_switch_url(next_url,store),status_code=303)
 
 
 

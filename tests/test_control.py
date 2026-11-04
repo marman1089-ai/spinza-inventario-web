@@ -211,11 +211,15 @@ class ControlTests(unittest.TestCase):
         self.assertIn('Esclusi dai totali',r.text)
         self.assertEqual(self.client.get('/report-documenti?download=csv').status_code,200)
 
-    def test_document_upload_opens_digital_review(self):
+    def test_document_upload_returns_to_original_archive(self):
         for kind,form in [('fatture',{'supplier':'Fornitore','doc_date':self.dt}),('chiusure',{'closure_date':self.dt}),('spese-secondarie',{'expense_date':self.dt})]:
             r=self.client.post(f'/{kind}/upload',data=form,files=[('files',('test.pdf',self.pdf(),'application/pdf'))],follow_redirects=False)
             self.assertEqual(r.status_code,303,r.text)
-            self.assertIn(f'/documenti/{kind}/',r.headers['location'])
+            self.assertEqual(r.headers['location'],f'/{kind}')
+            table=control.KINDS[kind][0]
+            stored=self.sql(f'SELECT data FROM {table}')
+            self.assertEqual(len(stored),1)
+            self.assertTrue(bytes(stored[0]['data']).startswith(b'%PDF'))
 
     def test_transfer_creation_remembers_exact_source(self):
         r=self.client.post('/scambi/submit',data={'from_store':'spinza','to_store':'reburger_maggio',f'qty_{self.sala}':'2'},follow_redirects=False)
@@ -267,20 +271,25 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(self.client.post('/ordinati/arrivato',data={'order_id':oid,f'received_{line["id"]}':'3'},follow_redirects=False).status_code,303)
         self.assertEqual((self.qty(self.pid),self.qty(self.sala)),(20,2))
 
-    def test_staff_photo_only_and_originals_protected(self):
+    def test_staff_original_archives_and_same_day_delete(self):
         self.login(2)
         for kind in ['fatture','chiusure','spese-secondarie']:
             r=self.client.post(f'/{kind}/upload',files=[('files',('photo.pdf',self.pdf(),'application/pdf'))],follow_redirects=False)
             self.assertEqual(r.status_code,303,r.text)
-            url=r.headers['location'];did=int(url.split('/')[-1])
-            page=self.client.get(url)
-            self.assertEqual(page.status_code,200,page.text[:200])
-            self.assertNotIn('Foto / PDF originale',page.text)
-            self.assertNotIn('id="document-form"',page.text)
-            self.assertEqual(self.client.get(f'/{kind}/{did}').status_code,403)
-            self.assertEqual(self.client.get(f'/registrazione-digitale/{kind}').status_code,403)
+            self.assertEqual(r.headers['location'],f'/{kind}')
+            table=control.KINDS[kind][0]
+            did=self.sql(f'SELECT id FROM {table}')[0]['id']
+            self.assertEqual(self.client.get(r.headers['location']).status_code,200)
+            original=self.client.get(f'/{kind}/{did}')
+            self.assertEqual(original.status_code,200)
+            self.assertTrue(original.content.startswith(b'%PDF'))
+            self.login(3)
+            self.assertEqual(self.client.get(f'/{kind}/{did}').status_code,404)
+            self.login(2)
+            self.assertEqual(self.client.get(f'/registrazione-digitale/{kind}').status_code,410)
             self.assertEqual(self.save(did,kind).status_code,403)
-            self.assertEqual(self.client.post(f'/{kind}/{did}/delete').status_code,403)
+            self.assertEqual(self.client.post(f'/{kind}/{did}/delete',follow_redirects=False).status_code,303)
+            self.assertEqual(self.sql(f'SELECT id FROM {table}'),[])
         self.assertEqual(self.client.get('/fatture/importa-prodotti').status_code,403)
         self.assertEqual(self.client.get('/fatture/importa-prodotti/draft/1/image').status_code,403)
 
@@ -301,14 +310,10 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(self.save(did,revision=1).status_code,303)
         self.assertEqual(len(self.sql('SELECT id FROM digital_document_versions')),1)
 
-    def test_admin_can_create_written_record_without_original(self):
+    def test_retired_manual_digitization_cannot_create_records(self):
         r=self.client.post('/registrazione-digitale/spese-secondarie',data={'doc_date':self.dt,'supplier':'Supermercato','amount':'25.00','description':'Detersivo'},follow_redirects=False)
-        self.assertEqual(r.status_code,303,r.text)
-        page=self.client.get(r.headers['location'])
-        self.assertIn('senza foto',page.text)
-        self.assertNotIn('Foto / PDF originale',page.text)
-        row=self.sql('SELECT * FROM secondary_expenses')[0]
-        self.assertIsNone(row['data'])
+        self.assertEqual(r.status_code,410,r.text)
+        self.assertEqual(self.sql('SELECT id FROM secondary_expenses'),[])
         from app.document_jobs import enqueue_history
         self.assertEqual(enqueue_history(),0)
 
@@ -336,8 +341,9 @@ class ControlTests(unittest.TestCase):
         self.assertIn('Panini',page.text)
         self.assertEqual(self.client.get('/admin/cassa/report?start=2026-10-12&end=2026-10-12&download=csv').status_code,200)
         self.login(2)
-        for url in ['/admin/cassa','/admin/cassa/report','/admin/digitalizzazione']:
+        for url in ['/admin/cassa','/admin/cassa/report']:
             self.assertEqual(self.client.get(url).status_code,403)
+        self.assertEqual(self.client.get('/admin/digitalizzazione').status_code,410)
 
     def test_product_period_crossing_month_not_split(self):
         raw=b',,,Excl. ,Incl. discount,Incl. discount\nName,ID,Total,Incl. VAT,Excl. VAT,Incl. VAT\nOG SMASH,1,10,100,90,99\nTotal,,10,100,90,99\n'

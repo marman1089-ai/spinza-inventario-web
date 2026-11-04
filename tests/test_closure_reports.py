@@ -164,6 +164,52 @@ class ReportsTest(unittest.TestCase):
             page=routes['/report-chiusura'](Request(session),month='2026-11',deleted=True)
             self.assertIn('data-date="2026-11-02" data-count="0"',page)
             self.assertIn('Report eliminato',page)
+            # Each expense can use a different source, without counting the float as revenue.
+            base=[('closure_date','2026-11-02'),('channel','POS'),('amount','50'),('channel','Cash'),('amount','100')]
+            cases=[
+                ('d', [('expense_name','Ghiaccio'),('expense_amount','20'),('expense_mode','add_to_cash')],17000,15000,None),
+                ('e', [('expense_name','Ghiaccio'),('expense_amount','20'),('expense_mode','included')],15000,13000,None),
+                ('f', [('expense_name','Ghiaccio'),('expense_amount','20'),('expense_mode','cash_fund'),('cash_fund_initial','100')],15000,15000,8000),
+                ('g', [('expense_name','A'),('expense_amount','20'),('expense_mode','add_to_cash'),('expense_name','B'),('expense_amount','10'),('expense_mode','included'),('expense_name','C'),('expense_amount','30'),('expense_mode','cash_fund'),('cash_fund_initial','100')],17000,14000,7000),
+                ('h', [('expense_name','Ghiaccio'),('expense_amount','20'),('expense_mode','cash_fund'),('cash_fund_initial','20')],15000,15000,0),
+            ]
+            for letter,extra,total,net,remaining in cases:
+                payload=base+[('submission',letter*43)]+extra
+                self.assertEqual(send('/report-chiusura/salva',payload).status_code,303)
+                send('/report-chiusura/salva',payload)
+                # Inspect persisted values and the rendered totals.
+                with db.connect() as c:
+                    row=c.cursor().execute('SELECT * FROM closure_reports WHERE submission_token=?',(letter*43,)).fetchone()
+                    self.assertEqual(row['total_cents'],total)
+                    import json
+                    expense=c.cursor().execute('SELECT lines_json FROM closure_report_expenses WHERE report_id=?',(row['id'],)).fetchone()
+                    expenses=json.loads(expense['lines_json'])
+                    self.assertEqual(total-sum(e['cents'] for e in expenses if e['mode']!='cash_fund'),net)
+                    fund=c.cursor().execute('SELECT initial_cents FROM closure_report_cash_funds WHERE report_id=?',(row['id'],)).fetchone()
+                    self.assertEqual(fund['initial_cents']-sum(e['cents'] for e in expenses if e['mode']=='cash_fund') if fund else None,remaining)
+                    income=c.cursor().execute('SELECT SUM(amount) AS total FROM cash_entries WHERE notes=?',(f"Report chiusura #{row['id']}",)).fetchone()
+                    self.assertAlmostEqual(income['total'],total/100)
+                    self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM cash_expenses WHERE store=? AND notes LIKE ?',('spinza',f"Report chiusura #{row['id']} - %")).fetchone()['n'],len(expenses))
+                page=routes['/report-chiusura'](Request(session))
+                self.assertIn('Incassi al netto delle spese sull’incasso',page)
+                if remaining is not None:
+                    self.assertIn('Fondo cassa iniziale:',page)
+                    self.assertIn(('%.2f'%(remaining/100)).replace('.',','),page)
+                self.assertEqual(delete(row['id']).status_code,303)
+                with db.connect() as c:
+                    self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM closure_report_cash_funds WHERE report_id=?',(row['id'],)).fetchone()['n'],0)
+            for extra in [
+                [('expense_mode','bad')],
+                [('expense_mode','included'),('expense_mode','cash_fund')],
+                [('expense_mode','cash_fund')],
+                [('expense_mode','cash_fund'),('cash_fund_initial','19,99')],
+                [('expense_mode','cash_fund'),('cash_fund_initial','-100')],
+            ]:
+                payload=base+[('submission','z'*43),('expense_name','Test'),('expense_amount','20')]+extra
+                with self.assertRaises(HTTPException) as error: send('/report-chiusura/salva',payload)
+                self.assertEqual(error.exception.status_code,422)
+            with db.connect() as c:
+                self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM closure_reports').fetchone()['n'],0)
             user.clear()
             with self.assertRaises(HTTPException):routes['/report-chiusura'](Request(session))
 if __name__=='__main__': unittest.main()

@@ -12,7 +12,7 @@
       const parts=value.split('.');
       total+=Number(parts[0])*100+Number(((parts[1]||'')+'00').slice(0,2));
     });
-    let expenses=0,expensesValid=true;
+    let expenses=0,added=0,fundExpenses=0,expensesValid=true;
     form.querySelectorAll('.closing-expense-row').forEach(row=>{
       const name=row.querySelector('[name=expense_name]'),amount=row.querySelector('[name=expense_amount]');
       const value=amount.value.trim().replace(',','.');
@@ -23,14 +23,34 @@
       const parts=value.split('.'),cents=Number(parts[0])*100+Number(((parts[1]||'')+'00').slice(0,2));
       if(cents<=0){amount.setCustomValidity('Inserisci un importo maggiore di zero.');expensesValid=false;}
       expenses+=cents;
+      const mode=row.querySelector('[name=expense_mode]').value;
+      if(mode==='add_to_cash')added+=cents;
+      else if(mode==='cash_fund')fundExpenses+=cents;
     });
     const money=c=>new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR'}).format(c/100);
+    const fundInput=document.getElementById('closing-fund-initial');
+    const needsFund=fundExpenses>0;
+    document.getElementById('closing-fund-section').hidden=!needsFund;
+    fundInput.required=needsFund;fundInput.disabled=!needsFund;fundInput.setCustomValidity('');
+    let fundInitial=0,fundValid=true;
+    if(needsFund){
+      const value=fundInput.value.trim().replace(',','.');
+      if(!/^\d{1,9}(?:\.\d{1,2})?$/.test(value)){
+        fundInput.setCustomValidity('Inserisci il fondo cassa iniziale.');fundValid=false;
+      }else{
+        const parts=value.split('.');fundInitial=Number(parts[0])*100+Number(((parts[1]||'')+'00').slice(0,2));
+        if(fundInitial<fundExpenses){fundInput.setCustomValidity('Le spese superano il fondo cassa iniziale.');fundValid=false;}
+      }
+    }
+    document.getElementById('closing-fund-expenses').textContent=money(fundExpenses);
+    document.getElementById('closing-fund-remaining').textContent=fundValid?money(fundInitial-fundExpenses):'Controlla il fondo iniziale';
     document.getElementById('closing-expense-total').textContent=expensesValid?money(expenses):'Controlla le spese';
-    document.getElementById('closing-net-total').textContent=valid&&expensesValid?money(total):'Controlla gli importi';
-    out.textContent=valid&&expensesValid?money(total+expenses):'Controlla gli importi';
+    document.getElementById('closing-net-total').textContent=valid&&expensesValid?money(total+added-(expenses-fundExpenses)):'Controlla gli importi';
+    out.textContent=valid&&expensesValid?money(total+added):'Controlla gli importi';
   }
   form.addEventListener('input',()=>{dirty=true;update();});
-  form.addEventListener('submit',()=>{dirty=false;document.getElementById('save-closing').disabled=true;});
+  form.addEventListener('change',()=>{dirty=true;update();});
+  form.addEventListener('submit',event=>{update();if(!form.reportValidity()){event.preventDefault();return;}dirty=false;document.getElementById('save-closing').disabled=true;});
   document.querySelectorAll('.closing-add form,.closing-channel-action').forEach(channelForm=>{
     channelForm.addEventListener('submit',event=>{
       if(dirty&&!window.confirm('Hai importi o note non salvati. Continuando perderai queste modifiche. Vuoi continuare?')){event.preventDefault();return;}

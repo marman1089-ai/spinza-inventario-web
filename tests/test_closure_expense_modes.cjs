@@ -1,0 +1,18 @@
+const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict'),path=require('path');
+const input=value=>({value,validation:'',setCustomValidity(message){this.validation=message;}});
+const amounts=[input('50'),input('100')],name=input('Spesa'),amount=input('20'),mode=input('add_to_cash');
+const row={querySelector(selector){return {'[name=expense_name]':name,'[name=expense_amount]':amount,'[name=expense_mode]':mode}[selector];},cloneNode(){return this;}};
+const listeners={};
+const form={querySelectorAll(selector){return selector==='[name=amount]'?amounts:[row];},addEventListener(type,fn){listeners[type]=fn;}};
+const elements={'closing-form':form,'closing-expense-rows':{firstElementChild:row,addEventListener(){}},'add-closing-expense':{addEventListener(){}}};
+for(const id of ['closing-total','closing-expense-total','closing-net-total','closing-fund-initial','closing-fund-section','closing-fund-expenses','closing-fund-remaining'])elements[id]=input('');
+const document={getElementById(id){return elements[id];},querySelectorAll(){return [];}};
+vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../app/static/js/closure-reports.js'),'utf8'),{document,Intl});
+const number=id=>Number(elements[id].textContent.replace(/[^0-9,-]/g,'').replace(',','.'));
+assert.equal(number('closing-total'),170);assert.equal(number('closing-net-total'),150);
+mode.value='included';listeners.change();assert.equal(number('closing-total'),150);assert.equal(number('closing-net-total'),130);
+mode.value='cash_fund';listeners.change();assert.equal(elements['closing-fund-section'].hidden,false);assert.equal(elements['closing-fund-initial'].required,true);assert.ok(elements['closing-fund-initial'].validation);
+elements['closing-fund-initial'].value='100';listeners.input();assert.equal(number('closing-total'),150);assert.equal(number('closing-net-total'),150);assert.equal(number('closing-fund-remaining'),80);assert.equal(elements['closing-fund-initial'].validation,'');
+elements['closing-fund-initial'].value='19,99';listeners.input();assert.ok(elements['closing-fund-initial'].validation);
+mode.value='included';listeners.change();assert.equal(elements['closing-fund-section'].hidden,true);assert.equal(elements['closing-fund-initial'].disabled,true);assert.equal(elements['closing-fund-initial'].validation,'');
+console.log('Calcoli browser verificati per tutte le modalità e validazione del fondo.');

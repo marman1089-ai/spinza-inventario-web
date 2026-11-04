@@ -28,6 +28,7 @@ def init_reports():
         cur.execute('CREATE INDEX IF NOT EXISTS ix_closure_reports_scope ON closure_reports(store,closure_date)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_exports (report_id INTEGER PRIMARY KEY)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_expenses (report_id INTEGER PRIMARY KEY, lines_json TEXT NOT NULL)')
+        cur.execute('CREATE TABLE IF NOT EXISTS closure_report_cash_funds (report_id INTEGER PRIMARY KEY, initial_cents BIGINT NOT NULL)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_deleted_tokens (submission_token TEXT PRIMARY KEY)')
 
 
@@ -64,6 +65,8 @@ def install(app, api):
         expenses=cur.execute(f'SELECT lines_json FROM closure_report_expenses WHERE report_id={ph()}',(row['id'],)).fetchone()
         for expense in json.loads(expenses['lines_json']) if expenses else []:
             notes=f"Report chiusura #{row['id']} - {expense['name']}"
+            if expense.get('mode')=='cash_fund': notes+=' (fondo cassa)'
+            elif expense.get('mode')=='included': notes+=' (già compresa nell’incasso)'
             api['_insert_cash_expense_compat'](cur,row['store'],row['closure_date'],'Spese chiusura','','',expense['cents']/100,notes,row['created_by'])
             api['_log'](cur,store=row['store'],username=row['created_by'],action='CREATE',category='CASSA',name=notes,delta=-expense['cents']/100)
     @app.on_event('startup')
@@ -98,6 +101,7 @@ def install(app, api):
             if end: sql+=f' AND closure_date<={ph()}'; params.append(end)
             rows=cur.execute(sql+' ORDER BY closure_date DESC,id DESC',tuple(params)).fetchall()
             expense_rows=cur.execute(f'SELECT e.report_id,e.lines_json FROM closure_report_expenses e JOIN closure_reports r ON r.id=e.report_id WHERE r.store={ph()}',(selected,)).fetchall()
+            fund_rows=cur.execute(f'SELECT f.report_id,f.initial_cents FROM closure_report_cash_funds f JOIN closure_reports r ON r.id=f.report_id WHERE r.store={ph()}',(selected,)).fetchall()
             counts=cur.execute(f'SELECT closure_date,COUNT(*) AS n FROM closure_reports WHERE store={ph()} AND closure_date>={ph()} AND closure_date<={ph()} GROUP BY closure_date',(selected,anchor.isoformat(),anchor.replace(day=calendar.monthrange(anchor.year,anchor.month)[1]).isoformat())).fetchall()
         by_day={str(r['closure_date']):r['n'] for r in counts}
         def link(**kw): return '/report-chiusura?'+urlencode(dict(store=selected,**kw))
@@ -114,11 +118,15 @@ def install(app, api):
         month_names=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre']
         calendar_ctx=dict(weeks=weeks,month_label=month_names[anchor.month-1]+' '+str(anchor.year),month_value=anchor.strftime('%Y-%m'),prev_month=link(month=prev.strftime('%Y-%m'))+'#closing-calendar',next_month=link(month=next_month.strftime('%Y-%m'))+'#closing-calendar',current_month=link(month=today.strftime('%Y-%m'))+'#closing-calendar',selected_day=selected_day.isoformat() if selected_day else '',form_date=selected_day.isoformat() if selected_day else today.isoformat(),days_saved=len(by_day))
         expenses_by_id={r['report_id']:json.loads(r['lines_json']) for r in expense_rows}
+        funds_by_id={r['report_id']:r['initial_cents'] for r in fund_rows}
         for r in rows:
             r['lines']=json.loads(r['lines_json'])
             r['expenses']=expenses_by_id.get(r['id'],[])
             r['expense_total']=sum(e['cents'] for e in r['expenses'])
-            r['net_cents']=r['total_cents']-r['expense_total']
+            r['fund_expenses']=sum(e['cents'] for e in r['expenses'] if e.get('mode')=='cash_fund')
+            r['fund_initial']=funds_by_id.get(r['id'])
+            r['fund_remaining']=r['fund_initial']-r['fund_expenses'] if r['fund_initial'] is not None else None
+            r['net_cents']=r['total_cents']-(r['expense_total']-r['fund_expenses'])
             r['can_delete']=can_delete(user,r)
         return api['render']('closure_reports.html',**calendar_ctx,request=request,user=user,brand=scope,stores=stores,selected=selected,channels=names,rows=rows,start=start,end=end,saved=saved,deleted=deleted,today=datetime.now(ZoneInfo('Europe/Rome')).date().isoformat(),csrf=token(request),submission=secrets.token_urlsafe(32),period_total=sum(r['total_cents'] for r in rows))
     @app.post('/report-chiusura/canali')
@@ -166,6 +174,7 @@ def install(app, api):
             cur.execute(f'DELETE FROM cash_expenses WHERE store={ph()} AND flow_date={ph()} AND substr(notes,1,{ph()})={ph()}',
                         (store,row['closure_date'],len(expense_prefix),expense_prefix))
             cur.execute(f'INSERT INTO closure_report_deleted_tokens(submission_token) VALUES({ph()}) ON CONFLICT(submission_token) DO NOTHING',(row['submission_token'],))
+            cur.execute(f'DELETE FROM closure_report_cash_funds WHERE report_id={ph()}',(report_id,))
             cur.execute(f'DELETE FROM closure_report_expenses WHERE report_id={ph()}',(report_id,))
             cur.execute(f'DELETE FROM closure_report_exports WHERE report_id={ph()}',(report_id,))
             cur.execute(f'DELETE FROM closure_reports WHERE id={ph()} AND store={ph()}',(report_id,store))
@@ -186,14 +195,24 @@ def install(app, api):
         expense_names=form.getlist('expense_name'); expense_amounts=form.getlist('expense_amount')
         if len(expense_names)!=len(expense_amounts) or len(expense_names)>100:
             raise HTTPException(422,'Elenco spese non valido (massimo 100 voci).')
+        expense_modes=form.getlist('expense_mode')
+        # Older open forms keep the previous add-to-Cash behaviour.
+        if not expense_modes: expense_modes=['add_to_cash']*len(expense_names)
+        if len(expense_modes)!=len(expense_names): raise HTTPException(422,'Modalità spese non valide.')
         expenses=[]
-        for name,amount in zip(expense_names,expense_amounts):
+        for name,amount,mode in zip(expense_names,expense_amounts,expense_modes):
+            if mode not in ('add_to_cash','included','cash_fund'): raise HTTPException(422,'Modalità spesa non valida.')
             name=' '.join(str(name).split()); amount=str(amount).strip()
             if not name and not amount: continue
             if not name or len(name)>120: raise HTTPException(422,'Inserisci il nome della spesa (massimo 120 caratteri).')
             value=cents(amount)
             if value<=0: raise HTTPException(422,'Inserisci un importo maggiore di zero per la spesa.')
-            expenses.append(dict(name=name,cents=value))
+            expenses.append(dict(name=name,cents=value,mode=mode))
+        fund_expenses=sum(e['cents'] for e in expenses if e['mode']=='cash_fund')
+        fund_initial=None
+        if fund_expenses:
+            fund_initial=cents(form.get('cash_fund_initial',''))
+            if fund_expenses>fund_initial: raise HTTPException(422,'Le spese dal fondo cassa superano il fondo iniziale.')
         with connect() as conn:
             cur=conn.cursor()
             if not using_postgres(): cur.execute('BEGIN IMMEDIATE')
@@ -203,14 +222,16 @@ def install(app, api):
             if len(set(raw_names))!=len(raw_names) or not {'POS','Cash'}.issubset(raw_names) or any(n not in known for n in raw_names):
                 raise HTTPException(422,'Canali non validi: ricarica il modulo.')
             lines=[dict(name=n,cents=cents(v)) for n,v in zip(raw_names,raw_amounts)]
-            # Cash entered is the money left after paying the daily expenses.
-            expense_total=sum(e['cents'] for e in expenses)
+            # Only expenses not yet included in the entered revenue increase Cash.
+            expense_total=sum(e['cents'] for e in expenses if e['mode']=='add_to_cash')
             for line in lines:
                 if line['name']=='Cash': line['cents']+=expense_total
             total=sum(r['cents'] for r in lines)
             cur.execute(f"INSERT INTO closure_reports(store,closure_date,lines_json,total_cents,notes,created_by,created_at,submission_token) VALUES({','.join([ph()]*8)}) ON CONFLICT(submission_token) DO NOTHING RETURNING id",(store,day,json.dumps(lines,ensure_ascii=False),total,notes,user['username'],datetime.now(ZoneInfo('Europe/Rome')).isoformat(timespec='seconds'),submission))
             inserted=cur.fetchone()
             if inserted:
+                if fund_initial is not None:
+                    cur.execute(f'INSERT INTO closure_report_cash_funds(report_id,initial_cents) VALUES({ph()},{ph()})',(inserted['id'],fund_initial))
                 cur.execute(f'INSERT INTO closure_report_expenses(report_id,lines_json) VALUES({ph()},{ph()})',(inserted['id'],json.dumps(expenses,ensure_ascii=False)))
             row=cur.execute(f'SELECT * FROM closure_reports WHERE submission_token={ph()}',(submission,)).fetchone()
             export_report(cur,row)

@@ -326,9 +326,9 @@
       {% endif %}
       {% if user and user.role == 'admin' %}
       <form class="brand-store-switch" method="post" action="/set-active-store">
-        <input type="hidden" name="next_url" value="/inventario">
+        <input type="hidden" name="next_url" value="{{ request.url.path if request is defined and request.url is defined else '/inventario' }}{{ ('?' ~ request.url.query) if request is defined and request.url is defined and request.url.query else '' }}">
         <label for="header-store">Negozio attivo</label>
-        <select id="header-store" name="store" aria-label="Cambia negozio" onchange="this.form.next_url.value=location.pathname+location.search;this.form.classList.add('is-switching');this.form.querySelector('label').textContent='Cambio negozio…';this.form.submit()">
+        <select id="header-store" name="store" aria-label="Cambia negozio" onchange="this.form.next_url.value=location.pathname+location.search+location.hash;try{sessionStorage.setItem('scrollY',String(window.scrollY||0))}catch(e){}this.form.classList.add('is-switching');this.form.querySelector('label').textContent='Cambio negozio…';this.form.submit()">
           {% set chosen = header_store or active_store or 'spinza' %}
           {% for key,label in [('spinza',"Spinza Santa'Agostino"),('reburger_maggio','Reburger San Felice'),('reburger_camaldoli','Reburger Camaldoli'),('ALL','Tutti i negozi')] %}
           <option value="{{ key }}" {% if chosen==key %}selected{% endif %}>{{ label }}</option>{% endfor %}
@@ -527,7 +527,7 @@
       if(form && form.querySelector){
         const inp = form.querySelector('input[name="next_url"]');
         if(inp){
-          inp.value = window.location.pathname + window.location.search;
+          inp.value = window.location.pathname + window.location.search + window.location.hash;
         }
       }
     }, true);

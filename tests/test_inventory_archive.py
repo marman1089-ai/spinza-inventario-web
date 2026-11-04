@@ -148,7 +148,7 @@ class InventoryTests(unittest.TestCase):
         from unittest.mock import MagicMock
         conn=MagicMock();conn.autocommit=True
         pool=MagicMock();pool.connection.return_value.__enter__.return_value=conn
-        with patch.dict('os.environ',{'DATABASE_URL':'postgresql://test.invalid/database'}), patch.object(db,'_get_postgres_pool',return_value=pool):
+        with patch.dict('os.environ',{'DATABASE_URL':'postgresql://test.invalid/database'}), patch.object(db,'psycopg',MagicMock()), patch.object(db,'_get_postgres_pool',return_value=pool):
             with db.connect() as acquired:
                 self.assertFalse(acquired.autocommit)
                 acquired.autocommit=True  # Simulate init_db DDL mode.

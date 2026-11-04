@@ -24,6 +24,7 @@
   .mt-timeline::before{content:"";position:absolute;left:9px;top:14px;bottom:14px;width:2px;background:linear-gradient(180deg,var(--brand-primary),var(--brand-cyan),var(--brand-blue));border-radius:999px;opacity:.62;box-shadow:0 0 18px color-mix(in srgb,var(--brand-cyan) 28%,transparent)}
   .mt-month{position:relative;display:grid;grid-template-columns:minmax(150px,1.15fr) repeat(3,minmax(120px,.8fr)) auto;gap:10px;align-items:center;padding:13px 14px!important;margin:0!important;transition:transform .24s var(--ease-ui),border-color .2s ease,box-shadow .24s var(--ease-ui)!important}
   .mt-month::before{content:"";position:absolute;left:-23px;top:50%;width:12px;height:12px;transform:translateY(-50%);border-radius:50%;background:var(--brand-panel-solid);border:3px solid var(--brand-cyan);box-shadow:0 0 0 4px color-mix(in srgb,var(--brand-cyan) 13%,transparent),0 0 18px color-mix(in srgb,var(--brand-cyan) 40%,transparent)}
+  .mt-current{border-color:var(--brand-cyan)!important}.mt-current .mt-month-title strong{color:var(--brand-cyan)}
   .mt-month:hover{transform:translateX(3px);border-color:var(--brand-line-strong)!important;box-shadow:var(--shadow-hover)!important}
   .mt-month-title strong{font-size:17px;text-transform:capitalize}
   .mt-month-title .meta{font-size:11px;color:var(--brand-muted);margin-top:4px}
@@ -54,7 +55,7 @@
           <div class="muted">Entrate e uscite mese per mese · {{ scope_label }}</div>
         </div>
       </div>
-      <div class="mt-range-note">Ordine cronologico dal mese più vecchio al più recente. I mesi senza movimenti restano visibili con valore zero.</div>
+      <div class="mt-range-note">Prima il mese corrente, poi i mesi più vicini fino ai più lontani. A parità di distanza viene prima il mese passato. I mesi senza movimenti restano visibili con valore zero.</div>
     </div>
     <a href="/gestionale" class="btn2" style="text-decoration:none;">← Dashboard</a>
   </div>
@@ -106,9 +107,9 @@
 {% if timeline.rows %}
   <div class="mt-timeline" aria-label="Storico mensile">
     {% for row in timeline.rows %}
-      <div class="card mt-month">
+      <div class="card mt-month{% if row.is_current %} mt-current{% endif %}" data-month="{{ row.key }}">
         <div class="mt-month-title">
-          <strong>{{ row.label }}</strong>
+          <strong>{{ row.label }}</strong>{% if row.is_current %} <span class="pill">Mese corrente</span>{% endif %}
           <div class="meta">{{ row.income_count }} entrate · {{ row.expense_count }} uscite{% if brand == 'ALL' and row.store_labels != '—' %} · {{ row.store_labels }}{% endif %}</div>
         </div>
         <div class="mt-amount mt-income"><span>Entrate</span><strong>{{ money(row.income_total) }}</strong></div>
@@ -121,7 +122,7 @@
 {% else %}
   <div class="card mt-empty">
     <h3 style="margin-top:0;">Nessun mese disponibile</h3>
-    <div class="muted">Quando inserirai entrate o uscite, compariranno qui in ordine cronologico.</div>
+    <div class="muted">Quando inserirai entrate o uscite, compariranno qui partendo dai mesi più vicini a quello corrente.</div>
   </div>
 {% endif %}
 {% endblock %}
