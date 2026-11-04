@@ -1,0 +1,56 @@
+FONDO CASSA E BILANCIO CASH RISERVATO ADMIN
+
+FONDO ANCHE SENZA SPESE
+Nel modulo Report chiusura il Fondo cassa iniziale e sempre visibile,
+sopra le spese. Puoi registrare il fondo senza aggiungere spese e anche
+con incassi pari a zero. Il fondo viene salvato nel report e nello storico;
+non viene sommato agli incassi e non genera entrate o uscite.
+Se non ci sono spese dal fondo, il campo e facoltativo.
+Il fondo e riferito al singolo report, non trasferito automaticamente
+al successivo. Inserisci in Cash solo l'incasso, senza il fondo.
+
+CONTROLLO CASH SOLO ADMIN
+Apri una chiusura nello storico: trovi Bilancio contanti - Solo admin.
+Contanti attesi = Cash incassato + fondo iniziale - spese della chiusura.
+POS, carte e altri canali non partecipano al controllo.
+La modalita Da sommare al Cash ricostruisce prima il Cash incassato;
+le spese vengono poi sottratte una sola volta nel controllo finale.
+Inserisci i contanti effettivamente contati, comprensivi del fondo registrato:
+il programma mostra se manca denaro, se c'e un'eccedenza o se la cassa e pari.
+Se il fondo non e stato indicato, il controllo considera zero come fondo
+e lo segnala: escludi dal conteggio eventuali fondi non registrati.
+
+Puoi salvare e aggiornare conteggio e nota privata anche il giorno dopo
+o piu avanti, senza il limite di giornata previsto per l'eliminazione utenti.
+Puoi salvare soltanto una nota, senza avere ancora il conteggio.
+La verifica mostra autore e data dell'ultimo aggiornamento.
+Conteggi, differenze e note private non sono inviati nelle pagine utenti;
+il server impedisce agli utenti di salvare queste verifiche.
+Il controllo vale per ciascun report, non e una somma dei fondi ripetuti
+nei report di giorni diversi.
+
+SPESE NEL GESTIONALE ADMIN
+Tutte le spese del report vengono registrate nelle uscite admin, anche
+quelle gia comprese nell'incasso e quelle pagate dal fondo cassa.
+La nota della spesa specifica quando proviene dal fondo.
+Il controllo cash non aggiunge movimenti contabili: un ammanco annotato
+non viene trasformato automaticamente in una nuova spesa.
+Salvare nuovamente una verifica o reinviare una chiusura non duplica
+entrate e uscite. Eliminando un report vengono rimosse anche le sue
+verifiche private e i movimenti collegati, secondo i permessi previsti.
+
+INSTALLAZIONE
+A gestionale fermo, estrarre aggiornamento_bilancio_cash_admin.zip nella
+cartella con run.py, sovrascrivere i file app/ inclusi e riavviare.
+Le tabelle necessarie vengono create automaticamente al riavvio.
+Conservare una copia dei file precedenti. Non sostituire il database
+spinza.db della propria installazione. Aggiornare il browser con Ctrl+F5.
+Include tutte le modifiche precedenti, compreso lo storico mensile.
+
+VERIFICHE SUPERATE
+Salvataggio fondo senza spese, fondo senza incassi, fondo zero, valori
+non validi, modalita spese miste, calcolo solo Cash, ammanchi/eccedenze,
+cassa pari, aggiornamento il giorno dopo, nota senza conteggio,
+riservatezza utenti, blocco modifiche non-admin, negozio non consentito,
+CSRF, eliminazione verifiche col report e nessuna duplicazione contabile.
+Eseguiti anche i controlli JavaScript su fondo facoltativo e calcoli.

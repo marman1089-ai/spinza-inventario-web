@@ -30,10 +30,10 @@
     const money=c=>new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR'}).format(c/100);
     const fundInput=document.getElementById('closing-fund-initial');
     const needsFund=fundExpenses>0;
-    document.getElementById('closing-fund-section').hidden=!needsFund;
-    fundInput.required=needsFund;fundInput.disabled=!needsFund;fundInput.setCustomValidity('');
+    document.getElementById('closing-fund-section').hidden=false;
+    fundInput.required=needsFund;fundInput.disabled=false;fundInput.setCustomValidity('');
     let fundInitial=0,fundValid=true;
-    if(needsFund){
+    if(needsFund||fundInput.value.trim()){
       const value=fundInput.value.trim().replace(',','.');
       if(!/^\d{1,9}(?:\.\d{1,2})?$/.test(value)){
         fundInput.setCustomValidity('Inserisci il fondo cassa iniziale.');fundValid=false;
@@ -43,7 +43,7 @@
       }
     }
     document.getElementById('closing-fund-expenses').textContent=money(fundExpenses);
-    document.getElementById('closing-fund-remaining').textContent=fundValid?money(fundInitial-fundExpenses):'Controlla il fondo iniziale';
+    document.getElementById('closing-fund-remaining').textContent=fundValid?(fundInput.value.trim()?money(fundInitial-fundExpenses):'Non indicato'):'Controlla il fondo iniziale';
     document.getElementById('closing-expense-total').textContent=expensesValid?money(expenses):'Controlla le spese';
     document.getElementById('closing-net-total').textContent=valid&&expensesValid?money(total+added-(expenses-fundExpenses)):'Controlla gli importi';
     out.textContent=valid&&expensesValid?money(total+added):'Controlla gli importi';

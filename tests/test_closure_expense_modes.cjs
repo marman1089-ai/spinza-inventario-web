@@ -14,5 +14,8 @@ mode.value='included';listeners.change();assert.equal(number('closing-total'),15
 mode.value='cash_fund';listeners.change();assert.equal(elements['closing-fund-section'].hidden,false);assert.equal(elements['closing-fund-initial'].required,true);assert.ok(elements['closing-fund-initial'].validation);
 elements['closing-fund-initial'].value='100';listeners.input();assert.equal(number('closing-total'),150);assert.equal(number('closing-net-total'),150);assert.equal(number('closing-fund-remaining'),80);assert.equal(elements['closing-fund-initial'].validation,'');
 elements['closing-fund-initial'].value='19,99';listeners.input();assert.ok(elements['closing-fund-initial'].validation);
-mode.value='included';listeners.change();assert.equal(elements['closing-fund-section'].hidden,true);assert.equal(elements['closing-fund-initial'].disabled,true);assert.equal(elements['closing-fund-initial'].validation,'');
+mode.value='included';listeners.change();assert.equal(elements['closing-fund-section'].hidden,false);assert.equal(elements['closing-fund-initial'].disabled,false);assert.equal(elements['closing-fund-initial'].validation,'');
+name.value='';amount.value='';elements['closing-fund-initial'].value='100,50';listeners.input();assert.equal(number('closing-fund-remaining'),100.5);assert.equal(number('closing-total'),150);assert.equal(elements['closing-fund-initial'].required,false);
+elements['closing-fund-initial'].value='-1';listeners.input();assert.ok(elements['closing-fund-initial'].validation);
+elements['closing-fund-initial'].value='';listeners.input();assert.equal(elements['closing-fund-initial'].validation,'');assert.equal(elements['closing-fund-remaining'].textContent,'Non indicato');
 console.log('Calcoli browser verificati per tutte le modalità e validazione del fondo.');

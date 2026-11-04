@@ -28,6 +28,7 @@ def init_reports():
         cur.execute('CREATE INDEX IF NOT EXISTS ix_closure_reports_scope ON closure_reports(store,closure_date)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_exports (report_id INTEGER PRIMARY KEY)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_expenses (report_id INTEGER PRIMARY KEY, lines_json TEXT NOT NULL)')
+        cur.execute('CREATE TABLE IF NOT EXISTS closure_report_cash_checks (report_id INTEGER PRIMARY KEY, counted_cents BIGINT, notes TEXT NOT NULL, updated_by TEXT NOT NULL, updated_at TEXT NOT NULL)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_cash_funds (report_id INTEGER PRIMARY KEY, initial_cents BIGINT NOT NULL)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_deleted_tokens (submission_token TEXT PRIMARY KEY)')
 
@@ -102,6 +103,9 @@ def install(app, api):
             rows=cur.execute(sql+' ORDER BY closure_date DESC,id DESC',tuple(params)).fetchall()
             expense_rows=cur.execute(f'SELECT e.report_id,e.lines_json FROM closure_report_expenses e JOIN closure_reports r ON r.id=e.report_id WHERE r.store={ph()}',(selected,)).fetchall()
             fund_rows=cur.execute(f'SELECT f.report_id,f.initial_cents FROM closure_report_cash_funds f JOIN closure_reports r ON r.id=f.report_id WHERE r.store={ph()}',(selected,)).fetchall()
+            cash_checks={}
+            if user.get('role')=='admin':
+                cash_checks={r['report_id']:r for r in cur.execute(f'SELECT c.* FROM closure_report_cash_checks c JOIN closure_reports r ON r.id=c.report_id WHERE r.store={ph()}',(selected,)).fetchall()}
             counts=cur.execute(f'SELECT closure_date,COUNT(*) AS n FROM closure_reports WHERE store={ph()} AND closure_date>={ph()} AND closure_date<={ph()} GROUP BY closure_date',(selected,anchor.isoformat(),anchor.replace(day=calendar.monthrange(anchor.year,anchor.month)[1]).isoformat())).fetchall()
         by_day={str(r['closure_date']):r['n'] for r in counts}
         def link(**kw): return '/report-chiusura?'+urlencode(dict(store=selected,**kw))
@@ -128,6 +132,12 @@ def install(app, api):
             r['fund_remaining']=r['fund_initial']-r['fund_expenses'] if r['fund_initial'] is not None else None
             r['net_cents']=r['total_cents']-(r['expense_total']-r['fund_expenses'])
             r['can_delete']=can_delete(user,r)
+            if user.get('role')=='admin':
+                cash=sum(line['cents'] for line in r['lines'] if line['name']=='Cash')
+                r['expected_cash']=cash+(r['fund_initial'] or 0)-r['expense_total']
+                r['cash_check']=cash_checks.get(r['id'])
+                counted=r['cash_check']['counted_cents'] if r['cash_check'] else None
+                r['cash_difference']=counted-r['expected_cash'] if counted is not None else None
         return api['render']('closure_reports.html',**calendar_ctx,request=request,user=user,brand=scope,stores=stores,selected=selected,channels=names,rows=rows,start=start,end=end,saved=saved,deleted=deleted,today=datetime.now(ZoneInfo('Europe/Rome')).date().isoformat(),csrf=token(request),submission=secrets.token_urlsafe(32),period_total=sum(r['total_cents'] for r in rows))
     @app.post('/report-chiusura/canali')
     async def add_channel(request:Request):
@@ -174,12 +184,36 @@ def install(app, api):
             cur.execute(f'DELETE FROM cash_expenses WHERE store={ph()} AND flow_date={ph()} AND substr(notes,1,{ph()})={ph()}',
                         (store,row['closure_date'],len(expense_prefix),expense_prefix))
             cur.execute(f'INSERT INTO closure_report_deleted_tokens(submission_token) VALUES({ph()}) ON CONFLICT(submission_token) DO NOTHING',(row['submission_token'],))
+            cur.execute(f'DELETE FROM closure_report_cash_checks WHERE report_id={ph()}',(report_id,))
             cur.execute(f'DELETE FROM closure_report_cash_funds WHERE report_id={ph()}',(report_id,))
             cur.execute(f'DELETE FROM closure_report_expenses WHERE report_id={ph()}',(report_id,))
             cur.execute(f'DELETE FROM closure_report_exports WHERE report_id={ph()}',(report_id,))
             cur.execute(f'DELETE FROM closure_reports WHERE id={ph()} AND store={ph()}',(report_id,store))
             api['_log'](cur,store=store,username=user['username'],action='DELETE',category='CASSA',name=prefix+' - eliminato con entrate e uscite collegate',delta=0)
         return RedirectResponse('/report-chiusura?'+urlencode(dict(store=store,deleted='true'))+'#closing-history',303)
+    @app.post('/report-chiusura/verifica-cash')
+    async def check_cash(request:Request):
+        user,scope=auth(request)
+        if user.get('role')!='admin': raise HTTPException(403,'Verifica contanti riservata all’admin.')
+        form=await request.form(); check(request,form)
+        store=str(form.get('store','')); allowed(scope,store)
+        try: report_id=int(str(form.get('report_id','')))
+        except ValueError: raise HTTPException(422,'Report non valido.')
+        raw_counted=str(form.get('counted_cash','')).strip()
+        counted=cents(raw_counted) if raw_counted else None
+        notes=str(form.get('cash_notes','')).strip()
+        if len(notes)>2000: raise HTTPException(422,'Note troppo lunghe (massimo 2000 caratteri).')
+        if counted is None and not notes: raise HTTPException(422,'Inserisci i contanti contati oppure una nota.')
+        with connect() as conn:
+            cur=conn.cursor()
+            if not using_postgres(): cur.execute('BEGIN IMMEDIATE')
+            lock=' FOR UPDATE' if using_postgres() else ''
+            row=cur.execute(f'SELECT id,closure_date FROM closure_reports WHERE id={ph()} AND store={ph()}'+lock,(report_id,store)).fetchone()
+            if not row: raise HTTPException(404,'Report non trovato.')
+            cur.execute(f'INSERT INTO closure_report_cash_checks(report_id,counted_cents,notes,updated_by,updated_at) VALUES({",".join([ph()]*5)}) ON CONFLICT(report_id) DO UPDATE SET counted_cents=excluded.counted_cents,notes=excluded.notes,updated_by=excluded.updated_by,updated_at=excluded.updated_at',
+                        (report_id,counted,notes,user['username'],datetime.now(ZoneInfo('Europe/Rome')).isoformat(timespec='seconds')))
+            api['_log'](cur,store=store,username=user['username'],action='UPDATE',category='CASSA',name=f'Verifica contanti report #{report_id}',delta=0)
+        return RedirectResponse('/report-chiusura?'+urlencode(dict(store=store,day=str(row['closure_date'])))+f'#cash-check-{report_id}',303)
     @app.post('/report-chiusura/salva')
     async def save(request:Request):
         user,scope=auth(request); form=await request.form(); check(request,form)
@@ -210,8 +244,9 @@ def install(app, api):
             expenses.append(dict(name=name,cents=value,mode=mode))
         fund_expenses=sum(e['cents'] for e in expenses if e['mode']=='cash_fund')
         fund_initial=None
-        if fund_expenses:
-            fund_initial=cents(form.get('cash_fund_initial',''))
+        raw_fund=str(form.get('cash_fund_initial','')).strip()
+        if raw_fund or fund_expenses:
+            fund_initial=cents(raw_fund)
             if fund_expenses>fund_initial: raise HTTPException(422,'Le spese dal fondo cassa superano il fondo iniziale.')
         with connect() as conn:
             cur=conn.cursor()
