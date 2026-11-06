@@ -68,7 +68,7 @@ def install(app, api):
             notes=f"Report chiusura #{row['id']} - {expense['name']}"
             if expense.get('mode')=='cash_fund': notes+=' (fondo cassa)'
             elif expense.get('mode')=='included': notes+=' (già compresa nell’incasso)'
-            api['_insert_cash_expense_compat'](cur,row['store'],row['closure_date'],'Spese chiusura','','',expense['cents']/100,notes,row['created_by'])
+            api['_insert_cash_expense_compat'](cur,row['store'],row['closure_date'],'Spese chiusura','','Contanti',expense['cents']/100,notes,row['created_by'])
             api['_log'](cur,store=row['store'],username=row['created_by'],action='CREATE',category='CASSA',name=notes,delta=-expense['cents']/100)
     @app.on_event('startup')
     def startup_reports():

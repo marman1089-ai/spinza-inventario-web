@@ -354,6 +354,7 @@
         <div class="nav-dd-panel">
           <a href="/gestionale">📊 Dashboard gestionale</a>
           {% if user.role == 'admin' %}
+            <a href="/contanti-nei-negozi">💶 Contanti nei negozi</a>
             <a href="/gestionale/incassi">💶 Incassi</a>
             <a href="/gestionale/uscite">💸 Uscite</a>
             <a href="/gestionale/storico-mensile">🗓️ Storico mensile</a>
@@ -409,6 +410,7 @@
         <a href="/gestionale" onclick="closeMobileMenu()">📊 Dashboard gestionale</a>
         {% if user.role == 'admin' %}
           <a href="/gestionale/incassi" onclick="closeMobileMenu()">💶 Incassi</a>
+          <a href="/contanti-nei-negozi" onclick="closeMobileMenu()">💶 Contanti nei negozi</a>
           <a href="/gestionale/uscite" onclick="closeMobileMenu()">💸 Uscite</a>
           <a href="/gestionale/storico-mensile" onclick="closeMobileMenu()">🗓️ Storico mensile</a>
           <a href="/gestionale/report-vendite" onclick="closeMobileMenu()">📈 Report vendite</a>

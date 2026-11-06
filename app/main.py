@@ -353,6 +353,9 @@ def _render_admin(request: Request, *, user, users, msg=None, error=None):
             d["online"] = False
         decorated.append(d)
 
+    from .admin_dashboard import dashboard
+    with connect() as conn:
+        admin_dashboard=dashboard(conn.cursor(),_current_store_scope(request,user),STORES,_rome_today())
     return render(
         "admin.html",
         user=user,
@@ -361,6 +364,8 @@ def _render_admin(request: Request, *, user, users, msg=None, error=None):
         error=error,
         stores=STORES,
         admin_store=admin_store,
+        admin_dashboard=admin_dashboard,
+        request=request,
         brand=admin_store,
     )
 
@@ -3742,9 +3747,11 @@ async def gestionale_delete_month(request: Request):
 
     with connect() as conn:
         cur = conn.cursor()
+        linked=cur.execute(f"SELECT id FROM cash_expenses WHERE {where_sql} AND flow_date>={ph} AND flow_date<{ph} AND id IN (SELECT expense_id FROM cash_treasury_payments WHERE cancelled_at='' AND expense_id IS NOT NULL) LIMIT 1",params+(start_s,end_s)).fetchone()
+        if linked:raise HTTPException(409,'Il mese contiene pagamenti tracciati nei contanti dei negozi. Le correzioni vanno fatte da Contanti nei negozi, senza cancellare la provenienza del denaro.')
         stats = _cash_month_delete_stats(cur, brand, month_key)
         cur.execute(f"DELETE FROM cash_entries WHERE {where_sql} AND flow_date >= {ph} AND flow_date < {ph}", params + (start_s, end_s))
-        cur.execute(f"DELETE FROM cash_expenses WHERE {where_sql} AND flow_date >= {ph} AND flow_date < {ph}", params + (start_s, end_s))
+        cur.execute(f"DELETE FROM cash_expenses WHERE {where_sql} AND flow_date >= {ph} AND flow_date < {ph} AND id NOT IN (SELECT expense_id FROM cash_treasury_payments WHERE cancelled_at='' AND expense_id IS NOT NULL)", params + (start_s, end_s))
         log_store = brand if brand != 'ALL' else (request.session.get('active_store') or user.get('store') or 'spinza')
         _log(
             cur,
@@ -4625,7 +4632,7 @@ async def archived_store_import_txt(request: Request, store_key: str):
                 for flow_date in unique_days:
                     cur.execute(f"DELETE FROM cash_entries WHERE store={ph} AND flow_date={ph}", (store_key, flow_date))
                     if include_expenses:
-                        cur.execute(f"DELETE FROM cash_expenses WHERE store={ph} AND flow_date={ph}", (store_key, flow_date))
+                        cur.execute(f"DELETE FROM cash_expenses WHERE store={ph} AND flow_date={ph} AND id NOT IN (SELECT expense_id FROM cash_treasury_payments WHERE cancelled_at='' AND expense_id IS NOT NULL)", (store_key, flow_date))
             for block in blocks:
                 flow_date = str(block.get('date') or '').strip()
                 if not flow_date:
@@ -4692,7 +4699,7 @@ def archived_store_delete_expense(request: Request, store_key: str, expense_id: 
     with connect() as conn:
         cur = conn.cursor()
         if _is_archived_store_key(store_key, cur):
-            cur.execute(f"DELETE FROM cash_expenses WHERE id={ph} AND store={ph}", (expense_id, store_key))
+            cur.execute(f"DELETE FROM cash_expenses WHERE id={ph} AND store={ph} AND id NOT IN (SELECT expense_id FROM cash_treasury_payments WHERE cancelled_at='' AND expense_id IS NOT NULL)", (expense_id, store_key))
     return RedirectResponse(f'/gestionale/archiviati/{store_key}', status_code=HTTP_303_SEE_OTHER)
 
 
@@ -4984,7 +4991,7 @@ async def cash_entries_import_txt(request: Request):
                 for store_key, flow_date in unique_days:
                     cur.execute(f"DELETE FROM cash_entries WHERE store={ph} AND flow_date={ph}", (store_key, flow_date))
                     if include_expenses:
-                        cur.execute(f"DELETE FROM cash_expenses WHERE store={ph} AND flow_date={ph}", (store_key, flow_date))
+                        cur.execute(f"DELETE FROM cash_expenses WHERE store={ph} AND flow_date={ph} AND id NOT IN (SELECT expense_id FROM cash_treasury_payments WHERE cancelled_at='' AND expense_id IS NOT NULL)", (store_key, flow_date))
 
             for block in blocks:
                 flow_date = str(block.get('date') or '').strip()
@@ -5262,13 +5269,16 @@ def cash_expenses_delete(request: Request, expense_id: int):
     ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
+        from .cash_treasury import expense_is_linked
+        if expense_is_linked(cur,expense_id):
+            raise HTTPException(409,'Questa uscita è collegata ai contanti nei negozi. Per correggerla usa Annulla pagamento nella sezione Contanti nei negozi.')
         row = cur.execute(
             f"SELECT id, store, flow_date, category, amount FROM cash_expenses WHERE id={ph} AND {where_sql}",
             (expense_id, *params),
         ).fetchone()
         if row:
             row = dict(row)
-            cur.execute(f"DELETE FROM cash_expenses WHERE id={ph}", (expense_id,))
+            cur.execute(f"DELETE FROM cash_expenses WHERE id={ph} AND id NOT IN (SELECT expense_id FROM cash_treasury_payments WHERE cancelled_at='' AND expense_id IS NOT NULL)", (expense_id,))
             _log(
                 cur,
                 store=row.get('store') or (user.get('store') or 'spinza'),
@@ -5589,7 +5599,7 @@ def _store_switch_url(next_url: str, store: str) -> str:
     except ValueError:
         return fallback
     pages={
-        '/workspace','/inventario-home','/inventario','/inventario/conteggio',
+        '/contanti-nei-negozi','/workspace','/inventario-home','/inventario','/inventario/conteggio',
         '/inventario/report','/inventario/fatture-settimana','/inventario-controllo',
         '/admin','/admin/fasce-orarie','/admin/cassa','/admin/cassa/report',
         '/admin/controllo','/admin/digitalizzazione','/report-documenti',
@@ -5609,7 +5619,7 @@ def _store_switch_url(next_url: str, store: str) -> str:
     filters={'area','day','start','end','q','month','month_key','period_type',
         'anchor_date','flow_date','payment_method','category','cat','loc','only_low',
         'from_month','to_month','year','week','days','supplier','q_date','kind',
-        'limit','q_user','q_day','q_area','q_group'}
+        'limit','q_user','q_day','q_area','q_group','q_product','asof','who'}
     params=[(k,v) for k,v in parse_qsl(target.query,keep_blank_values=True) if k in filters]
     store_pages={'/inventario','/inventario/conteggio','/inventario/report',
         '/inventario/fatture-settimana','/inventario-controllo','/admin',
@@ -6032,6 +6042,8 @@ async def archive_text_save(request: Request, file_id: int):
         if not ((row.get("content_type") or "").lower().startswith("text/") or row["filename"].lower().endswith((".txt", ".md", ".csv", ".log"))) or row["size_bytes"] > 1024*1024 or len(content)>1024*1024:
             return RedirectResponse(_archive_back_url(row.get("folder_id"), error="Testo troppo grande o formato non modificabile."), status_code=303)
         cur.execute(f"UPDATE archive_files SET data={ph}, size_bytes={ph} WHERE store={ph} AND id={ph}", (content, len(content), scope, file_id))
+        cur.execute(f"DELETE FROM admin_file_index WHERE kind='archivio' AND file_id={ph}",(file_id,))
+        cur.execute(f"UPDATE archive_files SET ts={ph} WHERE id={ph}",(datetime.now(ZoneInfo('UTC')).isoformat(timespec='microseconds'),file_id))
     return RedirectResponse(_archive_back_url(row.get("folder_id"), ok="Modifiche al testo salvate."), status_code=303)
 
 
@@ -6057,6 +6069,8 @@ async def archive_file_replace(request: Request, file_id: int):
         name = _archive_clean_name(upload.filename, "file")
         mime = upload.content_type or "application/octet-stream"
         cur.execute(f"UPDATE archive_files SET filename={ph}, data={ph}, size_bytes={ph}, content_type={ph} WHERE store={ph} AND id={ph}", (name, raw, len(raw), mime, scope, file_id))
+        cur.execute(f"DELETE FROM admin_file_index WHERE kind='archivio' AND file_id={ph}",(file_id,))
+        cur.execute(f"UPDATE archive_files SET ts={ph} WHERE id={ph}",(datetime.now(ZoneInfo('UTC')).isoformat(timespec='microseconds'),file_id))
     return RedirectResponse(_archive_back_url(parent, ok="File sostituito senza cambiare posizione."), status_code=303)
 
 
@@ -7207,11 +7221,21 @@ def _logs_sql_date_filter(using_pg: bool, field: str = "ts"):
     return f"substr({field}, 1, 10) = {_ph()}"
 
 
-def _log_groups(store):
+def _inventory_log_condition():
+    # A warehouse log must identify an inventory area or an inventory product.
+    prefix="split_part(logs.name, ' | ', 1)" if using_postgres() else "CASE WHEN instr(logs.name,' | ')>0 THEN substr(logs.name,1,instr(logs.name,' | ')-1) ELSE logs.name END"
+    return f"""(UPPER(category) NOT IN ('CASSA','USCITE','CASSA ARCHIVIATA','USCITE ARCHIVIATE','CONTANTI','CHIUSURE','FATTURE','SPESE','ORDINI','ORDER')
+        AND UPPER(action) NOT LIKE 'ORDER_%%' AND UPPER(action) NOT LIKE 'DOC_%%'
+        AND name NOT LIKE 'Report chiusura #%%'
+        AND (area IN ('bibite','prodotti') OR EXISTS (SELECT 1 FROM products p
+            WHERE p.store=logs.store AND p.category=logs.category AND (p.name=logs.name OR p.name={prefix}))))"""
+
+
+def _log_groups(store,section=None):
     ph = _ph()
     with connect() as conn:
         rows = conn.cursor().execute(
-            "SELECT DISTINCT category FROM logs" + (f" WHERE store={ph}" if store != "ALL" else "") + " ORDER BY category",
+            "SELECT DISTINCT category FROM logs WHERE " + (_inventory_log_condition() if section=="inventory" else "1=1") + (f" AND store={ph}" if store != "ALL" else "") + " ORDER BY category",
             (store,) if store != "ALL" else (),
         ).fetchall()
     return [r['category'] for r in rows if r['category']]
@@ -7226,6 +7250,7 @@ def _fetch_logs(
     q_day: str = "",
     q_area: str = "",
     q_group: str = "",
+    q_product: str = "",
 ):
     """Legge i log filtrando per sezione, utente e giorno.
 
@@ -7243,7 +7268,7 @@ def _fetch_logs(
     elif section == "docs":
         section_cond = doc_cond
     else:
-        section_cond = f"(NOT {order_cond} AND NOT {doc_cond})"
+        section_cond = _inventory_log_condition()
 
     where = [section_cond]
     params = []
@@ -7264,8 +7289,15 @@ def _fetch_logs(
 
     q_day = (q_day or "").strip()
     if q_day:
-        where.append(_logs_sql_date_filter(using_pg, "ts"))
-        params.append(q_day)
+        try: log_day=date.fromisoformat(q_day)
+        except ValueError: raise HTTPException(422,'Giorno non valido.')
+        if not 1900<=log_day.year<=9998: raise HTTPException(422,'Giorno non valido.')
+        start=datetime.combine(log_day,datetime.min.time(),tzinfo=ZoneInfo('Europe/Rome')).astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
+        end=datetime.combine(log_day+timedelta(days=1),datetime.min.time(),tzinfo=ZoneInfo('Europe/Rome')).astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
+        where.extend([f'ts>={ph}',f'ts<{ph}']);params.extend([start.strftime('%Y-%m-%d %H:%M:%S'),end.strftime('%Y-%m-%d %H:%M:%S')])
+    if q_product.strip():
+        value=q_product.strip().upper().replace('!','!!').replace('%','!%').replace('_','!_')
+        where.append(f"UPPER(name) LIKE {ph} ESCAPE '!'");params.append('%'+value+'%')
 
     if q_group:
         where.append(f"category={ph}")
@@ -7289,7 +7321,8 @@ def _fetch_logs(
     # In alcuni ambienti (soprattutto Postgres) il parametro bindato dentro LIMIT
     # può generare errori (500). Usiamo quindi un LIMIT inserito come intero già
     # validato per evitare Internal Server Error.
-    safe_limit = int(limit)
+    try: safe_limit=max(1,min(1000,int(limit)))
+    except (TypeError,ValueError): safe_limit=500
 
     with connect() as conn:
         cur = conn.cursor()
@@ -7323,7 +7356,7 @@ def logs_home(request: Request):
 
 
 @app.get("/logs/inventario", response_class=HTMLResponse)
-def logs_inventory_page(request: Request, limit: int = 500, q_user: str = "", q_day: str = "", q_area: str = "", q_group: str = ""):
+def logs_inventory_page(request: Request, limit: int = 500, q_user: str = "", q_day: str = "", q_area: str = "", q_group: str = "", q_product: str = ""):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -7331,7 +7364,7 @@ def logs_inventory_page(request: Request, limit: int = 500, q_user: str = "", q_
         return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
 
     active_store = _normalize_active_store_for_admin(request)
-    rows = _fetch_logs(store=active_store, limit=limit, section="inventory", q_user=q_user, q_day=q_day, q_area=q_area, q_group=q_group)
+    rows = _fetch_logs(store=active_store, limit=limit, section="inventory", q_user=q_user, q_day=q_day, q_area=q_area, q_group=q_group,q_product=q_product)
     brand = "ALL" if active_store == "ALL" else active_store
     return render(
         "logs_inventory.html",
@@ -7339,10 +7372,11 @@ def logs_inventory_page(request: Request, limit: int = 500, q_user: str = "", q_
         rows=rows,
         limit=limit,
         q_user=q_user,
+        q_product=q_product,
         q_day=q_day,
         q_area=q_area,
         q_group=q_group,
-        log_groups=_log_groups(active_store),
+        log_groups=_log_groups(active_store,section="inventory"),
         stores=STORES,
         brand=brand,
         active_store=active_store,
@@ -9898,3 +9932,9 @@ async def delete_inventory_report(request: Request, count_id: int):
 
 from .closure_reports import install as install_closure_reports
 install_closure_reports(app, globals())
+
+from .admin_dashboard import install as install_admin_dashboard
+install_admin_dashboard(app, globals())
+
+from .cash_treasury import install as install_cash_treasury
+install_cash_treasury(app, globals())

@@ -26,6 +26,8 @@ class ControlTests(unittest.TestCase):
         db.SQLITE_PATH=folder/(str(uuid.uuid4())+'.sqlite')
         db.init_db()
         control.init_control_db()
+        from app.closure_reports import init_reports
+        init_reports()
         # Migration is idempotent.
         control.init_control_db()
         with db.connect() as conn:

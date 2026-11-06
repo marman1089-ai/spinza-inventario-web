@@ -1,0 +1,111 @@
+CONTANTI NEI NEGOZI, PRESTITI E LOG MAGAZZINO
+
+DOVE SI TROVA
+Solo gli admin vedono Contanti nei negozi, dal menu Gestionale o dal
+pannello Admin. Con Tutti i negozi sono affiancati Piazza San Felice,
+Via Camaldoli e Spinza. Selezionando un negozio viene ampliato il suo saldo.
+Il registro dei movimenti e filtrato per negozio, periodo e persona.
+I prestiti restano una situazione complessiva delle due aziende.
+
+PRIMO AVVIO: SALDI INIZIALI
+Aprire Configura saldo iniziale su ogni scheda e inserire:
+- importo realmente contato, compreso l'eventuale fondo cassa;
+- data da cui iniziare la ricostruzione.
+Il saldo iniziale e riferito ALL'INIZIO di quella data, PRIMA dei movimenti
+della giornata. Da quella data inclusa vengono sommati gli incassi Cash
+e sottratte le uscite in contanti. I movimenti precedenti sono esclusi.
+Per registrare un pagamento passato occorre che la data iniziale della
+cassa d'origine non sia successiva a quel pagamento.
+Importi: usare 1000,00 oppure 1000.00, senza separatori delle migliaia.
+Prima di configurarli i saldi sono indicati come Da configurare, non zero.
+
+COME VIENE RICOSTRUITO IL CONTANTE
+Saldo iniziale + incassi con metodo Contanti/Cash - spese in contanti
+- quote prese per pagamenti - rimborsi inviati + rimborsi ricevuti
++/- rettifiche documentate.
+POS, carte e metodi diversi sono esclusi. Il fondo dei report chiusura
+non viene aggiunto di nuovo ogni giorno: e un conteggio, non un incasso.
+Le spese dei report vengono considerate anche nei vecchi record generati
+dal report con metodo di pagamento vuoto. Le altre vecchie spese senza
+metodo non vengono indovinate: compaiono tra le uscite da verificare.
+Se confermate in contanti, si possono collegare al pagamento specificando
+la provenienza. Le informazioni registrate determinano il saldo ricostruito.
+
+PAGARE UNA SPESA DA UNA, DUE O TRE CASSE
+Indicare nome, data effettiva, importo, azienda beneficiaria e negozio cui
+attribuire la spesa nel gestionale. Indicare quanto e stato preso da ogni
+negozio. La somma delle quote deve coincidere con l'importo totale.
+La disponibilita mostrata nei campi delle quote e quella di oggi; il server
+verifica anche che il pagamento sia sostenibile alla data storica scelta
+e nei giorni successivi fino a oggi. Non sono ammessi pagamenti futuri.
+Viene registrata UNA SOLA uscita nel gestionale admin, attribuita al negozio
+beneficiario. Il contante si riduce esclusivamente nelle casse d'origine.
+L'uscita non viene sottratta una seconda volta dalla cassa beneficiaria.
+Se l'uscita esiste gia, selezionarla nelle ultime 200 oppure indicarne il
+numero: importo e negozio beneficiario devono coincidere. Non si crea una
+seconda spesa e la data contabile originale resta invariata, mentre il
+registro contanti usa la data del pagamento effettivo.
+Le spese dei report di chiusura sono gia gestite e non vanno pagate di nuovo.
+
+AZIENDE E PRESTITI AUTOMATICI
+Spinza = S&C SRLS.
+Piazza San Felice e Via Camaldoli = Reburger Slow Fast Food.
+Ogni quota di un'azienda usata per una spesa dell'altra genera un prestito
+alla data del pagamento. Le quote dei due Reburger per una spesa Reburger
+non generano prestiti tra aziende.
+Esempio: spesa Reburger di 300 euro, presi 120 da San Felice, 80 da Camaldoli
+e 100 da Spinza. Le casse scendono rispettivamente di 120, 80 e 100 euro;
+Reburger deve restituire 100 euro a S&C SRLS. La spesa admin e una sola,
+pari a 300 euro. Per una spesa Spinza finanziata da Reburger vale il contrario.
+Le due posizioni reciproche restano separate, senza compensazione automatica.
+Il registro indica data, provenienza, causale, autore e importi.
+
+RIMBORSI, CONTEGGI E CORREZIONI
+Il rimborso indica negozio che restituisce, negozio ricevente, importo e data:
+sposta il contante e riduce il debito, senza creare una nuova spesa o una
+vendita. Non puo superare il prestito disponibile alla data scelta.
+Allinea al contante effettivamente contato registra la differenza dal saldo
+ricostruito a fine del giorno indicato, con un motivo obbligatorio. E una
+rettifica tracciata, non una spesa di fornitore. Dopo modifiche retroattive
+puo essere necessario riconciliare di nuovo un conteggio gia verificato.
+Dopo il primo movimento di tesoreria il saldo iniziale non viene riscritto:
+le correzioni del contante si fanno con nuovi conteggi, mantenendo lo storico.
+Annulla pagamento/rimborso serve per registrazioni sbagliate o mai avvenute,
+non per fingere una restituzione reale di denaro. Il motivo e obbligatorio
+e la registrazione annullata resta visibile. Un pagamento gia rimborsato
+non puo essere annullato prima di correggere i rimborsi collegati.
+Annullando il collegamento a un'uscita preesistente si ripristinano le sue
+informazioni originali; annullando una nuova spesa si elimina la sola uscita
+creata da quel pagamento. Le uscite collegate sono protette dalle normali
+eliminazioni: le correzioni si fanno dalla sezione Contanti nei negozi.
+
+LOG MAGAZZINO
+Movimenti magazzino contiene solo log riconducibili all'inventario, non
+report chiusura, incassi, pagamenti, prestiti o modifiche degli account.
+Si possono combinare giorno, persona, prodotto, Sala/Cucina e gruppo.
+Il filtro del giorno usa il calendario italiano Europe/Rome, anche quando
+il timestamp salvato e UTC. I movimenti monetari hanno un registro separato.
+
+INSTALLAZIONE
+Arrestare il gestionale e conservare una copia dei file precedenti.
+Estrarre aggiornamento_contanti_e_movimenti.zip nella cartella con run.py,
+sovrascrivere i file inclusi, aggiornare le dipendenze con:
+    python -m pip install -r requirements.txt
+AVVIA_SITO_WINDOWS.bat installa gia le dipendenze automaticamente.
+Su Render pubblicare anche requirements.txt e riavviare/ridistribuire.
+Le nuove tabelle e gli indici vengono creati automaticamente al riavvio.
+Aggiornare il browser con Ctrl+F5.
+NON sostituire il database spinza.db dell'installazione con quello dello ZIP.
+Entrambi i pacchetti contengono anche tutte le modifiche precedenti.
+
+VERIFICHE
+129 test dell'intero progetto superati; ripetuti e superati i 10 test
+specifici della tesoreria dopo le ultime protezioni dei collegamenti.
+Verificati: pagamenti da tre negozi, prestiti nei due versi, nessun prestito
+tra le due sedi Reburger, rimborsi, rettifiche, annullamenti, nessun doppio
+conteggio/spesa, incassi POS esclusi, date passate, saldo insufficiente
+nei giorni successivi, ripetizione dello stesso invio, pagamenti concorrenti,
+permessi admin, CSRF e filtri combinati dell'inventario. Verificati anche
+sintassi Python/JavaScript e impaginazione con dati dimostrativi.
+I test usano database SQLite temporanei; non e stato usato un database
+PostgreSQL di produzione o modificato il database dell'utente.

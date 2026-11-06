@@ -1,0 +1,74 @@
+NUOVA DASHBOARD ADMIN - CONTROLLO NEGOZI E INDICE FILE
+
+La nuova dashboard compare SOPRA le funzioni admin esistenti.
+Gli account, la lista utenti e le funzioni precedenti restano disponibili.
+
+CONTROLLO GIORNALIERO
+Con Negozio attivo = Tutti i negozi sono mostrate tre colonne affiancate,
+una per negozio. Ogni colonna contiene ieri e oggi, con:
+- report chiusura, importo e autore; collegamento al bilancio Cash;
+- foto/file delle chiusure, separati dai report manuali;
+- fatture e spese secondarie, con conteggi e nomi dei file.
+Il riferimento e la DATA DEL DOCUMENTO, non la data di caricamento.
+L'assenza di fatture/spese indica Nessun file, non una spesa mancante certa.
+Con un negozio selezionato viene mostrato solo quello, in una scheda
+piu ampia con ieri e oggi affiancati. Su schermi piccoli le schede si adattano.
+Usare Aggiorna situazione per ricaricare i conteggi correnti.
+
+LEGENDA RICERCABILE DEI FILE
+Comprende File archiviati, fatture, foto chiusure e spese secondarie.
+Mostra nome, negozio, categoria, cartella e sottocartelle, autore, data,
+dimensione, testo disponibile e anteprima. La ricerca trova nomi,
+fornitori e testo indicizzato. Sono disponibili filtro categoria e pagine
+di risultati, senza nascondere i file oltre la prima pagina.
+Gli originali si aprono anche dalla vista Tutti i negozi, senza dover
+cambiare negozio per ogni documento. Gli endpoint sono riservati agli admin;
+con un negozio selezionato non e possibile leggere i file degli altri.
+
+PRESTAZIONI E PRIMA PREPARAZIONE
+L'indice e le anteprime sono conservati nel database. La dashboard non
+legge il contenuto binario di ogni file per caricarsi: usa metadati e cache.
+I riepiloghi giornalieri dei negozi sono caricati con query raggruppate.
+Le nuove immagini/PDF e i nuovi testi vengono preparati in background,
+partendo dai file piu recenti. La prima preparazione richiede tempo:
+In preparazione indica i file non ancora pronti. Aggiorna indice visualizzato
+ricarica i risultati gia preparati. I dati non vengono inviati a servizi AI.
+Dopo modifiche e sostituzioni dei file archiviati, la cache viene invalidata
+e aggiornata automaticamente, anche se il nuovo testo ha la stessa lunghezza.
+
+FORMATO DELLE ANTEPRIME
+PDF: immagine della prima pagina e testo estraibile; immagini: anteprima.
+TXT/CSV/MD e altri testi: contenuto leggibile. DOCX/XLSX/PPTX/ODT/ODS:
+testo estraibile. ZIP: legenda dei file contenuti, senza eseguirli.
+Foto e scansioni non vengono automaticamente trascritte con OCR: se non
+contengono testo, viene segnalato e si puo consultare l'immagine/originale.
+Formati non supportati, PDF protetti o file illeggibili mantengono il
+collegamento all'originale con uno stato chiaro. Le anteprime non ricreano
+l'impaginazione dei fogli di calcolo e dei documenti Office.
+Limiti della cache: file fino a 30 MB, testo fino a 200.000 caratteri,
+PDF fino a 200 pagine di testo, ZIP fino a 5.000 nomi; quando un limite
+viene raggiunto lo stato lo segnala. L'originale resta sempre distinto.
+Aprire un'anteprima gia preparata non richiede di rileggere l'originale;
+non si puo garantire un secondo esatto per scaricare/aprire qualsiasi file.
+
+INSTALLAZIONE
+1. Arrestare il gestionale e conservare una copia dei file precedenti.
+2. Estrarre aggiornamento_dashboard_admin.zip nella cartella con run.py,
+   sovrascrivendo i file app/ e requirements.txt inclusi.
+3. Installare le dipendenze aggiornate: python -m pip install -r requirements.txt
+   Il file AVVIA_SITO_WINDOWS.bat lo esegue gia automaticamente.
+   Su Render pubblicare anche requirements.txt e rifare il deploy.
+4. Riavviare il gestionale, aprire Admin e aggiornare il browser con Ctrl+F5.
+La tabella dell'indice e gli indici di ricerca vengono creati al riavvio.
+Non sostituire il database spinza.db della propria installazione.
+Tutte le modifiche precedenti a chiusure, fondo, bilancio Cash e storico
+mensile sono incluse in entrambi i pacchetti.
+
+VERIFICHE
+Suite completa: 117 test superati. Ripetuti e superati i 6 test dedicati
+alla dashboard dopo le ottimizzazioni. Verificati permessi, confronto
+ieri/oggi, vista singola e generale, paginazione, ricerca del testo, percorsi,
+PDF e anteprime, file non leggibili, invalidazione dopo modifica e
+sostituzione, apertura originali e mancata lettura dei blob nella dashboard.
+Verificate sintassi Python/JavaScript e impaginazione desktop con dati demo.
+I test usano database SQLite temporanei; nessun database di produzione usato.

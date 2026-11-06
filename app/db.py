@@ -673,6 +673,17 @@ def init_db():
         except Exception:
             pass
 
+        _safe_exec(cur, """CREATE TABLE IF NOT EXISTS admin_file_index (
+            kind TEXT NOT NULL, file_id INTEGER NOT NULL, source_stamp TEXT NOT NULL,
+            full_text TEXT NOT NULL, thumbnail TEXT NOT NULL, state TEXT NOT NULL,
+            info TEXT NOT NULL, PRIMARY KEY(kind,file_id))""")
+
+        for table, day in [('closures','closure_date'),('invoices_docs','doc_date'),('secondary_expenses','expense_date')]:
+            _safe_exec(cur,f'CREATE INDEX IF NOT EXISTS ix_admin_{table}_day_store ON {table}({day},store)')
+
+        from .cash_treasury import ensure_schema as ensure_treasury_schema
+        ensure_treasury_schema(cur)
+
         # LOGS
         _safe_exec(cur, f"""
         CREATE TABLE IF NOT EXISTS logs (

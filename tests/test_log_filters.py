@@ -42,6 +42,23 @@ class LogFilterTests(unittest.TestCase):
         self.login(2)
         self.assertEqual(self.client.get('/logs/inventario',follow_redirects=False).status_code,303)
 
+    def test_finance_and_closure_reports_are_not_warehouse_movements(self):
+        self.seed()
+        for category,name in [('CASSA','Report chiusura #123 - Contanti'),('CASSA','Verifica contanti report #123'),('CONTANTI','Pagamento contanti #4'),('UTENTI','Account dipendente')]:
+            self.sql('INSERT INTO logs(store,category,name,area,action,username,ts,delta) VALUES(?,?,?,?,?,?,?,?)',('spinza',category,name,'bibite' if category in ('CASSA','CONTANTI') else '', 'CREATE','testadmin','2026-10-29 12:00:00',50))
+        rows=main._fetch_logs(store='spinza',limit=100,section='inventory')
+        self.assertFalse(any('Report chiusura' in row['name'] or row['category'] in ('CASSA','CONTANTI','UTENTI') for row in rows))
+        self.assertNotIn('CASSA',main._log_groups('spinza',section='inventory'))
+        filtered=main._fetch_logs(store='spinza',limit=100,section='inventory',q_product='Cola',q_user='marco',q_day='2026-10-28')
+        self.assertEqual([row['name'] for row in filtered],['Cola | 10 → 20'])
+        page=self.client.get('/logs/inventario?q_product=Cola&q_user=marco&q_day=2026-10-28')
+        self.assertIn('name="q_product"',page.text);self.assertNotIn('Report chiusura #123',page.text)
+
+    def test_log_day_uses_italian_calendar(self):
+        self.sql("INSERT INTO logs(store,category,name,area,action,username,ts,delta) VALUES('spinza','Bibite','Cola','bibite','MOVE','marco','2026-11-05 23:30:00',1)")
+        self.assertEqual(len(main._fetch_logs(store='spinza',limit=100,section='inventory',q_day='2026-11-06')),1)
+        self.assertEqual(len(main._fetch_logs(store='spinza',limit=100,section='inventory',q_day='2026-11-05')),0)
+
     def test_area_survives_delete_and_schema_idempotent(self):
         response=self.client.post(f'/items/{self.pid}/delete',data={'store':'spinza'},follow_redirects=False)
         self.assertEqual(response.status_code,303)
