@@ -10,6 +10,7 @@ from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import Request, Form, HTTPException
 from fastapi.responses import RedirectResponse, Response, JSONResponse
+from .document_review import available_document
 from .db import connect, using_postgres
 from .document_ai import extract_document
 
@@ -143,6 +144,9 @@ def install(app, api):
         row = cur.execute(sql, tuple(params)).fetchone()
         if not row:
             raise HTTPException(404, 'Documento non trovato in questo negozio.')
+        pending=cur.execute(f'SELECT 1 FROM admin_document_reviews WHERE kind={ph()} AND doc_id={ph()} AND reviewed_at IS NULL',(kind,doc_id)).fetchone()
+        if pending:
+            raise HTTPException(403, 'Documento in attesa di conferma in File da verificare.')
         return dict(row)
 
     def digital(cur, kind, row):
@@ -163,7 +167,7 @@ def install(app, api):
                 {'d.supplier' if key == 'fatture' else "''"} AS supplier
                 FROM {table} d LEFT JOIN digital_documents x ON x.kind={ph()} AND x.doc_id=d.id
                 WHERE COALESCE(x.doc_date,CAST(d.{datecol} AS TEXT))>={ph()}
-                AND COALESCE(x.doc_date,CAST(d.{datecol} AS TEXT))<={ph()}'''
+                AND COALESCE(x.doc_date,CAST(d.{datecol} AS TEXT))<={ph()} AND {available_document(key,'d.id')}'''
             params = [key,start,end]
             if store != 'ALL':
                 sql += f' AND d.store={ph()}'

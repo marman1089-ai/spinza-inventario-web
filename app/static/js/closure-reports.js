@@ -5,12 +5,14 @@
   const out=document.getElementById('closing-total');
   let dirty=false;
   function update(){
-    let total=0,valid=true;
+    let total=0,cash=0,valid=true;
     form.querySelectorAll('[name=amount]').forEach(input=>{
       const value=input.value.trim().replace(',','.');
       if(!/^\d{1,9}(?:\.\d{1,2})?$/.test(value)){valid=false;return;}
       const parts=value.split('.');
-      total+=Number(parts[0])*100+Number(((parts[1]||'')+'00').slice(0,2));
+      const valueCents=Number(parts[0])*100+Number(((parts[1]||'')+'00').slice(0,2));
+      total+=valueCents;
+      if(input.dataset?.channel==='Cash')cash=valueCents;
     });
     let expenses=0,added=0,fundExpenses=0,expensesValid=true;
     form.querySelectorAll('.closing-expense-row').forEach(row=>{
@@ -46,6 +48,8 @@
     document.getElementById('closing-fund-remaining').textContent=fundValid?(fundInput.value.trim()?money(fundInitial-fundExpenses):'Non indicato'):'Controlla il fondo iniziale';
     document.getElementById('closing-expense-total').textContent=expensesValid?money(expenses):'Controlla le spese';
     document.getElementById('closing-net-total').textContent=valid&&expensesValid?money(total+added-(expenses-fundExpenses)):'Controlla gli importi';
+    const expected=document.getElementById('closing-expected-cash');
+    if(expected)expected.textContent=valid&&expensesValid&&fundValid?money(cash+added+fundInitial-expenses):'Controlla gli importi';
     out.textContent=valid&&expensesValid?money(total+added):'Controlla gli importi';
   }
   form.addEventListener('input',()=>{dirty=true;update();});
@@ -71,7 +75,10 @@
   const rowTemplate=expenseRows.firstElementChild.cloneNode(true);
   document.getElementById('add-closing-expense').addEventListener('click',()=>{
     if(expenseRows.children.length>=100)return;
-    const row=rowTemplate.cloneNode(true);expenseRows.appendChild(row);
+    const row=rowTemplate.cloneNode(true);
+    row.querySelectorAll('input').forEach(input=>{input.value='';input.defaultValue='';});
+    row.querySelector('select').value='add_to_cash';
+    expenseRows.appendChild(row);
     row.querySelector('input').focus();dirty=true;update();
   });
   expenseRows.addEventListener('click',event=>{

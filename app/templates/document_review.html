@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% set title='Verifica documento' %}
+{% block content %}
+<link rel="stylesheet" href="/static/css/closure-reports.css?v=6">
+<div class="closing-page">
+<section class="card closing-header">
+  <div><span class="eyebrow">FILE DA VERIFICARE</span><h1>{{ document.label }}</h1>
+  <p>{{ stores.get(document.store,document.store) }} · Caricato da {{ document.uploaded_by }}</p></div>
+  <a class="btn2" href="/admin/file-da-verificare">Torna alla coda</a>
+</section>
+<section class="card closing-editor">
+  <a class="btn2" target="_blank" rel="noopener" href="/admin/indice-file/{{ document.kind }}/{{ document.id }}/originale">Apri originale ↗</a>
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="closing-field">Nome file<input name="filename" value="{{ document.filename }}" maxlength="180" required></label>
+    <label class="closing-field">Data documento<input name="doc_date" type="date" value="{{ document.doc_date }}" required></label>
+    {% if document.kind=='fatture' %}<label class="closing-field">Fornitore<input name="supplier" value="{{ document.supplier }}" maxlength="180" required></label>{% endif %}
+    <button class="btn">Conferma e archivia</button>
+  </form>
+</section>
+</div>
+{% endblock %}

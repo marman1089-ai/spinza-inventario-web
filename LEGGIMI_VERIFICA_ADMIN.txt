@@ -1,0 +1,24 @@
+VERIFICA ADMIN
+
+Dopo aver fermato il gestionale, estrai l'aggiornamento nella cartella
+con run.py e sovrascrivi i file dell'app. Mantieni il database in uso.
+Riavvia il gestionale per creare le tabelle della verifica.
+Se aggiorni da una versione più vecchia, installa le dipendenze da
+requirements.txt. AVVIA_SITO_WINDOWS.bat le installa automaticamente.
+
+Dal pannello admin apri File da verificare. Qui arrivano i nuovi report
+chiusura, le foto chiusura, le fatture e le spese secondarie dei dipendenti.
+Oggi e ieri sono la vista iniziale. Puoi filtrare un giorno o aprire tutti
+i file ancora in attesa. Il filtro usa la data del documento o del report.
+
+Per una chiusura controlla e correggi data, incassi, fondo, spese e note.
+Conferma per registrare entrate e uscite una sola volta.
+Per un documento apri l'originale, correggi nome e data e, se è una
+fattura, il fornitore. Conferma per pubblicarlo nell'archivio.
+I nuovi inserimenti admin vengono registrati subito.
+I record presenti prima dell'aggiornamento conservano il loro stato.
+Dopo la conferma di un invio dipendente, l'eliminazione è riservata agli admin.
+
+Il pannello mostra gli ultimi login riusciti in ora italiana e offre
+accessi diretti a Controllo live, Fasce orarie, Log, Contanti e Account.
+La revisione file parte da oggi e ieri e permette di scegliere una data.

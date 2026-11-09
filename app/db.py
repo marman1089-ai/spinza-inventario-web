@@ -681,6 +681,8 @@ def init_db():
         for table, day in [('closures','closure_date'),('invoices_docs','doc_date'),('secondary_expenses','expense_date')]:
             _safe_exec(cur,f'CREATE INDEX IF NOT EXISTS ix_admin_{table}_day_store ON {table}({day},store)')
 
+        from .document_review import ensure_schema as ensure_document_review_schema
+        ensure_document_review_schema(cur)
         from .cash_treasury import ensure_schema as ensure_treasury_schema
         ensure_treasury_schema(cur)
 

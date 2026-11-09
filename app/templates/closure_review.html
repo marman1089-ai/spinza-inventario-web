@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% set title='File da verificare' %}
+{% block content %}
+<link rel="stylesheet" href="/static/css/closure-reports.css?v=6">
+<div class="closing-page">
+<section class="card closing-header">
+  <div><span class="eyebrow">CONTROLLO ADMIN</span><h1>File da verificare</h1><p>Chiusure, foto, fatture e spese secondarie inviate dai dipendenti. Controlla ogni voce e confermala quando è corretta.</p></div>
+  <a class="btn2" href="/admin">Pannello admin</a>
+</section>
+{% if draft %}
+<section class="card closing-editor">
+  <h2>Chiusura #{{ draft.id }} · {{ stores[draft.store] }}</h2>
+  <p>Inserita da {{ draft.created_by }}. Modifica i dati e conferma quando sono corretti.</p>
+  {% set selected=draft.store %}{% set channels=draft.channels %}{% set form_date=draft.closure_date %}
+  {% include '_closure_form.html' %}
+</section>
+<script src="/static/js/closure-reports.js?v=8" defer></script>
+{% else %}
+<section class="card">
+  <form class="row" method="get" action="/admin/file-da-verificare" style="align-items:center">
+    <label>Data <input name="day" type="date" value="{{ day }}"></label>
+    <button class="btn2">Filtra</button>
+    <a class="btn2" href="/admin/file-da-verificare">Oggi e ieri</a>
+    <a class="btn2" href="?all_pending=1">Tutti in attesa · {{ pending_count }}</a>
+  </form>
+  <p class="muted">{{ 'Tutti i file in attesa' if all_pending else (day or 'Oggi e ieri') }}</p>
+</section>
+<section class="card">
+  <h2>{{ queue|length }} chiusure da controllare</h2>
+  <div style="overflow:auto"><table>
+    <thead><tr><th>Data</th><th>Negozio</th><th>Inserita da</th><th>Incassi dichiarati</th><th></th></tr></thead>
+    <tbody>{% for report in queue %}
+      <tr><td>{{ report.closure_date }}</td><td>{{ stores[report.store] }}</td><td>{{ report.created_by }}</td><td>{{ '%.2f'|format(report.total_cents/100)|replace('.',',') }} €</td><td><a class="btn2" href="?report_id={{ report.id }}">Controlla #{{ report.id }}</a></td></tr>
+    {% else %}<tr><td colspan="5">Nessuna chiusura in attesa per la vista selezionata.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+<section class="card">
+  <h2>{{ documents|length }} documenti da controllare</h2>
+  <div style="overflow:auto"><table>
+    <thead><tr><th>Data</th><th>Tipo</th><th>Documento</th><th>Negozio</th><th>Caricato da</th><th></th></tr></thead>
+    <tbody>{% for file in documents %}
+      <tr><td>{{ file.doc_date }}</td><td>{{ file.label }}</td><td>{{ file.filename }}</td><td>{{ stores.get(file.store,file.store) }}</td><td>{{ file.uploaded_by }}</td><td><a class="btn2" href="/admin/file-da-verificare/documenti/{{ file.kind }}/{{ file.id }}">Controlla</a></td></tr>
+    {% else %}<tr><td colspan="6">Nessun documento in attesa per la vista selezionata.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endif %}
+</div>
+{% endblock %}

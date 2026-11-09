@@ -5,7 +5,7 @@ import json
 import logging
 import threading
 import zipfile
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import PurePosixPath
 from urllib.parse import urlencode, quote
 from xml.etree import ElementTree
@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse, Response
 from .db import connect, using_postgres
+from .document_review import pending_documents
 
 SOURCES={
     'archivio':('archive_files','ts','created_by','File archiviati'),
@@ -46,15 +47,31 @@ def source_query(kind,preview=True):
     return f'''SELECT '{kind}' AS kind,f.id,f.store,f.filename,f.content_type,
         CAST(f.{day} AS TEXT) AS doc_date,CAST(f.ts AS TEXT) AS ts,
         f.{author} AS author,length(f.data) AS size_bytes,{extra},{supplier},
-        i.source_stamp,i.state,i.info,{cached}
-        FROM {table} f LEFT JOIN admin_file_index i ON i.kind='{kind}' AND i.file_id=f.id'''
+        i.source_stamp,i.state,i.info,{cached},
+        CASE WHEN r.doc_id IS NOT NULL AND r.reviewed_at IS NULL THEN 1 ELSE 0 END AS pending_review
+        FROM {table} f LEFT JOIN admin_file_index i ON i.kind='{kind}' AND i.file_id=f.id
+        LEFT JOIN admin_document_reviews r ON r.kind='{kind}' AND r.doc_id=f.id'''
 
-def catalogue(cur,scope,query='',kind='',page=0):
+def catalogue(cur,scope,query='',kind='',page=0,day=None,today=None):
+    today=today or datetime.now(ZoneInfo('Europe/Rome')).date()
+    first=day or today-timedelta(days=1)
+    last=day or today
     kinds=[kind] if kind in SOURCES else list(SOURCES)
     searches=[];params=[];needle='%'+query.casefold().replace('!','!!').replace('%','!%').replace('_','!_')+'%'
     for key in kinds:
         clauses=[]
         if scope!='ALL': clauses.append(f'f.store={ph()}');params.append(scope)
+        if key=='archivio':
+            rome=ZoneInfo('Europe/Rome')
+            start=datetime.combine(first,datetime.min.time(),rome).astimezone(timezone.utc)
+            end=datetime.combine(last+timedelta(days=1),datetime.min.time(),rome).astimezone(timezone.utc)
+            timestamp='f.ts' if using_postgres() else 'datetime(f.ts)'
+            clauses.extend([f'{timestamp}>={ph()}',f'{timestamp}<{ph()}'])
+            params.extend([start.strftime('%Y-%m-%d %H:%M:%S'),end.strftime('%Y-%m-%d %H:%M:%S')])
+        else:
+            field=SOURCES[key][1]
+            clauses.extend([f'f.{field}>={ph()}',f'f.{field}<={ph()}'])
+            params.extend([first.isoformat(),last.isoformat()])
         if query:
             clauses.append(f"(LOWER(COALESCE(f.filename,'')) LIKE {ph()} ESCAPE '!' OR LOWER(COALESCE(i.full_text,'')) LIKE {ph()} ESCAPE '!'" + (f" OR LOWER(f.supplier) LIKE {ph()} ESCAPE '!'" if key=='fatture' else '')+')')
             params.extend([needle,needle]+([needle] if key=='fatture' else []))
@@ -190,9 +207,12 @@ def dashboard(cur,scope,stores,today):
     where=f'closure_date>={ph()} AND closure_date<={ph()}'
     args=[days[0].isoformat(),days[-1].isoformat()]
     if scope!='ALL':where+=f' AND store={ph()}';args.append(scope)
+    pending_ids={row['report_id'] for row in cur.execute('SELECT report_id FROM closure_report_reviews WHERE reviewed_at IS NULL').fetchall()}
     report_groups={}
     for raw in cur.execute(f'SELECT id,store,closure_date,total_cents,created_by,created_at FROM closure_reports WHERE {where} ORDER BY id',tuple(args)).fetchall():
-        row=dict(raw);report_groups.setdefault((row['store'],str(row['closure_date'])),[]).append(row)
+        row=dict(raw);row['pending_review']=row['id'] in pending_ids;report_groups.setdefault((row['store'],str(row['closure_date'])),[]).append(row)
+    documents_waiting=pending_documents(cur,scope)
+    pending_files={(row['kind'],row['id']) for row in documents_waiting}
     document_groups={}
     for kind,(table,column,author,label) in SOURCES.items():
         if kind=='archivio':continue
@@ -200,7 +220,7 @@ def dashboard(cur,scope,stores,today):
         args=[days[0].isoformat(),days[-1].isoformat()]
         if scope!='ALL':where+=f' AND store={ph()}';args.append(scope)
         for raw in cur.execute(f'SELECT id,store,CAST({column} AS TEXT) AS doc_date,filename,{author} AS author FROM {table} WHERE {where} ORDER BY id',tuple(args)).fetchall():
-            row=dict(raw);row['url']=f"/admin/indice-file/{kind}/{row['id']}/originale"
+            row=dict(raw);row['pending_review']=(kind,row['id']) in pending_files;row['url']=f"/admin/indice-file/{kind}/{row['id']}/originale"
             document_groups.setdefault((row['store'],row['doc_date'],kind),[]).append(row)
     for store in selected:
         item=dict(store=store,label=stores[store],days=[])
@@ -214,8 +234,17 @@ def dashboard(cur,scope,stores,today):
         clause=f' WHERE store={ph()}' if scope!='ALL' else '';args=(scope,) if scope!='ALL' else ()
         row=cur.execute(f'SELECT COUNT(*) AS n,COALESCE(SUM(length(data)),0) AS size FROM {table}'+clause,args).fetchone()
         totals.append(dict(kind=kind,label=label,count=row['n'],size=row['size']))
+    scope_clause='' if scope=='ALL' else f' AND r.store={ph()}'
+    scope_args=() if scope=='ALL' else (scope,)
+    waiting=cur.execute('SELECT COUNT(*) AS n FROM closure_report_reviews v JOIN closure_reports r ON r.id=v.report_id WHERE v.reviewed_at IS NULL'+scope_clause,scope_args).fetchone()['n']
+    from .control_journal import create_control_schema
+    create_control_schema(cur)
+    recent_access=[]
+    access_scope='' if scope=='ALL' else f' AND store={ph()}'
+    for row in cur.execute("SELECT username,store,happened FROM control_activity_events WHERE kind='access' AND method='POST' AND path IN ('/login','/admin-login') AND status>=300 AND status<400"+access_scope+" ORDER BY happened DESC,id DESC LIMIT 12",scope_args).fetchall():
+        recent_access.append(dict(row,local_time=datetime.fromtimestamp(row['happened'],ZoneInfo('Europe/Rome')).strftime('%d/%m/%Y %H:%M')))
     _wake.set()
-    return dict(board=board,totals=totals,file_count=sum(t['count'] for t in totals),catalogue=catalogue(cur,scope),scope=scope,now=datetime.now(ZoneInfo('Europe/Rome')).strftime('%d/%m/%Y %H:%M'))
+    return dict(waiting=waiting+len(documents_waiting),recent_access=recent_access,board=board,totals=totals,file_count=sum(t['count'] for t in totals),catalogue=catalogue(cur,scope,today=today),scope=scope,now=datetime.now(ZoneInfo('Europe/Rome')).strftime('%d/%m/%Y %H:%M'))
 
 def install(app,api):
     global _store_labels
@@ -236,9 +265,16 @@ def install(app,api):
         _stop.set();_wake.set()
         if _thread:_thread.join(timeout=2)
     @app.get('/admin/indice-file')
-    def search(request:Request,q:str='',kind:str='',page:int=0):
+    def search(request:Request,q:str='',kind:str='',page:int=0,day:str=''):
         scope=admin(request)
-        with connect() as conn:result=catalogue(conn.cursor(),scope,q[:200].strip(),kind,page)
+        try:
+            selected_day=date.fromisoformat(day) if day else None
+            if selected_day and not 1900<=selected_day.year<=9998:
+                raise ValueError()
+        except ValueError:
+            raise HTTPException(422,'Data non valida.')
+        with connect() as conn:
+            result=catalogue(conn.cursor(),scope,q[:200].strip(),kind,page,selected_day,api['_rome_today']())
         _wake.set()
         return JSONResponse(result,headers={'Cache-Control':'no-store'})
     @app.get('/admin/indice-file/{kind}/{file_id}/testo')

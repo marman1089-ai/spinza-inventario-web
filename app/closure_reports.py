@@ -4,7 +4,7 @@ import calendar
 from urllib.parse import urlencode
 import re
 import secrets
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 from fastapi import Request, HTTPException
 from fastapi.responses import RedirectResponse
@@ -24,6 +24,8 @@ def init_reports():
     with connect() as conn:
         cur=conn.cursor()
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_channels (store TEXT NOT NULL, name TEXT NOT NULL, channel_key TEXT NOT NULL, PRIMARY KEY(store,channel_key))')
+        cur.execute('''CREATE TABLE IF NOT EXISTS closure_report_reviews (
+            report_id INTEGER PRIMARY KEY, reviewed_at TEXT, reviewed_by TEXT)''')
         cur.execute(f"CREATE TABLE IF NOT EXISTS closure_reports (id {ident}, store TEXT NOT NULL, closure_date TEXT NOT NULL, lines_json TEXT NOT NULL, total_cents BIGINT NOT NULL, notes TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL, submission_token TEXT NOT NULL UNIQUE)")
         cur.execute('CREATE INDEX IF NOT EXISTS ix_closure_reports_scope ON closure_reports(store,closure_date)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_exports (report_id INTEGER PRIMARY KEY)')
@@ -53,6 +55,8 @@ def install(app, api):
     def can_delete(user,row):
         return user.get('role')=='admin' or str(row['closure_date'])==datetime.now(ZoneInfo('Europe/Rome')).date().isoformat()
     def export_report(cur, row):
+        if cur.execute(f'SELECT 1 FROM closure_report_reviews WHERE report_id={ph()} AND reviewed_at IS NULL',(row['id'],)).fetchone():
+            return
         # Claim and accounting rows commit together; retries cannot duplicate income.
         claimed=cur.execute(f'INSERT INTO closure_report_exports(report_id) VALUES({ph()}) ON CONFLICT(report_id) DO NOTHING RETURNING report_id',(row['id'],)).fetchone()
         if not claimed: return
@@ -107,6 +111,7 @@ def install(app, api):
             if user.get('role')=='admin':
                 cash_checks={r['report_id']:r for r in cur.execute(f'SELECT c.* FROM closure_report_cash_checks c JOIN closure_reports r ON r.id=c.report_id WHERE r.store={ph()}',(selected,)).fetchall()}
             counts=cur.execute(f'SELECT closure_date,COUNT(*) AS n FROM closure_reports WHERE store={ph()} AND closure_date>={ph()} AND closure_date<={ph()} GROUP BY closure_date',(selected,anchor.isoformat(),anchor.replace(day=calendar.monthrange(anchor.year,anchor.month)[1]).isoformat())).fetchall()
+            review_status={r['report_id']:r['reviewed_at'] for r in cur.execute('SELECT report_id,reviewed_at FROM closure_report_reviews').fetchall()}
         by_day={str(r['closure_date']):r['n'] for r in counts}
         def link(**kw): return '/report-chiusura?'+urlencode(dict(store=selected,**kw))
         weeks=[]
@@ -131,7 +136,8 @@ def install(app, api):
             r['fund_initial']=funds_by_id.get(r['id'])
             r['fund_remaining']=r['fund_initial']-r['fund_expenses'] if r['fund_initial'] is not None else None
             r['net_cents']=r['total_cents']-(r['expense_total']-r['fund_expenses'])
-            r['can_delete']=can_delete(user,r)
+            r['can_delete']=can_delete(user,r) and (user.get('role')=='admin' or not review_status.get(r['id']))
+            r['pending_review']=r['id'] in review_status and review_status[r['id']] is None
             if user.get('role')=='admin':
                 cash=sum(line['cents'] for line in r['lines'] if line['name']=='Cash')
                 r['expected_cash']=cash+(r['fund_initial'] or 0)-r['expense_total']
@@ -173,6 +179,8 @@ def install(app, api):
             lock=' FOR UPDATE' if using_postgres() else ''
             row=cur.execute(f'SELECT * FROM closure_reports WHERE id={ph()} AND store={ph()}'+lock,(report_id,store)).fetchone()
             if not row: raise HTTPException(404,'Report non trovato.')
+            if user.get('role')!='admin' and cur.execute(f'SELECT 1 FROM closure_report_reviews WHERE report_id={ph()} AND reviewed_at IS NOT NULL',(report_id,)).fetchone():
+                raise HTTPException(403,'La chiusura confermata può essere eliminata solo da un admin.')
             if not can_delete(user,row):
                 raise HTTPException(403,'Puoi eliminare un report solo nel giorno della chiusura. Per le altre date serve un admin.')
             # Match the complete report reference, never #1 against #10.
@@ -188,6 +196,7 @@ def install(app, api):
             cur.execute(f'DELETE FROM closure_report_cash_funds WHERE report_id={ph()}',(report_id,))
             cur.execute(f'DELETE FROM closure_report_expenses WHERE report_id={ph()}',(report_id,))
             cur.execute(f'DELETE FROM closure_report_exports WHERE report_id={ph()}',(report_id,))
+            cur.execute(f'DELETE FROM closure_report_reviews WHERE report_id={ph()}',(report_id,))
             cur.execute(f'DELETE FROM closure_reports WHERE id={ph()} AND store={ph()}',(report_id,store))
             api['_log'](cur,store=store,username=user['username'],action='DELETE',category='CASSA',name=prefix+' - eliminato con entrate e uscite collegate',delta=0)
         return RedirectResponse('/report-chiusura?'+urlencode(dict(store=store,deleted='true'))+'#closing-history',303)
@@ -210,20 +219,17 @@ def install(app, api):
             lock=' FOR UPDATE' if using_postgres() else ''
             row=cur.execute(f'SELECT id,closure_date FROM closure_reports WHERE id={ph()} AND store={ph()}'+lock,(report_id,store)).fetchone()
             if not row: raise HTTPException(404,'Report non trovato.')
+            if cur.execute(f'SELECT 1 FROM closure_report_reviews WHERE report_id={ph()} AND reviewed_at IS NULL',(report_id,)).fetchone():
+                raise HTTPException(409,'Conferma prima la chiusura in File da verificare.')
             cur.execute(f'INSERT INTO closure_report_cash_checks(report_id,counted_cents,notes,updated_by,updated_at) VALUES({",".join([ph()]*5)}) ON CONFLICT(report_id) DO UPDATE SET counted_cents=excluded.counted_cents,notes=excluded.notes,updated_by=excluded.updated_by,updated_at=excluded.updated_at',
                         (report_id,counted,notes,user['username'],datetime.now(ZoneInfo('Europe/Rome')).isoformat(timespec='seconds')))
             api['_log'](cur,store=store,username=user['username'],action='UPDATE',category='CASSA',name=f'Verifica contanti report #{report_id}',delta=0)
         return RedirectResponse('/report-chiusura?'+urlencode(dict(store=store,day=str(row['closure_date'])))+f'#cash-check-{report_id}',303)
-    @app.post('/report-chiusura/salva')
-    async def save(request:Request):
-        user,scope=auth(request); form=await request.form(); check(request,form)
-        store=str(form.get('store','')); allowed(scope,store)
+    def parse_report(form,known):
         try: day=date.fromisoformat(str(form.get('closure_date',''))).isoformat()
         except ValueError: raise HTTPException(422,'Data della chiusura non valida.')
         notes=str(form.get('notes','')).strip()
         if len(notes)>2000: raise HTTPException(422,'Note troppo lunghe (massimo 2000 caratteri).')
-        submission=str(form.get('submission',''))
-        if not re.fullmatch(r'[A-Za-z0-9_-]{40,60}',submission): raise HTTPException(422,'Ricarica il modulo prima di salvare.')
         raw_names=form.getlist('channel'); raw_amounts=form.getlist('amount')
         if len(raw_names)!=len(raw_amounts) or not 2<=len(raw_names)<=100: raise HTTPException(422,'Canali non validi.')
         expense_names=form.getlist('expense_name'); expense_amounts=form.getlist('expense_amount')
@@ -248,26 +254,112 @@ def install(app, api):
         if raw_fund or fund_expenses:
             fund_initial=cents(raw_fund)
             if fund_expenses>fund_initial: raise HTTPException(422,'Le spese dal fondo cassa superano il fondo iniziale.')
+        if len(set(raw_names))!=len(raw_names) or not {'POS','Cash'}.issubset(raw_names) or any(n not in known for n in raw_names):
+            raise HTTPException(422,'Canali non validi: ricarica il modulo.')
+        lines=[dict(name=n,cents=cents(v)) for n,v in zip(raw_names,raw_amounts)]
+        # Only expenses not yet included in the entered revenue increase Cash.
+        expense_total=sum(e['cents'] for e in expenses if e['mode']=='add_to_cash')
+        for line in lines:
+            if line['name']=='Cash': line['cents']+=expense_total
+        total=sum(r['cents'] for r in lines)
+        return day,notes,lines,total,expenses,fund_initial
+
+    @app.get('/admin/file-da-verificare')
+    def review_page(request:Request, report_id:int=0, day:str='', all_pending:bool=False):
+        user,scope=auth(request)
+        if user.get('role')!='admin':
+            raise HTTPException(403,'Verifica riservata agli admin.')
+        with connect() as conn:
+            cur=conn.cursor()
+            clause='' if scope=='ALL' else f' AND r.store={ph()}'
+            args=() if scope=='ALL' else (scope,)
+            queue=cur.execute('SELECT r.id,r.store,r.closure_date,r.created_by,r.total_cents FROM closure_reports r JOIN closure_report_reviews v ON v.report_id=r.id WHERE v.reviewed_at IS NULL'+clause+' ORDER BY r.closure_date DESC,r.id DESC',args).fetchall()
+            draft=None
+            if report_id:
+                draft=next((row for row in queue if row['id']==report_id),None)
+                if not draft:
+                    raise HTTPException(404,'Chiusura in attesa non trovata.')
+                row=cur.execute(f'SELECT * FROM closure_reports WHERE id={ph()}',(report_id,)).fetchone()
+                if not row:
+                    raise HTTPException(404,'Chiusura non trovata.')
+                expenses=cur.execute(f'SELECT lines_json FROM closure_report_expenses WHERE report_id={ph()}',(report_id,)).fetchone()
+                fund=cur.execute(f'SELECT initial_cents FROM closure_report_cash_funds WHERE report_id={ph()}',(report_id,)).fetchone()
+                draft=dict(row)
+                draft['expenses']=json.loads(expenses['lines_json']) if expenses else []
+                draft['amounts']={line['name']:line['cents'] for line in json.loads(row['lines_json'])}
+                draft['amounts']['Cash']-=sum(e['cents'] for e in draft['expenses'] if e.get('mode')=='add_to_cash')
+                draft['channels']=list(dict.fromkeys(channels(cur,row['store'])+list(draft['amounts'])))
+                draft['fund']=fund['initial_cents'] if fund else None
+            from .document_review import pending_documents
+            documents=pending_documents(cur,scope) if not draft else []
+        pending_count=len(queue)+len(documents)
+        if not draft and not all_pending:
+            today=datetime.now(ZoneInfo('Europe/Rome')).date()
+            try:
+                dates={date.fromisoformat(day).isoformat()} if day else {today.isoformat(),(today-timedelta(days=1)).isoformat()}
+            except ValueError:
+                raise HTTPException(422,'Data non valida.')
+            queue=[row for row in queue if str(row['closure_date']) in dates]
+            documents=[row for row in documents if row['doc_date'] in dates]
+        return api['render']('closure_review.html',request=request,user=user,brand=scope,stores=stores,queue=queue,documents=documents,draft=draft,csrf=token(request),pending_count=pending_count,day=day,all_pending=all_pending)
+
+    @app.post('/admin/file-da-verificare/conferma')
+    async def approve_report(request:Request):
+        user,scope=auth(request)
+        if user.get('role')!='admin':
+            raise HTTPException(403,'Verifica riservata agli admin.')
+        form=await request.form()
+        check(request,form)
+        try:
+            report_id=int(str(form.get('report_id','')))
+        except ValueError:
+            raise HTTPException(422,'Report non valido.')
+        with connect() as conn:
+            cur=conn.cursor()
+            if not using_postgres():
+                cur.execute('BEGIN IMMEDIATE')
+            lock=' FOR UPDATE' if using_postgres() else ''
+            row=cur.execute(f'SELECT * FROM closure_reports WHERE id={ph()}'+lock,(report_id,)).fetchone()
+            if not row:
+                raise HTTPException(404,'Report non trovato.')
+            allowed(scope,row['store'])
+            review=cur.execute(f'SELECT reviewed_at FROM closure_report_reviews WHERE report_id={ph()}',(report_id,)).fetchone()
+            if not review or review['reviewed_at'] is not None:
+                raise HTTPException(409,'Report già confermato.')
+            known=channels(cur,row['store'])+[line['name'] for line in json.loads(row['lines_json'])]
+            day,notes,lines,total,expenses,fund_initial=parse_report(form,known)
+            cur.execute(f'UPDATE closure_reports SET closure_date={ph()},notes={ph()},lines_json={ph()},total_cents={ph()} WHERE id={ph()}',(day,notes,json.dumps(lines,ensure_ascii=False),total,report_id))
+            cur.execute(f'INSERT INTO closure_report_expenses(report_id,lines_json) VALUES({ph()},{ph()}) ON CONFLICT(report_id) DO UPDATE SET lines_json=excluded.lines_json',(report_id,json.dumps(expenses,ensure_ascii=False)))
+            cur.execute(f'DELETE FROM closure_report_cash_funds WHERE report_id={ph()}',(report_id,))
+            if fund_initial is not None:
+                cur.execute(f'INSERT INTO closure_report_cash_funds(report_id,initial_cents) VALUES({ph()},{ph()})',(report_id,fund_initial))
+            cur.execute(f'UPDATE closure_report_reviews SET reviewed_at={ph()},reviewed_by={ph()} WHERE report_id={ph()}',(datetime.now(ZoneInfo('Europe/Rome')).isoformat(timespec='seconds'),user['username'],report_id))
+            export_report(cur,dict(row,closure_date=day,notes=notes,lines_json=json.dumps(lines,ensure_ascii=False)))
+        return RedirectResponse('/admin/file-da-verificare',303)
+
+    @app.post('/report-chiusura/salva')
+    async def save(request:Request):
+        user,scope=auth(request); form=await request.form(); check(request,form)
+        store=str(form.get('store','')); allowed(scope,store)
+        submission=str(form.get('submission',''))
+        if not re.fullmatch(r'[A-Za-z0-9_-]{40,60}',submission): raise HTTPException(422,'Ricarica il modulo prima di salvare.')
         with connect() as conn:
             cur=conn.cursor()
             if not using_postgres(): cur.execute('BEGIN IMMEDIATE')
             if cur.execute(f'SELECT submission_token FROM closure_report_deleted_tokens WHERE submission_token={ph()}',(submission,)).fetchone():
                 raise HTTPException(409,'Questo report è stato eliminato. Ricarica la pagina per inserire una nuova chiusura.')
-            known=channels(cur,store)
-            if len(set(raw_names))!=len(raw_names) or not {'POS','Cash'}.issubset(raw_names) or any(n not in known for n in raw_names):
-                raise HTTPException(422,'Canali non validi: ricarica il modulo.')
-            lines=[dict(name=n,cents=cents(v)) for n,v in zip(raw_names,raw_amounts)]
-            # Only expenses not yet included in the entered revenue increase Cash.
-            expense_total=sum(e['cents'] for e in expenses if e['mode']=='add_to_cash')
-            for line in lines:
-                if line['name']=='Cash': line['cents']+=expense_total
-            total=sum(r['cents'] for r in lines)
+            day,notes,lines,total,expenses,fund_initial=parse_report(form,channels(cur,store))
             cur.execute(f"INSERT INTO closure_reports(store,closure_date,lines_json,total_cents,notes,created_by,created_at,submission_token) VALUES({','.join([ph()]*8)}) ON CONFLICT(submission_token) DO NOTHING RETURNING id",(store,day,json.dumps(lines,ensure_ascii=False),total,notes,user['username'],datetime.now(ZoneInfo('Europe/Rome')).isoformat(timespec='seconds'),submission))
             inserted=cur.fetchone()
             if inserted:
+                if user.get('role')!='admin':
+                    cur.execute(f'INSERT INTO closure_report_reviews(report_id) VALUES({ph()})',(inserted['id'],))
                 if fund_initial is not None:
                     cur.execute(f'INSERT INTO closure_report_cash_funds(report_id,initial_cents) VALUES({ph()},{ph()})',(inserted['id'],fund_initial))
                 cur.execute(f'INSERT INTO closure_report_expenses(report_id,lines_json) VALUES({ph()},{ph()})',(inserted['id'],json.dumps(expenses,ensure_ascii=False)))
-            row=cur.execute(f'SELECT * FROM closure_reports WHERE submission_token={ph()}',(submission,)).fetchone()
+            lock=' FOR UPDATE' if using_postgres() else ''
+            row=cur.execute(f'SELECT * FROM closure_reports WHERE submission_token={ph()}'+lock,(submission,)).fetchone()
+            if not row or row['store']!=store:
+                raise HTTPException(409,'Invio non disponibile.')
             export_report(cur,row)
         return RedirectResponse('/report-chiusura?store='+store+'&saved=true',303)

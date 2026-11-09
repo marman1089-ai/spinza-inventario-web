@@ -3,3 +3,14 @@
 .ad-hero .btn2,.ad-catalogue .btn2{display:inline-block;padding:10px 14px;border-radius:10px;text-decoration:none}.ad-shop header{min-height:32px!important}.ad-report .ad-link{line-height:1.5}
 
 .ad-file>summary::after{content:"⌄";color:var(--muted);font-size:18px}.ad-file[open]>summary::after{content:"⌃"}
+
+.ad-operations{margin-bottom:22px;padding:22px!important}
+.ad-quick-links{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-bottom:22px}
+.ad-quick-links a{display:grid;gap:5px;padding:12px 14px;text-decoration:none}
+.ad-quick-links small{color:var(--muted);line-height:1.4}
+.ad-access-table{max-height:300px;overflow:auto}
+.ad-access-table th{position:sticky;top:0;background:var(--panel)}
+.ad-filters{grid-template-columns:160px minmax(0,1fr) 190px auto}
+#ad-accounts,#ad-catalogue{scroll-margin-top:100px}
+@media(max-width:750px){.ad-filters{grid-template-columns:1fr 1fr}}
+@media(max-width:500px){.ad-filters,.ad-quick-links{grid-template-columns:1fr}}

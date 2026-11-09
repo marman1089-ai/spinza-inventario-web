@@ -1,4 +1,6 @@
 {% extends "base.html" %}{% set title="Fatture" %}{% block content %}
+{% if user.role!='admin' %}<p class="muted">I nuovi file caricati dai dipendenti compaiono in questo archivio dopo la conferma dell’admin.</p>{% endif %}
+
 <link rel="stylesheet" href="/static/multi_upload.css?v=3">
 <style>
 .supplier-picker{position:relative;flex:1;min-width:220px}.supplier-picker input{width:100%;box-sizing:border-box}.supplier-native-select{display:block!important;width:100%;min-height:42px;margin-top:7px;background:#1c2330;color:#fff;border:1px solid #64748b;border-radius:9px;padding:8px;max-width:100%;cursor:pointer}.supplier-picker:focus-within .supplier-native-select{border-color:#64b5f6}

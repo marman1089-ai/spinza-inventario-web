@@ -2,21 +2,6 @@
 {% set title = "Admin - Spinza Inventario" %}
 {% block content %}
   {% include "_admin_dashboard.html" %}
-  <div class="card" style="margin-bottom:12px;">
-    <div class="row" style="align-items:center;justify-content:space-between;">
-      <div>
-        <h2 style="margin:0;">Pannello Admin</h2>
-        <p class="muted" style="margin:6px 0 0 0;">Gestione dipendenti e funzioni rapide.</p>
-      </div>
-      <div class="row" style="justify-content:flex-end;">
-        <a class="pill" href="/inventario" style="text-decoration:none;color:var(--text);">📦 Inventario</a>
-        <a class="pill" href="/logs" style="text-decoration:none;color:var(--text);">🧾 Log</a>
-        <a class="pill" href="/admin/controllo-live" style="text-decoration:none;color:var(--text);">🔴 Controllo live</a>
-        <a class="pill" href="/admin/fasce-orarie" style="text-decoration:none;color:var(--text);">🕒 Fasce orarie</a>
-      </div>
-    </div>
-  </div>
-
   {% if msg %}
     <div class="card" style="margin-bottom:12px;background:rgba(16,185,129,.12);border:1px solid rgba(34,197,94,.32);">
       {{ msg }}
@@ -28,7 +13,7 @@
     </div>
   {% endif %}
 
-  <div class="card" style="margin-bottom:12px;">
+  <div class="card" id="ad-accounts" style="margin-bottom:12px;">
     <div class="row" style="align-items:flex-start;justify-content:space-between;gap:14px;">
       <div>
         <h3 style="margin:0 0 6px 0;">Crea account</h3>
@@ -74,7 +59,7 @@
           <tr>
             <th>Inventario</th>
             <th>Username</th>
-            <th>Ruolo</th><th>Ultimo accesso</th><th>Stato</th>
+            <th>Ruolo</th><th>Ultima attività</th><th>Stato</th>
             <th style="text-align:right;">Azioni</th>
           </tr>
         </thead>

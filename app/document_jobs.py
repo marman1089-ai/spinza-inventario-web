@@ -5,6 +5,7 @@ import os
 import threading
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
+from .document_review import available_document
 from .db import connect, using_postgres
 from .document_ai import extract_document
 
@@ -86,7 +87,7 @@ def enqueue_history(store=None,kind=None):
     with connect() as conn:
         cur=conn.cursor()
         for key,(table,_,_) in selected.items():
-            sql=f"SELECT id,store FROM {table} WHERE data IS NOT NULL AND COALESCE(filename,'')<>'registrazione-digitale'"
+            sql=f"SELECT id,store FROM {table} WHERE data IS NOT NULL AND COALESCE(filename,'')<>'registrazione-digitale' AND {available_document(key)}"
             args=[]
             if store and store!='ALL':
                 sql+=f' AND store={p()}';args.append(store)

@@ -5599,7 +5599,7 @@ def _store_switch_url(next_url: str, store: str) -> str:
     except ValueError:
         return fallback
     pages={
-        '/contanti-nei-negozi','/workspace','/inventario-home','/inventario','/inventario/conteggio',
+        '/admin/file-da-verificare','/admin/controllo-live','/contanti-nei-negozi','/workspace','/inventario-home','/inventario','/inventario/conteggio',
         '/inventario/report','/inventario/fatture-settimana','/inventario-controllo',
         '/admin','/admin/fasce-orarie','/admin/cassa','/admin/cassa/report',
         '/admin/controllo','/admin/digitalizzazione','/report-documenti',
@@ -5612,14 +5612,18 @@ def _store_switch_url(next_url: str, store: str) -> str:
         '/storico-ordini','/scambi','/file-archiviati','/profile','/updates',
         '/digitalizza/archivio/tutti',
     }
-    if target.scheme or target.netloc or target.path not in pages or '\\' in next_url:
+    if target.scheme or target.netloc or '\\' in next_url:
         return fallback
     path=target.path
+    if path.startswith('/admin/file-da-verificare/documenti/'):
+        path='/admin/file-da-verificare'
+    if path not in pages:
+        return fallback
     # Entity IDs and success/error messages belong to the previous store.
     filters={'area','day','start','end','q','month','month_key','period_type',
         'anchor_date','flow_date','payment_method','category','cat','loc','only_low',
         'from_month','to_month','year','week','days','supplier','q_date','kind',
-        'limit','q_user','q_day','q_area','q_group','q_product','asof','who'}
+        'limit','q_user','q_day','q_area','q_group','q_product','asof','who','all_pending'}
     params=[(k,v) for k,v in parse_qsl(target.query,keep_blank_values=True) if k in filters]
     store_pages={'/inventario','/inventario/conteggio','/inventario/report',
         '/inventario/fatture-settimana','/inventario-controllo','/admin',
@@ -7507,6 +7511,7 @@ def closures_page(request: Request, q: str = ""):
             sql += f" AND CAST(closure_date AS TEXT) LIKE {ph}"
             params.append(f"%{q}%")
 
+        sql += " AND " + available_document('chiusure')
         sql += " ORDER BY store, closure_date DESC, id DESC" if store == "ALL" else " ORDER BY closure_date DESC, id DESC"
         rows = cur.execute(sql, tuple(params)).fetchall()
     with connect() as digital_conn:
@@ -7574,6 +7579,7 @@ async def closures_upload(request: Request, closure_date: str = Form(""), files:
             (store, closure_date, user["username"], filename, content_type, content),
         )
         new_doc_id = cur.fetchone()["id"]
+        mark_upload(cur, 'chiusure', new_doc_id, user)
         _log(
             cur,
             store=store,
@@ -7629,21 +7635,26 @@ def closures_delete(request: Request, doc_id: int):
 
     with connect() as conn:
         cur = conn.cursor()
+        if not using_postgres():
+            cur.execute('BEGIN IMMEDIATE')
+        lock = ' FOR UPDATE' if using_postgres() else ''
 
         if store == "ALL" and is_admin(request):
             info = cur.execute(
-                f"SELECT store, closure_date, filename, uploaded_by, ts FROM closures WHERE id={ph}",
+                f"SELECT store, closure_date, filename, uploaded_by, ts FROM closures WHERE id={ph}"+lock,
                 (int(doc_id),),
             ).fetchone()
         else:
             info = cur.execute(
-                f"SELECT store, closure_date, filename, uploaded_by, ts FROM closures WHERE id={ph} AND store={ph}",
+                f"SELECT store, closure_date, filename, uploaded_by, ts FROM closures WHERE id={ph} AND store={ph}"+lock,
                 (int(doc_id), store),
             ).fetchone()
 
         if not info and not is_admin(request):
             return PlainTextResponse("Documento non eliminabile", status_code=403)
         if info:
+            if user.get('role')!='admin' and cur.execute(f"SELECT 1 FROM admin_document_reviews WHERE kind={ph} AND doc_id={ph} AND reviewed_at IS NOT NULL",('chiusure',doc_id)).fetchone():
+                return PlainTextResponse("Documento confermato. Eliminazione riservata all’admin.",status_code=403)
             if not _can_delete_uploaded_document(user, info):
                 return PlainTextResponse("Puoi eliminare solo i tuoi file nel giorno del caricamento (ora italiana).", status_code=403)
             if store == "ALL" and is_admin(request):
@@ -7653,6 +7664,7 @@ def closures_delete(request: Request, doc_id: int):
                 cur.execute(f"DELETE FROM closures WHERE id={ph} AND store={ph}", (int(doc_id), store))
                 store_for_log = store
 
+            cur.execute(f'DELETE FROM admin_document_reviews WHERE kind={ph} AND doc_id={ph}',('chiusure',doc_id))
             cur.execute(
                 f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
                 (store_for_log, user["username"], "DELETE", "CHIUSURE", str(info.get("closure_date") or ""), 0.0),
@@ -7692,6 +7704,7 @@ def secondary_expenses_page(request: Request, q: str = ""):
             sql += f" AND CAST(expense_date AS TEXT) LIKE {ph}"
             params.append(f"%{q}%")
 
+        sql += " AND " + available_document('spese-secondarie')
         sql += " ORDER BY store, expense_date DESC, id DESC" if store == "ALL" else " ORDER BY expense_date DESC, id DESC"
         rows = cur.execute(sql, tuple(params)).fetchall()
 
@@ -7753,6 +7766,7 @@ async def secondary_expenses_upload(request: Request, expense_date: str = Form("
             (store, expense_date, user["username"], filename, content_type, content),
         )
         new_doc_id = cur.fetchone()["id"]
+        mark_upload(cur, 'spese-secondarie', new_doc_id, user)
         _log(
             cur,
             store=store,
@@ -7809,21 +7823,26 @@ def secondary_expenses_delete(request: Request, doc_id: int):
 
     with connect() as conn:
         cur = conn.cursor()
+        if not using_postgres():
+            cur.execute('BEGIN IMMEDIATE')
+        lock = ' FOR UPDATE' if using_postgres() else ''
 
         if store == "ALL" and is_admin(request):
             info = cur.execute(
-                f"SELECT store, expense_date, filename, uploaded_by, ts FROM secondary_expenses WHERE id={ph}",
+                f"SELECT store, expense_date, filename, uploaded_by, ts FROM secondary_expenses WHERE id={ph}"+lock,
                 (int(doc_id),),
             ).fetchone()
         else:
             info = cur.execute(
-                f"SELECT store, expense_date, filename, uploaded_by, ts FROM secondary_expenses WHERE id={ph} AND store={ph}",
+                f"SELECT store, expense_date, filename, uploaded_by, ts FROM secondary_expenses WHERE id={ph} AND store={ph}"+lock,
                 (int(doc_id), store),
             ).fetchone()
 
         if not info and not is_admin(request):
             return PlainTextResponse("Documento non eliminabile", status_code=403)
         if info:
+            if user.get('role')!='admin' and cur.execute(f"SELECT 1 FROM admin_document_reviews WHERE kind={ph} AND doc_id={ph} AND reviewed_at IS NOT NULL",('spese-secondarie',doc_id)).fetchone():
+                return PlainTextResponse("Documento confermato. Eliminazione riservata all’admin.",status_code=403)
             if not _can_delete_uploaded_document(user, info):
                 return PlainTextResponse("Puoi eliminare solo i tuoi file nel giorno del caricamento (ora italiana).", status_code=403)
             if store == "ALL" and is_admin(request):
@@ -7833,6 +7852,7 @@ def secondary_expenses_delete(request: Request, doc_id: int):
                 cur.execute(f"DELETE FROM secondary_expenses WHERE id={ph} AND store={ph}", (int(doc_id), store))
                 store_for_log = store
 
+            cur.execute(f'DELETE FROM admin_document_reviews WHERE kind={ph} AND doc_id={ph}',('spese-secondarie',doc_id))
             cur.execute(
                 f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
                 (store_for_log, user["username"], "DELETE", "SPESE", str(info.get("expense_date") or ""), 0.0),
@@ -8709,6 +8729,7 @@ def invoices_page(request: Request, supplier: str = "", q_date: str = ""):
             sql += f" AND CAST(doc_date AS TEXT) LIKE {ph}"
             params.append(f"%{q_date}%")
 
+        sql += " AND " + available_document('fatture')
         sql += " ORDER BY store, doc_date DESC, id DESC" if store == "ALL" else " ORDER BY doc_date DESC, id DESC"
         rows = cur.execute(sql, tuple(params)).fetchall()
         supplier_rows = cur.execute("SELECT DISTINCT supplier FROM invoices_docs WHERE supplier IS NOT NULL AND TRIM(supplier) <> ''").fetchall()
@@ -8789,6 +8810,7 @@ async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: 
             (store, supplier, doc_date, user["username"], filename, content_type, content),
         )
         new_doc_id = cur.fetchone()["id"]
+        mark_upload(cur, 'fatture', new_doc_id, user)
         _log(
             cur,
             store=store,
@@ -9193,22 +9215,27 @@ def invoices_delete(request: Request, doc_id: int):
 
     with connect() as conn:
         cur = conn.cursor()
+        if not using_postgres():
+            cur.execute('BEGIN IMMEDIATE')
+        lock = ' FOR UPDATE' if using_postgres() else ''
 
         # recupera info per log
         if store == "ALL" and is_admin(request):
             info = cur.execute(
-                f"SELECT store, supplier, doc_date, filename, uploaded_by, ts FROM invoices_docs WHERE id={ph}",
+                f"SELECT store, supplier, doc_date, filename, uploaded_by, ts FROM invoices_docs WHERE id={ph}"+lock,
                 (int(doc_id),),
             ).fetchone()
         else:
             info = cur.execute(
-                f"SELECT store, supplier, doc_date, filename, uploaded_by, ts FROM invoices_docs WHERE id={ph} AND store={ph}",
+                f"SELECT store, supplier, doc_date, filename, uploaded_by, ts FROM invoices_docs WHERE id={ph} AND store={ph}"+lock,
                 (int(doc_id), store),
             ).fetchone()
 
         if not info and not is_admin(request):
             return PlainTextResponse("Documento non eliminabile", status_code=403)
         if info:
+            if user.get('role')!='admin' and cur.execute(f"SELECT 1 FROM admin_document_reviews WHERE kind={ph} AND doc_id={ph} AND reviewed_at IS NOT NULL",('fatture',doc_id)).fetchone():
+                return PlainTextResponse("Documento confermato. Eliminazione riservata all’admin.",status_code=403)
             if not _can_delete_uploaded_document(user, info):
                 return PlainTextResponse("Puoi eliminare solo i tuoi file nel giorno del caricamento (ora italiana).", status_code=403)
             if store == "ALL" and is_admin(request):
@@ -9219,6 +9246,7 @@ def invoices_delete(request: Request, doc_id: int):
                 store_for_log = store
 
             # log: modulo fatture
+            cur.execute(f'DELETE FROM admin_document_reviews WHERE kind={ph} AND doc_id={ph}',('fatture',doc_id))
             cur.execute(
                 f"INSERT INTO logs(ts, store, username, action, category, name, delta) VALUES({now},{ph},{ph},{ph},{ph},{ph},{ph})",
                 (store_for_log, user["username"], "DELETE", "FATTURE", f'{info.get("supplier") or ""} {info.get("doc_date") or ""}'.strip(), 0.0),
@@ -9576,7 +9604,7 @@ def kitchen_weekly_invoices(request:Request,store:str='',week:str='',doc:int=0):
     ph=_ph()
     with connect() as conn:
         c=conn.cursor()
-        docs=c.execute(f"SELECT id,supplier,doc_date,filename FROM invoices_docs WHERE store={ph} AND doc_date>={ph} AND doc_date<={ph} ORDER BY doc_date,id",(store,week,week_end)).fetchall()
+        docs=c.execute(f"SELECT id,supplier,doc_date,filename FROM invoices_docs WHERE store={ph} AND doc_date>={ph} AND doc_date<={ph} AND {available_document('fatture')} ORDER BY doc_date,id",(store,week,week_end)).fetchall()
         reviews=c.execute(f"SELECT doc_id,status,updated_by,updated_at,id FROM kitchen_invoice_reviews WHERE store={ph} AND week_start={ph}",(store,week)).fetchall()
         products=c.execute(f"SELECT id,name,category,unit FROM products WHERE store={ph} AND area={ph} ORDER BY category,name",(store,'prodotti')).fetchall()
         revmap={int(r['doc_id']):dict(r) for r in reviews}
@@ -9606,7 +9634,7 @@ def kitchen_invoice_file(request:Request,doc_id:int,store:str='',week:str=''):
     end=(date.fromisoformat(week)+timedelta(days=6)).isoformat()
     ph=_ph()
     with connect() as conn:
-        row=conn.cursor().execute(f"SELECT data,content_type FROM invoices_docs WHERE id={ph} AND store={ph} AND doc_date>={ph} AND doc_date<={ph}",(doc_id,store,week,end)).fetchone()
+        row=conn.cursor().execute(f"SELECT data,content_type FROM invoices_docs WHERE id={ph} AND store={ph} AND doc_date>={ph} AND doc_date<={ph} AND {available_document('fatture')}",(doc_id,store,week,end)).fetchone()
     if not row:return PlainTextResponse('Documento non trovato',status_code=404)
     return Response(content=row['data'],media_type=row['content_type'] or 'application/pdf',headers={'Cache-Control':'private, max-age=120','X-Content-Type-Options':'nosniff','Content-Disposition':'inline'})
 
@@ -9628,7 +9656,7 @@ async def kitchen_invoice_save(request:Request):
     ph=_ph()
     with connect() as conn:
         c=conn.cursor()
-        document=c.execute(f"SELECT id FROM invoices_docs WHERE id={ph} AND store={ph} AND doc_date>={ph} AND doc_date<={ph}",(doc_id,store,week,end)).fetchone()
+        document=c.execute(f"SELECT id FROM invoices_docs WHERE id={ph} AND store={ph} AND doc_date>={ph} AND doc_date<={ph} AND {available_document('fatture')}",(doc_id,store,week,end)).fetchone()
         if not document:return PlainTextResponse('Fattura non trovata per questa settimana',status_code=404)
         products=c.execute(f"SELECT id FROM products WHERE store={ph} AND area={ph}",(store,'prodotti')).fetchall()
         allowed={int(r['id']) for r in products}
@@ -9656,7 +9684,7 @@ async def kitchen_invoice_save(request:Request):
             c.execute(f"INSERT INTO kitchen_invoice_review_lines(review_id,product_id,qty) VALUES({ph},{ph},{ph})",(rid,pid,qty))
         nextdoc=doc_id
         if status=='done':
-            rows=c.execute(f"SELECT id FROM invoices_docs WHERE store={ph} AND doc_date>={ph} AND doc_date<={ph} ORDER BY doc_date,id",(store,week,end)).fetchall()
+            rows=c.execute(f"SELECT id FROM invoices_docs WHERE store={ph} AND doc_date>={ph} AND doc_date<={ph} AND {available_document('fatture')} ORDER BY doc_date,id",(store,week,end)).fetchall()
             done=c.execute(f"SELECT doc_id FROM kitchen_invoice_reviews WHERE store={ph} AND week_start={ph} AND status='done'",(store,week)).fetchall()
             doneids={int(r['doc_id']) for r in done}
             nextdoc=next((int(r['id']) for r in rows if int(r['id']) not in doneids),doc_id)
@@ -9799,7 +9827,7 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
                 periods.append({'from':str(before['counted_at'])[:10],'to':str(after['counted_at'])[:10],'detail':detail})
         summaries=[{'name':k[0],'unit':k[1],'outgoing':v} for k,v in sorted(totals.items())]
         archive=cur.execute(f'SELECT id,counted_at,username FROM inventory_period_count_headers WHERE store={ph} AND area={ph} AND counted_at>={ph} AND counted_at<={ph} ORDER BY counted_at DESC,id DESC',(store,area,start_day.isoformat(),end_day.isoformat()+' 23:59:59')).fetchall()
-        invoices=cur.execute(f'SELECT id,supplier,doc_date,filename FROM invoices_docs WHERE store={ph} AND doc_date>={ph} AND doc_date<={ph} ORDER BY doc_date,id',(store,start_day.isoformat(),end_day.isoformat())).fetchall()
+        invoices=cur.execute(f'SELECT id,supplier,doc_date,filename FROM invoices_docs WHERE store={ph} AND doc_date>={ph} AND doc_date<={ph} AND {available_document('fatture')} ORDER BY doc_date,id',(store,start_day.isoformat(),end_day.isoformat())).fetchall()
         known=cur.execute(f"SELECT counted_at FROM inventory_period_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC LIMIT 1",(store,area)).fetchone()
     return render('stock_report.html',user=user,area=area,store=store,stores=STORES,
         start=start_day.isoformat(),end=end_day.isoformat(),periods=periods,totals=summaries,
@@ -9882,7 +9910,7 @@ def inventory_period_invoice(request: Request, doc_id: int, store: str = ''):
         return PlainTextResponse('Accesso negato',status_code=403)
     ph = _ph()
     with connect() as conn:
-        row = conn.cursor().execute(f'SELECT data,content_type FROM invoices_docs WHERE id={ph} AND store={ph}',(doc_id,store)).fetchone()
+        row = conn.cursor().execute(f"SELECT data,content_type FROM invoices_docs WHERE id={ph} AND store={ph} AND {available_document('fatture')}",(doc_id,store)).fetchone()
     if not row: return PlainTextResponse('Fattura non trovata',status_code=404)
     return Response(content=bytes(row['data']),media_type=row['content_type'] or 'application/pdf',headers={'Content-Disposition':'inline','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
 
@@ -9932,6 +9960,9 @@ async def delete_inventory_report(request: Request, count_id: int):
 
 from .closure_reports import install as install_closure_reports
 install_closure_reports(app, globals())
+
+from .document_review import available_document, install as install_document_review, mark_upload
+install_document_review(app, globals())
 
 from .admin_dashboard import install as install_admin_dashboard
 install_admin_dashboard(app, globals())
