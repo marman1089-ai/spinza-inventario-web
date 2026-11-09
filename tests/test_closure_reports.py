@@ -20,7 +20,7 @@ class ReportsTest(unittest.TestCase):
             app=FastAPI(); user={'role':'admin','username':'test','store':'spinza'}; scope=['spinza']
             env=Environment(loader=FileSystemLoader(Path(__file__).resolve().parents[1]/'app/templates'),autoescape=select_autoescape(['html']))
             def render(name,**ctx):
-                ctx.update(header_store=ctx['selected'],active_store=ctx['selected'])
+                ctx.update(header_store=ctx.get('selected','spinza'),active_store=ctx.get('selected','spinza'))
                 return env.get_template(name).render(**ctx)
             def insert(cur,store,day,method,amount,notes,user):
                 cur.execute('INSERT INTO cash_entries(store,flow_date,payment_method,amount,notes,created_by) VALUES(?,?,?,?,?,?)',(store,day,method,amount,notes,user))
@@ -31,7 +31,7 @@ class ReportsTest(unittest.TestCase):
             with db.connect() as c:
                 c.cursor().execute('CREATE TABLE cash_expenses (store TEXT,flow_date TEXT,amount REAL,notes TEXT)')
                 c.cursor().execute('CREATE TABLE cash_entries (store TEXT,flow_date TEXT,payment_method TEXT,amount REAL,notes TEXT,created_by TEXT)')
-            routes={r.path:r.endpoint for r in app.routes if r.path.startswith('/report-chiusura')}
+            routes={r.path:r.endpoint for r in app.routes if r.path.startswith(('/report-chiusura','/admin/file-da-verificare'))}
             session={}; page=routes['/report-chiusura'](Request(session)); self.assertIn('Report chiusura',page)
             csrf=session['closure_reports_csrf']
             def send(path,data): return run(routes[path](Request(session,[('csrf',csrf),('store','spinza')]+data)))
@@ -254,6 +254,34 @@ class ReportsTest(unittest.TestCase):
             for value in ['-1','NaN','1.234']:
                 with self.assertRaises(HTTPException):
                     send('/report-chiusura/salva',base+[('submission','n'*43),('cash_fund_initial',value)])
+            user['role']='staff'
+            pending=base+[('submission','w'*43),('expense_name','Spesa iniziale'),('expense_amount','10')]
+            with db.connect() as c:
+                prior_income=c.cursor().execute('SELECT COUNT(*) AS n FROM cash_entries').fetchone()['n']
+                prior_expenses=c.cursor().execute('SELECT COUNT(*) AS n FROM cash_expenses').fetchone()['n']
+            self.assertEqual(send('/report-chiusura/salva',pending).status_code,303)
+            app.router.on_startup[-1]()
+            with db.connect() as c:
+                rid=c.cursor().execute('SELECT report_id FROM closure_report_reviews').fetchone()['report_id']
+                self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM cash_entries').fetchone()['n'],prior_income)
+                self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM cash_expenses').fetchone()['n'],prior_expenses)
+            with self.assertRaises(HTTPException) as denied:
+                routes['/admin/file-da-verificare'](Request(session),rid)
+            self.assertEqual(denied.exception.status_code,403)
+            user['role']='admin'
+            review=routes['/admin/file-da-verificare'](Request(session),rid)
+            self.assertIn('Spesa iniziale',review)
+            self.assertIn('value="100,00"',review)
+            edited=[('report_id',str(rid)),('closure_date','2026-11-03'),('channel','POS'),('amount','25'),('channel','Cash'),('amount','80'),('expense_name','Spesa corretta'),('expense_amount','12'),('expense_mode','add_to_cash'),('cash_fund_initial','40'),('notes','Verificato')]
+            self.assertEqual(send('/admin/file-da-verificare/conferma',edited).status_code,303)
+            with self.assertRaises(HTTPException) as duplicate:
+                send('/admin/file-da-verificare/conferma',edited)
+            self.assertEqual(duplicate.exception.status_code,409)
+            with db.connect() as c:
+                rows=c.cursor().execute("SELECT * FROM cash_entries WHERE flow_date='2026-11-03'").fetchall()
+                self.assertEqual({r['payment_method']:r['amount'] for r in rows},{'POS':25,'Contanti':92})
+                self.assertEqual(c.cursor().execute("SELECT amount FROM cash_expenses WHERE flow_date='2026-11-03'").fetchone()['amount'],12)
+                self.assertEqual(c.cursor().execute('SELECT reviewed_by FROM closure_report_reviews WHERE report_id=?',(rid,)).fetchone()['reviewed_by'],'test')
             user.clear()
             with self.assertRaises(HTTPException):routes['/report-chiusura'](Request(session))
 if __name__=='__main__': unittest.main()

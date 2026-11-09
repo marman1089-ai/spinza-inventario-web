@@ -1,5 +1,6 @@
 import io
 import json
+import re
 import unittest
 import zipfile
 from datetime import date
@@ -88,6 +89,41 @@ class AdminDashboardTests(unittest.TestCase):
         with zipfile.ZipFile(z,'w') as archive:archive.writestr('spese/dettagli.txt','qualcosa')
         text,_,state,_=ad.extract(z.getvalue(),'documenti.zip','application/zip')
         self.assertIn('spese/dettagli.txt',text)
+    def test_default_recent_files_and_specific_date(self):
+        old=self.file('archivio-storico.txt')
+        self.sql("UPDATE archive_files SET ts='2026-10-01 10:00:00' WHERE id=?",(old,))
+        today=self.file('archivio-oggi.txt')
+        self.sql("UPDATE archive_files SET ts='2026-11-09T10:00:00+00:00' WHERE id=?",(today,))
+        boundary=self.file('fuori-periodo.txt')
+        self.sql("UPDATE archive_files SET ts='2026-11-07T21:00:00+00:00' WHERE id=?",(boundary,))
+        with patch.object(main,'_rome_today',return_value=date(2026,11,9)):
+            recent=self.client.get('/admin/indice-file').json()
+            self.assertEqual([row['id'] for row in recent['rows']],[today])
+            past=self.client.get('/admin/indice-file?day=2026-10-01').json()
+            self.assertEqual([row['id'] for row in past['rows']],[old])
+
+    def test_staff_documents_are_released_only_by_admin_review(self):
+        for kind, table in [('fatture','invoices_docs'),('chiusure','closures'),('spese-secondarie','secondary_expenses')]:
+            self.login(2)
+            upload=self.client.post(f'/{kind}/upload',data={'supplier':'Fornitore iniziale'},files=[('files',('attesa.pdf',self.pdf(),'application/pdf'))],follow_redirects=False)
+            self.assertEqual(upload.status_code,303,upload.text)
+            doc_id=self.sql(f'SELECT MAX(id) AS id FROM {table}')[0]['id']
+            url=f'/admin/file-da-verificare/documenti/{kind}/{doc_id}'
+            self.assertEqual(self.client.get(url).status_code,403)
+            self.assertNotIn('attesa.pdf',self.client.get(f'/{kind}').text)
+            self.login(store='ALL')
+            queue=self.client.get('/admin/file-da-verificare')
+            self.assertIn(url,queue.text)
+            page=self.client.get(url)
+            csrf=re.search(r'name="csrf" value="([^"]+)"',page.text).group(1)
+            payload={'csrf':csrf,'doc_date':'2026-11-08','filename':f'confermato-{kind}.pdf','supplier':'Fornitore corretto'}
+            self.assertEqual(self.client.post(url,data=payload,follow_redirects=False).status_code,303)
+            self.assertEqual(self.client.post(url,data=payload,follow_redirects=False).status_code,409)
+            self.assertNotIn(url,self.client.get('/admin/file-da-verificare').text)
+            self.assertIn(f'confermato-{kind}.pdf',self.client.get(f'/{kind}').text)
+            self.login(2)
+            self.assertEqual(self.client.post(f'/{kind}/{doc_id}/delete',follow_redirects=False).status_code,403)
+
     def test_metadata_page_does_not_read_original_blobs(self):
         self.file(content=b'private original')
         with db.connect() as conn:
