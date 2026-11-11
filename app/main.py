@@ -9827,7 +9827,8 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
                 periods.append({'from':str(before['counted_at'])[:10],'to':str(after['counted_at'])[:10],'detail':detail})
         summaries=[{'name':k[0],'unit':k[1],'outgoing':v} for k,v in sorted(totals.items())]
         archive=cur.execute(f'SELECT id,counted_at,username FROM inventory_period_count_headers WHERE store={ph} AND area={ph} AND counted_at>={ph} AND counted_at<={ph} ORDER BY counted_at DESC,id DESC',(store,area,start_day.isoformat(),end_day.isoformat()+' 23:59:59')).fetchall()
-        invoices=cur.execute(f'SELECT id,supplier,doc_date,filename FROM invoices_docs WHERE store={ph} AND doc_date>={ph} AND doc_date<={ph} AND {available_document('fatture')} ORDER BY doc_date,id',(store,start_day.isoformat(),end_day.isoformat())).fetchall()
+        invoice_visibility = available_document('fatture')
+        invoices=cur.execute(f"SELECT id,supplier,doc_date,filename FROM invoices_docs WHERE store={ph} AND doc_date>={ph} AND doc_date<={ph} AND {invoice_visibility} ORDER BY doc_date,id",(store,start_day.isoformat(),end_day.isoformat())).fetchall()
         known=cur.execute(f"SELECT counted_at FROM inventory_period_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC LIMIT 1",(store,area)).fetchone()
     return render('stock_report.html',user=user,area=area,store=store,stores=STORES,
         start=start_day.isoformat(),end=end_day.isoformat(),periods=periods,totals=summaries,
