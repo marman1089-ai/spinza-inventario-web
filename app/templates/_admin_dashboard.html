@@ -27,3 +27,12 @@
 <div class="ad-pages"><button class="btn2" id="ad-prev" type="button" disabled>← Precedenti</button><button class="btn2" id="ad-next" type="button" {% if admin_dashboard.catalogue.pages<=1 %}disabled{% endif %}>Successivi →</button><button class="btn2" id="ad-refresh" type="button">Aggiorna indice visualizzato</button></div><p class="muted ad-footnote">L’indice cerca nel testo estraibile. Per foto, PDF scansionati, file protetti o formati non supportati resta disponibile l’originale. Le anteprime sono copie di consultazione; la prima indicizzazione richiede tempo.</p></section>
 <script src="/static/js/admin-dashboard.js?v=2" defer></script>
 {% endif %}
+
+{% if admin_dashboard.cash %}<section class="card"><h2>Contanti reali confermati</h2>
+<table><thead><tr><th>Negozio</th><th>Data conteggio</th><th>Saldo contato</th><th>Cash riscontrato nel periodo</th><th>Differenza</th></tr></thead><tbody>
+{% for item in admin_dashboard.cash %}<tr><td>{{ item.label }}</td>{% if item.row %}<td>{{ item.row.day }}</td>
+<td>{{ ('%.2f' % (item.row.counted_cents/100)).replace('.',',') }} €</td>
+<td>{{ ('%.2f' % ((item.row.cash_cents+item.row.counted_cents-item.row.expected_cents)/100)).replace('.',',') }} €</td>
+<td>{{ ('%+.2f' % ((item.row.counted_cents-item.row.expected_cents)/100)).replace('.',',') }} €</td>
+{% else %}<td colspan="4">In attesa di conferma</td>{% endif %}</tr>{% endfor %}
+</tbody></table><a href="/contanti-nei-negozi">Apri riconciliazione contanti</a></section>{% endif %}

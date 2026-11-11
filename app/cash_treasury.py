@@ -26,6 +26,11 @@ def ensure_schema(cur):
     cur.execute('''CREATE TABLE IF NOT EXISTS cash_treasury_openings (
         store TEXT PRIMARY KEY,start_date TEXT NOT NULL,amount_cents BIGINT NOT NULL,
         created_by TEXT NOT NULL,created_at TEXT NOT NULL)''')
+    cur.execute(f'''CREATE TABLE IF NOT EXISTS cash_treasury_reconciliations (
+        id {ident}, store TEXT NOT NULL, day TEXT NOT NULL, expected_cents BIGINT NOT NULL,
+        counted_cents BIGINT NOT NULL, cash_cents BIGINT NOT NULL, previous_cents BIGINT,
+        notes TEXT NOT NULL, counted_by TEXT NOT NULL, counted_at TEXT NOT NULL, token TEXT NOT NULL UNIQUE)''')
+    cur.execute('CREATE INDEX IF NOT EXISTS ix_treasury_reconciliation ON cash_treasury_reconciliations(store,day,id)')
     cur.execute('''CREATE TABLE IF NOT EXISTS cash_treasury_counts (
         store TEXT NOT NULL,day TEXT NOT NULL,amount_cents BIGINT NOT NULL,
         counted_by TEXT NOT NULL,counted_at TEXT NOT NULL,PRIMARY KEY(store,day))''')
@@ -62,7 +67,7 @@ def events(cur):
     for store,row in openings.items():add(store,row['start_date'],row['amount_cents'],'opening','Saldo iniziale contato',row['created_by'],stamp=row['created_at'])
     for row in cur.execute('SELECT e.id,e.store,e.flow_date,e.payment_method,e.amount,e.notes,e.created_by,e.ts FROM cash_entries e JOIN cash_treasury_openings b ON b.store=e.store AND CAST(e.flow_date AS TEXT)>=b.start_date').fetchall():
         if str(row['payment_method'] or '').strip().casefold() in CASH_METHODS:
-            add(row['store'],row['flow_date'],amount(row['amount']),'income',row['notes'] or 'Incasso contanti',row['created_by'],row['id'],row['ts'])
+            add(row['store'],row['flow_date'],amount(row['amount']),'report_income' if str(row['notes'] or '').startswith('Report chiusura #') else 'income',row['notes'] or 'Incasso contanti',row['created_by'],row['id'],row['ts'])
     linked={r['expense_id'] for r in cur.execute("SELECT expense_id FROM cash_treasury_payments WHERE cancelled_at='' AND expense_id IS NOT NULL").fetchall()}
     unknown=[]
     for row in cur.execute('SELECT e.id,e.store,e.flow_date,e.payment_method,e.category,e.amount,e.notes,e.created_by,e.ts FROM cash_expenses e JOIN cash_treasury_openings b ON b.store=e.store AND CAST(e.flow_date AS TEXT)>=b.start_date').fetchall():
@@ -70,7 +75,7 @@ def events(cur):
         method=str(row['payment_method'] or '').strip().casefold()
         closure=(row['category']=='Spese chiusura' and str(row['notes'] or '').startswith('Report chiusura #'))
         if method in CASH_METHODS or closure:
-            add(row['store'],row['flow_date'],-amount(row['amount']),'expense',row['notes'] or row['category'],row['created_by'],row['id'],row['ts'])
+            add(row['store'],row['flow_date'],-amount(row['amount']),'report_expense' if closure else 'expense',row['notes'] or row['category'],row['created_by'],row['id'],row['ts'])
         elif not method:
             unknown.append(dict(row))
     payments=[dict(r) for r in cur.execute('SELECT * FROM cash_treasury_payments ORDER BY payment_date DESC,id DESC').fetchall()]
@@ -90,6 +95,31 @@ def events(cur):
         add(row['store'],row['day'],row['delta_cents'],'adjustment',row['notes'],row['created_by'],row['id'],row['created_at'])
     stream.sort(key=lambda r:(r['day'],0 if r['kind']=='opening' else 1,r['stamp'],r['kind'],r['id'] or 0))
     return openings,stream,payments,repayments,unknown
+
+def reconciliation_rows(cur, day):
+    return [dict(row) for row in cur.execute(
+        f'SELECT * FROM cash_treasury_reconciliations WHERE day<={p()} ORDER BY day DESC,id DESC',(day,)
+    ).fetchall()]
+
+
+def reconciliation_balance(opening, stream, rows, store, day):
+    if not opening or opening['start_date']>day:
+        return None, 0
+    previous=next((row for row in rows if row['store']==store and row['day']<day),None)
+    base=previous['counted_cents'] if previous else opening['amount_cents']
+    relevant=[row for row in stream if row['store']==store and row['day']<=day
+              and row['day']>=opening['start_date'] and (not previous or row['day']>previous['day'])]
+    cash=sum(row['delta'] for row in relevant if row['kind'] in ('report_income','report_expense'))
+    admin_delta=sum(row['delta'] for row in relevant if row['kind'] in ('payment','repayment','adjustment'))
+    return base+cash+admin_delta,cash
+
+
+def confirmed_cash(cur, day, scope):
+    rows=reconciliation_rows(cur,day)
+    stores=ORDER if scope=='ALL' else (scope,)
+    latest=[next((row for row in rows if row['store']==store),None) for store in stores]
+    return [dict(label=LABELS[store],row=row) for store,row in zip(stores,latest)]
+
 
 def balances(openings,stream,asof):
     totals={store:0 for store in openings}
@@ -167,41 +197,61 @@ def install(app,api):
     def startup():
         with connect() as conn:ensure_schema(conn.cursor())
     @app.get('/contanti-nei-negozi')
-    def index(request:Request,asof:str='',start:str='',end:str='',who:str=''):
-        user=admin(request);scope=api['_current_store_scope'](request,user)
-        cutoff=day_value(asof) if asof else api['_rome_today']().isoformat()
-        first=day_value(start) if start else '';last=day_value(end) if end else cutoff
-        if first and first>last:raise HTTPException(422,'Intervallo non valido.')
+    def index(request:Request,asof:str=''):
+        user=admin(request)
+        today=api['_rome_today']().isoformat()
+        cutoff=day_value(asof) if asof else today
         with connect() as conn:
-            cur=conn.cursor();openings,stream,payments,repayments,unknown=events(cur)
-            current=balances(openings,stream,cutoff)
-            available_now=balances(openings,stream,api['_rome_today']().isoformat())
-            counts={r['store']:r['amount_cents'] for r in cur.execute(
-                f'SELECT store,amount_cents FROM cash_treasury_counts WHERE day={p()}',(cutoff,)
-            ).fetchall()}
-            unlinked=[dict(r) for r in cur.execute("SELECT id,store,flow_date,amount,category,notes,payment_method FROM cash_expenses WHERE store IN ('spinza','reburger_maggio','reburger_camaldoli') AND category<>'Spese chiusura' AND id NOT IN (SELECT expense_id FROM cash_treasury_payments WHERE cancelled_at='' AND expense_id IS NOT NULL) ORDER BY flow_date DESC,id DESC LIMIT 200").fetchall()]
-        selected=ORDER if scope=='ALL' else (scope,)
-        cards=[dict(store=st,label=LABELS[st],company=COMPANIES[company(st)],opening=openings.get(st),balance=current.get(st)) for st in selected]
-        def summary(label, members):
-            expected=sum(current[st] for st in members) if all(current.get(st) is not None for st in members) else None
-            counted=sum(counts[st] for st in members) if all(st in counts for st in members) else None
-            return dict(label=label,expected=expected,counted=counted,
-                        difference=counted-expected if counted is not None and expected is not None else None)
+            cur=conn.cursor()
+            openings,stream,payments,_,_=events(cur)
+            records=reconciliation_rows(cur,cutoff)
+        cards=[]
+        for store in ORDER:
+            opening=openings.get(store)
+            expected,cash=reconciliation_balance(opening,stream,records,store,cutoff)
+            record=next((row for row in records if row['store']==store and row['day']==cutoff),None)
+            cards.append(dict(store=store,label=LABELS[store],company=COMPANIES[company(store)],
+                              opening=opening,expected=expected,cash=cash,record=record,
+                              count_token=secrets.token_urlsafe(32),expense_token=secrets.token_urlsafe(32)))
+        summaries=[]
+        for label,members in [(name,[c for c in cards if c['company']==name]) for name in COMPANIES.values()]+[('Totale generale',cards)]:
+            expected=sum(c['expected'] for c in members) if all(c['expected'] is not None for c in members) else None
+            counted=sum(c['record']['counted_cents'] for c in members) if all(c['record'] for c in members) else None
+            summaries.append(dict(label=label,expected=expected,counted=counted,
+                                  difference=counted-expected if counted is not None and expected is not None else None))
+        return api['render']('cash_treasury.html',request=request,user=user,brand=api['_current_store_scope'](request,user),
+                             stores=api['STORES'],labels=LABELS,cards=cards,summaries=summaries,
+                             reconciliations=records,payments=payments,today=today,asof=cutoff,csrf=token(request))
+    @app.post('/contanti-nei-negozi/riconcilia')
+    async def reconcile(request:Request):
+        user,form=await form_for(request)
+        store=store_key(form.get('store'))
+        day=day_value(form.get('day'))
+        key=submission(form)
+        value=cents(form.get('amount',''))
+        notes=str(form.get('notes','')).strip()
+        if len(notes)>1000:
+            raise HTTPException(422,'Nota troppo lunga.')
+        with connect() as conn:
+            cur=conn.cursor()
+            begin(cur)
+            require_base(cur,store,day)
+            if cur.execute(f'SELECT id FROM cash_treasury_reconciliations WHERE token={p()}',(key,)).fetchone():
+                return RedirectResponse('/contanti-nei-negozi?'+urlencode(dict(asof=day)),303)
+            if cur.execute(f'SELECT id FROM cash_treasury_reconciliations WHERE store={p()} AND day>{p()}',(store,day)).fetchone():
+                raise HTTPException(409,'Esiste un conteggio successivo per questo negozio. Aggiorna il conteggio più recente.')
+            op,stream,_,_,_=events(cur)
+            rows=reconciliation_rows(cur,day)
+            expected,cash=reconciliation_balance(op[store],stream,rows,store,day)
+            if str(form.get('expected_cents',expected))!=str(expected):
+                raise HTTPException(409,'Il saldo atteso è cambiato. Ricarica la pagina prima di confermare.')
+            previous=next((row['counted_cents'] for row in rows if row['store']==store and row['day']==day),None)
+            cur.execute(f'''INSERT INTO cash_treasury_reconciliations
+                (store,day,expected_cents,counted_cents,cash_cents,previous_cents,notes,counted_by,counted_at,token)
+                VALUES({','.join([p()]*10)})''',(store,day,expected,value,cash,previous,notes,user['username'],now(),key))
+            logged(cur,user,store,f'Riconciliazione contanti del {day}')
+        return RedirectResponse('/contanti-nei-negozi?'+urlencode(dict(asof=day)),303)
 
-        summaries=[summary(COMPANIES[key], [st for st in ORDER if company(st)==key]) for key in COMPANIES]
-        summaries.append(summary('Totale dei tre negozi', ORDER))
-        for card in cards:
-            card.update(summary(card['label'], (card['store'],)))
-        history=[];running=defaultdict(int)
-        for row in stream:
-            running[row['store']]+=row['delta']
-            if row['store'] in selected and (not first or row['day']>=first) and row['day']<=last and (not who or who.casefold() in row['actor'].casefold()):
-                history.append(dict(row,balance=running[row['store']]))
-        loans=loan_stream(payments,repayments);debt=defaultdict(int)
-        for row in loans:
-            if row['day']<=cutoff:debt[(row['lender'],row['borrower'])]+=row['delta']
-        loan_cards=[dict(lender=lender,borrower=borrower,balance=debt[(lender,borrower)]) for lender,borrower in [('sc','reburger'),('reburger','sc')]]
-        return api['render']('cash_treasury.html',request=request,user=user,brand=scope,scope=scope,stores=api['STORES'],labels=LABELS,company_for={st:company(st) for st in ORDER},companies=COMPANIES,cards=cards,summaries=summaries,all_balances=available_now,openings=openings,store_order=ORDER,history=list(reversed(history)),payments=[r for r in payments if scope=='ALL' or r['beneficiary_store']==scope or any(s['store']==scope for s in r['sources'])],repayments=[r for r in repayments if scope=='ALL' or scope in (r['source_store'],r['target_store'])],loan_cards=loan_cards,loans=[r for r in reversed(loans) if r['day']<=cutoff],unknown=[r for r in unknown if r['store'] in selected and r['store'] in openings and str(r['flow_date'])>=openings[r['store']]['start_date']],unlinked=unlinked,today=api['_rome_today']().isoformat(),asof=cutoff,start=first,end=end,who=who,csrf=token(request),submission=secrets.token_urlsafe(32))
     @app.post('/contanti-nei-negozi/conteggio')
     async def save_count(request:Request):
         user,form=await form_for(request)
@@ -228,6 +278,7 @@ def install(app,api):
             busy=cur.execute(f'SELECT payment_id FROM cash_treasury_sources WHERE store={p()}',(store,)).fetchone()
             busy=busy or cur.execute(f'SELECT id FROM cash_treasury_adjustments WHERE store={p()}',(store,)).fetchone()
             busy=busy or cur.execute(f'SELECT id FROM cash_treasury_repayments WHERE source_store={p()} OR target_store={p()}',(store,store)).fetchone()
+            busy=busy or cur.execute(f'SELECT id FROM cash_treasury_reconciliations WHERE store={p()}',(store,)).fetchone()
             if busy:raise HTTPException(409,'Il saldo iniziale ha già movimenti collegati. Per correggere il contante usa una rettifica, mantenendo lo storico.')
             cur.execute(f'''INSERT INTO cash_treasury_openings(store,start_date,amount_cents,created_by,created_at) VALUES({','.join([p()]*5)})
                 ON CONFLICT(store) DO UPDATE SET start_date=excluded.start_date,amount_cents=excluded.amount_cents,created_by=excluded.created_by,created_at=excluded.created_at''',(store,day,value,user['username'],now()))
@@ -240,6 +291,9 @@ def install(app,api):
         if not name or len(name)>200:raise HTTPException(422,'Inserisci il nome della spesa (massimo 200 caratteri).')
         if target not in COMPANIES or company(beneficiary)!=target:raise HTTPException(422,'Il negozio beneficiario non appartiene all’azienda scelta.')
         total=cents(form.get('amount',''));sources={st:cents(str(form.get('from_'+st,'')).strip() or '0') for st in ORDER}
+        single_store=form.get('single_store')=='1'
+        if single_store:
+            sources={st:total if st==beneficiary else 0 for st in ORDER}
         if total<=0 or sum(sources.values())!=total:raise HTTPException(422,'La somma presa dai negozi deve coincidere esattamente con la spesa, maggiore di zero.')
         try:expense_id=int(str(form.get('expense_id','0')) or '0')
         except ValueError:raise HTTPException(422,'Uscita da collegare non valida.')
@@ -271,7 +325,9 @@ def install(app,api):
                 cur.execute(f'UPDATE cash_treasury_payments SET expense_id={p()},active_expense_id={p()} WHERE id={p()}',(expense_id,expense_id,payment_id))
             for st,value in sources.items():
                 if value:cur.execute(f'INSERT INTO cash_treasury_sources(payment_id,store,amount_cents) VALUES({p()},{p()},{p()})',(payment_id,st,value))
-            validate_cash(cur,api['_rome_today']().isoformat());validate_loans(cur,api['_rome_today']().isoformat())
+            if not single_store:
+                validate_cash(cur,api['_rome_today']().isoformat())
+            validate_loans(cur,api['_rome_today']().isoformat())
             logged(cur,user,beneficiary,f'Pagamento contanti #{payment_id} - {name}')
         return back()
     @app.post('/contanti-nei-negozi/rettifica')

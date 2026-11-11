@@ -244,7 +244,9 @@ def dashboard(cur,scope,stores,today):
     for row in cur.execute("SELECT username,store,happened FROM control_activity_events WHERE kind='access' AND method='POST' AND path IN ('/login','/admin-login') AND status>=300 AND status<400"+access_scope+" ORDER BY happened DESC,id DESC LIMIT 12",scope_args).fetchall():
         recent_access.append(dict(row,local_time=datetime.fromtimestamp(row['happened'],ZoneInfo('Europe/Rome')).strftime('%d/%m/%Y %H:%M')))
     _wake.set()
-    return dict(waiting=waiting+len(documents_waiting),recent_access=recent_access,board=board,totals=totals,file_count=sum(t['count'] for t in totals),catalogue=catalogue(cur,scope,today=today),scope=scope,now=datetime.now(ZoneInfo('Europe/Rome')).strftime('%d/%m/%Y %H:%M'))
+    from .cash_treasury import confirmed_cash
+    cash=confirmed_cash(cur,today.isoformat(),scope)
+    return dict(cash=cash,waiting=waiting+len(documents_waiting),recent_access=recent_access,board=board,totals=totals,file_count=sum(t['count'] for t in totals),catalogue=catalogue(cur,scope,today=today),scope=scope,now=datetime.now(ZoneInfo('Europe/Rome')).strftime('%d/%m/%Y %H:%M'))
 
 def install(app,api):
     global _store_labels

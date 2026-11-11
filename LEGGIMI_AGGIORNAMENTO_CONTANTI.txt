@@ -1,39 +1,17 @@
 AGGIORNAMENTO CONTANTI
 
-INSTALLAZIONE
-1. Fai una copia della cartella del sito e del database in uso.
-2. Estrai lo ZIP in una cartella temporanea. Nella cartella del sito, sostituisci
-   la cartella app unendo i file. Mantieni i database locali in uso (per esempio
-   spinza.db e app/spinza.db) e gli eventuali file .db-wal e .db-shm.
-   In alternativa, sostituisci solo i otto file applicativi elencati qui sotto.
-3. Riavvia il gestionale. Le tabelle aggiuntive vengono create all'avvio.
-   Su Render pubblica il codice usando la connessione al database già configurata.
+Estrai lo ZIP e sovrascrivi i file di codice nella cartella del repository.
+Conserva .git, la configurazione e il database già in uso. Fai commit e push
+sul branch collegato a Render. La nuova tabella viene creata all'avvio.
 
-REPORT CHIUSURA
-Il fondo cassa parte da 106,00 euro, modificabili per la singola chiusura.
-Con fondo incluso, 356,00 euro inseriti e un fondo di 106,00 euro danno
-250,00 euro di contante da sommare agli altri canali. Con fondo escluso,
-250,00 euro inseriti danno 250,00 euro. Le modalità delle spese della
-chiusura continuano ad applicarsi.
-
-CONTANTI NEI NEGOZI
-Apri la sezione dal pannello Admin. Configura una volta il saldo iniziale di
-ciascun negozio all'inizio della data di partenza, prima dei movimenti del giorno.
-Registra le spese con data, negozio beneficiario e cassa da cui escono i soldi.
-Se la spesa esiste già nelle uscite, collegala per evitare una doppia registrazione.
-Seleziona la data da verificare e salva il contante effettivamente contato
-a fine giornata sulla scheda di ogni negozio. Il conteggio confronta il denaro
-fisico con il saldo atteso. Per rettificare il saldo usa la funzione di rettifica.
-I totali dei conteggi per azienda e per i tre negozi richiedono i conteggi di
-tutte le sedi interessate alla stessa data. Per vedere insieme tutte le schede,
-seleziona Tutti i negozi nel menu.
-
-FILE APPLICATIVI AGGIORNATI
-app/cash_treasury.py
-app/closure_reports.py
-app/main.py
-app/static/js/closure-reports.js
-app/templates/_closure_form.html
-app/templates/cash_treasury.html
-app/templates/closure_reports.html
-app/templates/closure_review.html
+Pannello admin > Contanti nei negozi
+- Configura il saldo di ciascuna sede prima dei movimenti della data iniziale.
+- Seleziona la data, registra le spese admin e conferma il contante contato.
+- L'atteso usa il Cash delle chiusure trasferite in contabilita, al netto
+  delle spese della chiusura, e i movimenti di tesoreria registrati dagli admin.
+- L'ultimo conteggio confermato diventa la base dei giorni successivi.
+  Le modifiche dello stesso giorno aggiungono righe allo storico.
+- Il Cash riscontrato nel periodo applica la differenza al Cash delle chiusure.
+  Gli importi contati sono visibili nel pannello admin e nelle riconciliazioni.
+- Le registrazioni storiche restano salvate nel database. I conteggi creati
+  prima di questo aggiornamento non diventano automaticamente riconciliazioni.
