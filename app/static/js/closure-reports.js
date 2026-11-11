@@ -5,8 +5,9 @@
   const out=document.getElementById('closing-total');
   let dirty=false;
   function update(){
-    let total=0,cash=0,valid=true;
+    let total=0,cash=0,valid=true,cashInput;
     form.querySelectorAll('[name=amount]').forEach(input=>{
+      if(input.dataset?.channel==='Cash')cashInput=input;
       const value=input.value.trim().replace(',','.');
       if(!/^\d{1,9}(?:\.\d{1,2})?$/.test(value)){valid=false;return;}
       const parts=value.split('.');
@@ -31,7 +32,8 @@
     });
     const money=c=>new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR'}).format(c/100);
     const fundInput=document.getElementById('closing-fund-initial');
-    const needsFund=fundExpenses>0;
+    const fundMode=document.getElementById('closing-fund-mode');
+    const needsFund=Boolean(fundMode)||fundExpenses>0;
     document.getElementById('closing-fund-section').hidden=false;
     fundInput.required=needsFund;fundInput.disabled=false;fundInput.setCustomValidity('');
     let fundInitial=0,fundValid=true;
@@ -44,6 +46,15 @@
         if(fundInitial<fundExpenses){fundInput.setCustomValidity('Le spese superano il fondo cassa iniziale.');fundValid=false;}
       }
     }
+    const deduction=fundMode?.value==='included'?fundInitial:0;
+    if(cashInput){
+      const insufficient=valid&&fundValid&&cash<deduction;
+      cashInput.setCustomValidity(insufficient?'Il contante inserito è inferiore al fondo cassa.':'');
+      if(insufficient)valid=false;
+    }
+    total-=deduction;
+    cash-=deduction;
+    if(fundMode&&(!fundMode.value||!fundValid))valid=false;
     document.getElementById('closing-fund-expenses').textContent=money(fundExpenses);
     document.getElementById('closing-fund-remaining').textContent=fundValid?(fundInput.value.trim()?money(fundInitial-fundExpenses):'Non indicato'):'Controlla il fondo iniziale';
     document.getElementById('closing-expense-total').textContent=expensesValid?money(expenses):'Controlla le spese';

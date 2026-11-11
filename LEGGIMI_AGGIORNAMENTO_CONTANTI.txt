@@ -1,0 +1,38 @@
+AGGIORNAMENTO CONTANTI
+
+INSTALLAZIONE
+1. Fai una copia della cartella del sito e del database in uso.
+2. Estrai lo ZIP in una cartella temporanea. Nella cartella del sito, sostituisci
+   la cartella app unendo i file. Mantieni i database locali in uso (per esempio
+   spinza.db e app/spinza.db) e gli eventuali file .db-wal e .db-shm.
+   In alternativa, sostituisci solo i sette file applicativi elencati qui sotto.
+3. Riavvia il gestionale. Le tabelle aggiuntive vengono create all'avvio.
+   Su Render pubblica il codice usando la connessione al database già configurata.
+
+REPORT CHIUSURA
+Il fondo cassa parte da 106,00 euro, modificabili per la singola chiusura.
+Con fondo incluso, 356,00 euro inseriti e un fondo di 106,00 euro danno
+250,00 euro di contante da sommare agli altri canali. Con fondo escluso,
+250,00 euro inseriti danno 250,00 euro. Le modalità delle spese della
+chiusura continuano ad applicarsi.
+
+CONTANTI NEI NEGOZI
+Apri la sezione dal pannello Admin. Configura una volta il saldo iniziale di
+ciascun negozio all'inizio della data di partenza, prima dei movimenti del giorno.
+Registra le spese con data, negozio beneficiario e cassa da cui escono i soldi.
+Se la spesa esiste già nelle uscite, collegala per evitare una doppia registrazione.
+Seleziona la data da verificare e salva il contante effettivamente contato
+a fine giornata sulla scheda di ogni negozio. Il conteggio confronta il denaro
+fisico con il saldo atteso. Per rettificare il saldo usa la funzione di rettifica.
+I totali dei conteggi per azienda e per i tre negozi richiedono i conteggi di
+tutte le sedi interessate alla stessa data. Per vedere insieme tutte le schede,
+seleziona Tutti i negozi nel menu.
+
+FILE APPLICATIVI AGGIORNATI
+app/cash_treasury.py
+app/closure_reports.py
+app/static/js/closure-reports.js
+app/templates/_closure_form.html
+app/templates/cash_treasury.html
+app/templates/closure_reports.html
+app/templates/closure_review.html

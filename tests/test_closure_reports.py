@@ -166,7 +166,12 @@ class ReportsTest(unittest.TestCase):
             self.assertIn('Report eliminato',page)
             # Each expense can use a different source, without counting the float as revenue.
             base=[('closure_date','2026-11-02'),('channel','POS'),('amount','50'),('channel','Cash'),('amount','100')]
+            self.assertIn('value="106,00"',page)
+            with self.assertRaises(HTTPException):
+                send('/report-chiusura/salva',base+[('cash_fund_mode','included'),('submission','v'*43)])
             cases=[
+                ('r', [('cash_fund_mode','included'),('cash_fund_initial','80,50')],6950,6950,8050),
+                ('s', [('cash_fund_mode','excluded')],15000,15000,10600),
                 ('l', [('cash_fund_initial','50')],0,0,5000),
                 ('i', [('cash_fund_initial','100,50')],15000,15000,10050),
                 ('j', [('cash_fund_initial','0')],15000,15000,0),

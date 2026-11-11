@@ -249,18 +249,35 @@ def install(app, api):
             if value<=0: raise HTTPException(422,'Inserisci un importo maggiore di zero per la spesa.')
             expenses.append(dict(name=name,cents=value,mode=mode))
         fund_expenses=sum(e['cents'] for e in expenses if e['mode']=='cash_fund')
-        fund_initial=None
+        fund_mode=form.get('cash_fund_mode')
+        if fund_mode is None: fund_mode='excluded'
+        if fund_mode not in ('included','excluded'):
+            raise HTTPException(422,'Indica se il contante include il fondo cassa.')
         raw_fund=str(form.get('cash_fund_initial','')).strip()
-        if raw_fund or fund_expenses:
+        if raw_fund:
             fund_initial=cents(raw_fund)
-            if fund_expenses>fund_initial: raise HTTPException(422,'Le spese dal fondo cassa superano il fondo iniziale.')
+        elif 'cash_fund_mode' in form:
+            fund_initial=10600
+        elif fund_expenses:
+            raise HTTPException(422,'Inserisci il fondo cassa iniziale.')
+        else:
+            fund_initial=None
+        if fund_initial is not None and fund_expenses>fund_initial:
+            raise HTTPException(422,'Le spese dal fondo cassa superano il fondo iniziale.')
         if len(set(raw_names))!=len(raw_names) or not {'POS','Cash'}.issubset(raw_names) or any(n not in known for n in raw_names):
             raise HTTPException(422,'Canali non validi: ricarica il modulo.')
         lines=[dict(name=n,cents=cents(v)) for n,v in zip(raw_names,raw_amounts)]
         # Only expenses not yet included in the entered revenue increase Cash.
         expense_total=sum(e['cents'] for e in expenses if e['mode']=='add_to_cash')
         for line in lines:
-            if line['name']=='Cash': line['cents']+=expense_total
+            if line['name']=='Cash':
+                if fund_mode=='included':
+                    if line['cents']<fund_initial:
+                        raise HTTPException(422,'Il contante inserito è inferiore al fondo cassa.')
+                    line['cents']-=fund_initial
+                if 'cash_fund_mode' in form:
+                    line['fund_mode']=fund_mode
+                line['cents']+=expense_total
         total=sum(r['cents'] for r in lines)
         return day,notes,lines,total,expenses,fund_initial
 
@@ -289,7 +306,11 @@ def install(app, api):
                 draft['amounts']={line['name']:line['cents'] for line in json.loads(row['lines_json'])}
                 draft['amounts']['Cash']-=sum(e['cents'] for e in draft['expenses'] if e.get('mode')=='add_to_cash')
                 draft['channels']=list(dict.fromkeys(channels(cur,row['store'])+list(draft['amounts'])))
-                draft['fund']=fund['initial_cents'] if fund else None
+                cash_line=next(line for line in json.loads(row['lines_json']) if line['name']=='Cash')
+                draft['fund_mode']=cash_line.get('fund_mode','excluded')
+                draft['fund']=fund['initial_cents'] if fund else 10600
+                if draft['fund_mode']=='included':
+                    draft['amounts']['Cash']+=draft['fund']
             from .document_review import pending_documents
             documents=pending_documents(cur,scope) if not draft else []
         pending_count=len(queue)+len(documents)

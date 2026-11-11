@@ -13,7 +13,7 @@ from .closure_reports import cents
 
 ORDER=('reburger_maggio','reburger_camaldoli','spinza')
 LABELS={'reburger_maggio':'Piazza San Felice','reburger_camaldoli':'Via Camaldoli','spinza':'Spinza'}
-COMPANIES={'sc':'S&C SRLS','reburger':'Reburger Slow Fast Food'}
+COMPANIES={'sc':'S&C SRLS','reburger':'Reburger Slow Fast Food SRL'}
 CASH_METHODS={'contanti','cash','contante'}
 
 def company(store):return 'sc' if store=='spinza' else 'reburger'
@@ -26,6 +26,9 @@ def ensure_schema(cur):
     cur.execute('''CREATE TABLE IF NOT EXISTS cash_treasury_openings (
         store TEXT PRIMARY KEY,start_date TEXT NOT NULL,amount_cents BIGINT NOT NULL,
         created_by TEXT NOT NULL,created_at TEXT NOT NULL)''')
+    cur.execute('''CREATE TABLE IF NOT EXISTS cash_treasury_counts (
+        store TEXT NOT NULL,day TEXT NOT NULL,amount_cents BIGINT NOT NULL,
+        counted_by TEXT NOT NULL,counted_at TEXT NOT NULL,PRIMARY KEY(store,day))''')
     cur.execute(f'''CREATE TABLE IF NOT EXISTS cash_treasury_payments (
         id {ident},payment_date TEXT NOT NULL,name TEXT NOT NULL,company TEXT NOT NULL,
         beneficiary_store TEXT NOT NULL,total_cents BIGINT NOT NULL,expense_id INTEGER,
@@ -173,10 +176,22 @@ def install(app,api):
             cur=conn.cursor();openings,stream,payments,repayments,unknown=events(cur)
             current=balances(openings,stream,cutoff)
             available_now=balances(openings,stream,api['_rome_today']().isoformat())
-            linked={r['expense_id'] for r in payments if not r['cancelled_at']}
+            counts={r['store']:r['amount_cents'] for r in cur.execute(
+                f'SELECT store,amount_cents FROM cash_treasury_counts WHERE day={p()}',(cutoff,)
+            ).fetchall()}
             unlinked=[dict(r) for r in cur.execute("SELECT id,store,flow_date,amount,category,notes,payment_method FROM cash_expenses WHERE store IN ('spinza','reburger_maggio','reburger_camaldoli') AND category<>'Spese chiusura' AND id NOT IN (SELECT expense_id FROM cash_treasury_payments WHERE cancelled_at='' AND expense_id IS NOT NULL) ORDER BY flow_date DESC,id DESC LIMIT 200").fetchall()]
         selected=ORDER if scope=='ALL' else (scope,)
         cards=[dict(store=st,label=LABELS[st],company=COMPANIES[company(st)],opening=openings.get(st),balance=current.get(st)) for st in selected]
+        def summary(label, members):
+            expected=sum(current[st] for st in members) if all(current.get(st) is not None for st in members) else None
+            counted=sum(counts[st] for st in members) if all(st in counts for st in members) else None
+            return dict(label=label,expected=expected,counted=counted,
+                        difference=counted-expected if counted is not None and expected is not None else None)
+
+        summaries=[summary(COMPANIES[key], [st for st in ORDER if company(st)==key]) for key in COMPANIES]
+        summaries.append(summary('Totale dei tre negozi', ORDER))
+        for card in cards:
+            card.update(summary(card['label'], (card['store'],)))
         history=[];running=defaultdict(int)
         for row in stream:
             running[row['store']]+=row['delta']
@@ -186,7 +201,25 @@ def install(app,api):
         for row in loans:
             if row['day']<=cutoff:debt[(row['lender'],row['borrower'])]+=row['delta']
         loan_cards=[dict(lender=lender,borrower=borrower,balance=debt[(lender,borrower)]) for lender,borrower in [('sc','reburger'),('reburger','sc')]]
-        return api['render']('cash_treasury.html',request=request,user=user,brand=scope,scope=scope,stores=api['STORES'],labels=LABELS,company_for={st:company(st) for st in ORDER},companies=COMPANIES,cards=cards,all_balances=available_now,openings=openings,store_order=ORDER,history=list(reversed(history)),payments=[r for r in payments if scope=='ALL' or r['beneficiary_store']==scope or any(s['store']==scope for s in r['sources'])],repayments=[r for r in repayments if scope=='ALL' or scope in (r['source_store'],r['target_store'])],loan_cards=loan_cards,loans=[r for r in reversed(loans) if r['day']<=cutoff],unknown=[r for r in unknown if r['store'] in selected and r['store'] in openings and str(r['flow_date'])>=openings[r['store']]['start_date']],unlinked=unlinked,today=api['_rome_today']().isoformat(),asof=cutoff,start=first,end=end,who=who,csrf=token(request),submission=secrets.token_urlsafe(32))
+        return api['render']('cash_treasury.html',request=request,user=user,brand=scope,scope=scope,stores=api['STORES'],labels=LABELS,company_for={st:company(st) for st in ORDER},companies=COMPANIES,cards=cards,summaries=summaries,all_balances=available_now,openings=openings,store_order=ORDER,history=list(reversed(history)),payments=[r for r in payments if scope=='ALL' or r['beneficiary_store']==scope or any(s['store']==scope for s in r['sources'])],repayments=[r for r in repayments if scope=='ALL' or scope in (r['source_store'],r['target_store'])],loan_cards=loan_cards,loans=[r for r in reversed(loans) if r['day']<=cutoff],unknown=[r for r in unknown if r['store'] in selected and r['store'] in openings and str(r['flow_date'])>=openings[r['store']]['start_date']],unlinked=unlinked,today=api['_rome_today']().isoformat(),asof=cutoff,start=first,end=end,who=who,csrf=token(request),submission=secrets.token_urlsafe(32))
+    @app.post('/contanti-nei-negozi/conteggio')
+    async def save_count(request:Request):
+        user,form=await form_for(request)
+        store=store_key(form.get('store'))
+        day=day_value(form.get('day'))
+        raw=str(form.get('amount','')).strip()
+        if not raw:
+            raise HTTPException(422,'Inserisci il contante effettivamente contato.')
+        value=cents(raw)
+        with connect() as conn:
+            cur=conn.cursor()
+            cur.execute(f'''INSERT INTO cash_treasury_counts(store,day,amount_cents,counted_by,counted_at)
+                VALUES({','.join([p()]*5)}) ON CONFLICT(store,day) DO UPDATE SET
+                amount_cents=excluded.amount_cents,counted_by=excluded.counted_by,counted_at=excluded.counted_at''',
+                (store,day,value,user['username'],now()))
+            logged(cur,user,store,f'Conteggio contanti del {day}')
+        return RedirectResponse('/contanti-nei-negozi?'+urlencode(dict(asof=day)),303)
+
     @app.post('/contanti-nei-negozi/saldo-iniziale')
     async def opening(request:Request):
         user,form=await form_for(request);store=store_key(str(form.get('store','')));day=day_value(form.get('day',''));value=cents(form.get('amount',''))
