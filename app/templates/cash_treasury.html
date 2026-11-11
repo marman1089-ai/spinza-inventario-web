@@ -19,15 +19,16 @@
 <button class="btn">Salva saldo iniziale</button></form>
 {% elif card.expected is none %}<p>Saldo iniziale dal {{ card.opening.start_date }}.</p>
 {% else %}
+{% if card.first_count and not card.record %}<p>Inserisci il contante reale per fissare la base dei prossimi controlli.</p>{% else %}
 <p>Saldo atteso <strong class="ct-money">{{ euro(card.expected) }}</strong></p>
-<p>Cash dalle chiusure nel periodo <strong>{{ euro(card.cash) }}</strong></p>
+<p>Cash dalle chiusure nel periodo <strong>{{ euro(card.cash) }}</strong></p>{% endif %}
 {% if card.record %}<p>Ultimo conteggio del giorno <strong>{{ euro(card.record.counted_cents) }}</strong> · Differenza {{ euro(card.record.counted_cents-card.record.expected_cents) }}</p>{% endif %}
 <form class="ct-form" method="post" action="/contanti-nei-negozi/riconcilia">
 <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="store" value="{{ card.store }}"><input type="hidden" name="day" value="{{ asof }}"><input type="hidden" name="submission" value="{{ card.count_token }}"><input type="hidden" name="expected_cents" value="{{ card.expected }}">
 {% set value = card.record.counted_cents if card.record else card.expected %}
-<label>Contante contato (€)<input name="amount" inputmode="decimal" pattern="[0-9]{1,9}([.,][0-9]{1,2})?" value="{{ ('%.2f' % (value/100)).replace('.',',') if value>=0 else '' }}" required></label>
+<label>Contante contato (€)<input name="amount" inputmode="decimal" pattern="[0-9]{1,9}([.,][0-9]{1,2})?" value="{{ ('%.2f' % (value/100)).replace('.',',') if value>=0 and (card.record or not card.first_count) else '' }}" required></label>
 <label>Nota facoltativa<input name="notes" maxlength="1000"></label>
-<button class="btn">{{ 'Aggiorna conteggio' if card.record else 'Conferma conteggio' }}</button></form>
+<button class="btn">{{ 'Aggiorna conteggio' if card.record else ('Fissa saldo reale' if card.first_count else 'Conferma conteggio') }}</button></form>
 <details><summary>Registra spesa in contanti</summary>
 <form class="ct-form" method="post" action="/contanti-nei-negozi/paga">
 <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="submission" value="{{ card.expense_token }}"><input type="hidden" name="single_store" value="1"><input type="hidden" name="beneficiary_store" value="{{ card.store }}"><input type="hidden" name="company" value="{{ 'sc' if card.store=='spinza' else 'reburger' }}">
@@ -36,17 +37,51 @@
 <label>Importo (€)<input name="amount" inputmode="decimal" pattern="[0-9]{1,9}([.,][0-9]{1,2})?" required></label>
 <button class="btn2">Salva spesa</button></form></details>
 {% endif %}
+{% if card.opening %}<form method="post" action="/contanti-nei-negozi/elimina-saldo-iniziale" data-confirm="Eliminare il saldo iniziale di questo negozio?">
+<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="store" value="{{ card.store }}">
+<button class="btn2">Elimina saldo iniziale</button></form>{% endif %}
 </section>{% endfor %}
 </div>
 <section class="card ct-scroll"><h2>Storico dei controlli</h2><p class="muted">Il Cash riscontrato è il Cash delle chiusure del periodo più la differenza rilevata nel conteggio.</p>
 <table><thead><tr><th>Data</th><th>Negozio</th><th>Cash chiusure</th><th>Cash riscontrato</th><th>Atteso</th><th>Contato</th><th>Differenza</th><th>Registrazione admin</th></tr></thead><tbody>
 {% for row in reconciliations %}{% set diff=row.counted_cents-row.expected_cents %}
-<tr><td>{{ row.day }}</td><td>{{ labels[row.store] }}</td><td>{{ euro(row.cash_cents) }}</td><td>{{ euro(row.cash_cents+diff) }}</td><td>{{ euro(row.expected_cents) }}</td><td>{{ euro(row.counted_cents) }}</td><td>{{ 'Ammanco ' if diff<0 else ('Eccedenza ' if diff>0 else 'In pari ') }}{{ euro(diff|abs) }}</td><td>{{ row.counted_by }} · {{ row.counted_at[:16]|replace('T',' ') }}{% if row.previous_cents is not none %}<br>Prima {{ euro(row.previous_cents) }}{% endif %}{% if row.notes %}<br>{{ row.notes }}{% endif %}</td></tr>
+<tr><td>{{ row.day }}</td><td>{{ labels[row.store] }}</td><td>{{ euro(row.cash_cents) }}</td><td>{{ euro(row.cash_cents+diff) }}</td><td>{{ euro(row.expected_cents) }}</td><td>{{ euro(row.counted_cents) }}</td><td>{{ 'Ammanco ' if diff<0 else ('Eccedenza ' if diff>0 else 'In pari ') }}{{ euro(diff|abs) }}</td><td>{{ row.counted_by }} · {{ row.counted_at[:16]|replace('T',' ') }}{% if row.previous_cents is not none %}<br>Prima {{ euro(row.previous_cents) }}{% endif %}{% if row.notes %}<br>{{ row.notes }}{% endif %}
+<form method="post" action="/contanti-nei-negozi/elimina-conteggio" data-confirm="Sei sicuro di eliminare questo conteggio?">
+<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="id" value="{{ row.id }}"><button class="btn2">Elimina conteggio</button></form></td></tr>
 {% else %}<tr><td colspan="8">Nessun conteggio confermato.</td></tr>{% endfor %}
 </tbody></table></section>
 <section class="card ct-scroll"><h2>Spese in contanti registrate</h2><table><thead><tr><th>Data</th><th>Negozio</th><th>Spesa</th><th>Importo</th></tr></thead><tbody>
-{% for row in payments if row.payment_date<=asof %}<tr><td>{{ row.payment_date }}</td><td>{{ labels[row.beneficiary_store] }}</td><td>{{ row.name }}{% if row.cancelled_at %} · annullata{% endif %}</td><td>{{ euro(row.total_cents) }}</td></tr>
+{% for row in payments if row.payment_date<=asof and not row.cancelled_at %}<tr><td>{{ row.payment_date }}</td><td>{{ labels[row.beneficiary_store] }}</td><td>{{ row.name }}{% if row.cancelled_at %} · annullata{% endif %}</td><td>{{ euro(row.total_cents) }}
+{% if not row.cancelled_at %}<form method="post" action="/contanti-nei-negozi/annulla-pagamento" data-confirm="Sei sicuro di eliminare questa spesa?">
+<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="payment_id" value="{{ row.id }}"><input type="hidden" name="reason" value="Spesa annullata dall’admin"><button class="btn2">Elimina spesa</button></form>{% endif %}</td></tr>
 {% else %}<tr><td colspan="4">Nessuna spesa registrata.</td></tr>{% endfor %}
 </tbody></table></section>
 </div>
+<dialog id="cash-delete-confirm" class="card" aria-labelledby="cash-delete-question">
+<form method="dialog">
+<p id="cash-delete-question"></p>
+<button class="btn2" value="no" autofocus>No</button>
+<button class="btn" value="yes">Sì</button>
+</form>
+</dialog>
+<script>
+(() => {
+  const dialog = document.getElementById('cash-delete-confirm');
+  const question = document.getElementById('cash-delete-question');
+  let pendingForm;
+  document.querySelectorAll('form[data-confirm]').forEach(form => {
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      pendingForm = form;
+      question.textContent = form.dataset.confirm;
+      dialog.returnValue = 'no';
+      dialog.showModal();
+    });
+  });
+  dialog.addEventListener('close', () => {
+    if (dialog.returnValue === 'yes') pendingForm.submit();
+    pendingForm = null;
+  });
+})();
+</script>
 {% endblock %}

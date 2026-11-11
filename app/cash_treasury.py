@@ -210,7 +210,10 @@ def install(app,api):
             opening=openings.get(store)
             expected,cash=reconciliation_balance(opening,stream,records,store,cutoff)
             record=next((row for row in records if row['store']==store and row['day']==cutoff),None)
-            cards.append(dict(store=store,label=LABELS[store],company=COMPANIES[company(store)],
+            first_count=not any(row['store']==store and row['day']<cutoff for row in records)
+            if record and first_count:
+                expected,cash=record['expected_cents'],record['cash_cents']
+            cards.append(dict(first_count=first_count,store=store,label=LABELS[store],company=COMPANIES[company(store)],
                               opening=opening,expected=expected,cash=cash,record=record,
                               count_token=secrets.token_urlsafe(32),expense_token=secrets.token_urlsafe(32)))
         summaries=[]
@@ -243,7 +246,10 @@ def install(app,api):
             op,stream,_,_,_=events(cur)
             rows=reconciliation_rows(cur,day)
             expected,cash=reconciliation_balance(op[store],stream,rows,store,day)
-            if str(form.get('expected_cents',expected))!=str(expected):
+            first_count=not any(row['store']==store and row['day']<day for row in rows)
+            if first_count:
+                expected,cash=value,0
+            elif str(form.get('expected_cents',expected))!=str(expected):
                 raise HTTPException(409,'Il saldo atteso è cambiato. Ricarica la pagina prima di confermare.')
             previous=next((row['counted_cents'] for row in rows if row['store']==store and row['day']==day),None)
             cur.execute(f'''INSERT INTO cash_treasury_reconciliations
@@ -251,6 +257,35 @@ def install(app,api):
                 VALUES({','.join([p()]*10)})''',(store,day,expected,value,cash,previous,notes,user['username'],now(),key))
             logged(cur,user,store,f'Riconciliazione contanti del {day}')
         return RedirectResponse('/contanti-nei-negozi?'+urlencode(dict(asof=day)),303)
+
+    @app.post('/contanti-nei-negozi/elimina-conteggio')
+    async def delete_reconciliation(request:Request):
+        user,form=await form_for(request)
+        try:
+            ident=int(str(form.get('id','')))
+        except ValueError:
+            raise HTTPException(422,'Conteggio non valido.')
+        with connect() as conn:
+            cur=conn.cursor()
+            begin(cur)
+            row=cur.execute(f'DELETE FROM cash_treasury_reconciliations WHERE id={p()} RETURNING store,day',(ident,)).fetchone()
+            if not row:
+                return back()
+            logged(cur,user,row['store'],f'Eliminato conteggio #{ident} del {row["day"]}')
+        return RedirectResponse('/contanti-nei-negozi?'+urlencode(dict(asof=row['day'])),303)
+
+    @app.post('/contanti-nei-negozi/elimina-saldo-iniziale')
+    async def delete_opening(request:Request):
+        user,form=await form_for(request)
+        store=store_key(form.get('store'))
+        with connect() as conn:
+            cur=conn.cursor()
+            begin(cur)
+            if cur.execute(f'SELECT id FROM cash_treasury_reconciliations WHERE store={p()}',(store,)).fetchone():
+                raise HTTPException(409,'Elimina prima i conteggi del negozio.')
+            cur.execute(f'DELETE FROM cash_treasury_openings WHERE store={p()}',(store,))
+            logged(cur,user,store,'Eliminato saldo iniziale contanti')
+        return back()
 
     @app.post('/contanti-nei-negozi/conteggio')
     async def save_count(request:Request):
@@ -275,14 +310,14 @@ def install(app,api):
         user,form=await form_for(request);store=store_key(str(form.get('store','')));day=day_value(form.get('day',''));value=cents(form.get('amount',''))
         with connect() as conn:
             cur=conn.cursor();begin(cur)
-            busy=cur.execute(f'SELECT payment_id FROM cash_treasury_sources WHERE store={p()}',(store,)).fetchone()
+            busy=cur.execute(f"SELECT s.payment_id FROM cash_treasury_sources s JOIN cash_treasury_payments t ON t.id=s.payment_id WHERE s.store={p()} AND t.cancelled_at=''",(store,)).fetchone()
             busy=busy or cur.execute(f'SELECT id FROM cash_treasury_adjustments WHERE store={p()}',(store,)).fetchone()
             busy=busy or cur.execute(f'SELECT id FROM cash_treasury_repayments WHERE source_store={p()} OR target_store={p()}',(store,store)).fetchone()
             busy=busy or cur.execute(f'SELECT id FROM cash_treasury_reconciliations WHERE store={p()}',(store,)).fetchone()
-            if busy:raise HTTPException(409,'Il saldo iniziale ha già movimenti collegati. Per correggere il contante usa una rettifica, mantenendo lo storico.')
+            if busy and cur.execute(f'SELECT store FROM cash_treasury_openings WHERE store={p()}',(store,)).fetchone():raise HTTPException(409,'Il saldo iniziale ha già movimenti collegati. Per correggere il contante usa una rettifica, mantenendo lo storico.')
             cur.execute(f'''INSERT INTO cash_treasury_openings(store,start_date,amount_cents,created_by,created_at) VALUES({','.join([p()]*5)})
                 ON CONFLICT(store) DO UPDATE SET start_date=excluded.start_date,amount_cents=excluded.amount_cents,created_by=excluded.created_by,created_at=excluded.created_at''',(store,day,value,user['username'],now()))
-            validate_cash(cur,api['_rome_today']().isoformat());logged(cur,user,store,f'Saldo iniziale contanti del {day}: {value/100:.2f} €')
+            logged(cur,user,store,f'Saldo iniziale contanti del {day}: {value/100:.2f} €')
         return back()
     @app.post('/contanti-nei-negozi/paga')
     async def pay(request:Request):
@@ -370,7 +405,7 @@ def install(app,api):
             if row['expense_id']:
                 if row['expense_created']:cur.execute(f'DELETE FROM cash_expenses WHERE id={p()}',(row['expense_id'],))
                 else:cur.execute(f'UPDATE cash_expenses SET payment_method={p()},notes={p()} WHERE id={p()}',(row['original_method'],row['original_notes'],row['expense_id']))
-            validate_loans(cur,api['_rome_today']().isoformat());validate_cash(cur,api['_rome_today']().isoformat());logged(cur,user,row['beneficiary_store'],f'Annullato pagamento contanti #{ident}')
+            validate_loans(cur,api['_rome_today']().isoformat());logged(cur,user,row['beneficiary_store'],f'Annullato pagamento contanti #{ident}')
         return back()
 
     @app.post('/contanti-nei-negozi/annulla-rimborso')

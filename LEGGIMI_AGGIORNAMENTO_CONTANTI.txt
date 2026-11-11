@@ -15,3 +15,7 @@ Pannello admin > Contanti nei negozi
   Gli importi contati sono visibili nel pannello admin e nelle riconciliazioni.
 - Le registrazioni storiche restano salvate nel database. I conteggi creati
   prima di questo aggiornamento non diventano automaticamente riconciliazioni.
+
+Il primo conteggio fissa il saldo senza differenza. Puoi eliminare le
+singole righe dello storico e le spese dopo conferma. Per eliminare il
+saldo iniziale, elimina prima i conteggi di quel negozio.
