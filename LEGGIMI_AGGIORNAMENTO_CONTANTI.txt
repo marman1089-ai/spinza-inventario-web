@@ -5,7 +5,7 @@ INSTALLAZIONE
 2. Estrai lo ZIP in una cartella temporanea. Nella cartella del sito, sostituisci
    la cartella app unendo i file. Mantieni i database locali in uso (per esempio
    spinza.db e app/spinza.db) e gli eventuali file .db-wal e .db-shm.
-   In alternativa, sostituisci solo i sette file applicativi elencati qui sotto.
+   In alternativa, sostituisci solo i otto file applicativi elencati qui sotto.
 3. Riavvia il gestionale. Le tabelle aggiuntive vengono create all'avvio.
    Su Render pubblica il codice usando la connessione al database già configurata.
 
@@ -31,6 +31,7 @@ seleziona Tutti i negozi nel menu.
 FILE APPLICATIVI AGGIORNATI
 app/cash_treasury.py
 app/closure_reports.py
+app/main.py
 app/static/js/closure-reports.js
 app/templates/_closure_form.html
 app/templates/cash_treasury.html
