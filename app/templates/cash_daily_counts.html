@@ -12,7 +12,10 @@
 <section class="card ct-balance">
 <small>{{ companies[card.company] }}</small>
 <h2>{{ card.label }}</h2>
-<p>Contato <strong>{{ euro(card.counted) }}</strong></p>
+<p>Saldo iniziale <strong>{{ euro(card.opening) }}</strong></p>
+<p>Saldo reale al {{ asof }} <strong class="ct-money">{{ euro(card.balance) }}</strong></p>
+{% if card.balance is none %}<p>Saldo iniziale assente per la data selezionata.</p>{% endif %}
+<p>Contato il {{ asof }} <strong>{{ euro(card.counted) }}</strong></p>
 <p>Dichiarato <strong>{{ euro(card.declared) }}</strong></p>
 {% if card.declared is none %}<p>Nessun report di chiusura per il giorno precedente.</p>
 {% elif card.counted is not none %}
@@ -30,9 +33,9 @@
 {% endfor %}
 </div>
 <section class="card ct-scroll">
-<h2>Totali del conteggio</h2>
-<table><thead><tr><th>Azienda</th><th>Contante trovato</th><th>Negozi registrati</th></tr></thead><tbody>
-{% for item in summaries %}<tr><th scope="row">{{ item.label }}</th><td>{{ euro(item.counted) }}</td><td>{{ item.recorded }} su {{ item.stores }}</td></tr>{% endfor %}
+<h2>Totali al {{ asof }}</h2>
+<table><thead><tr><th>Azienda</th><th>Contante trovato del giorno</th><th>Saldo reale</th><th>Negozi registrati</th></tr></thead><tbody>
+{% for item in summaries %}<tr><th scope="row">{{ item.label }}</th><td>{{ euro(item.counted) }}</td><td>{{ euro(item.balance) }}</td><td>{{ item.recorded }} su {{ item.stores }}</td></tr>{% endfor %}
 </tbody></table>
 </section>
 <section class="card ct-scroll">

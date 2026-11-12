@@ -212,6 +212,15 @@ def install(app,api):
         month_end = count_date.replace(day=monthrange(count_date.year, count_date.month)[1]).isoformat()
         with connect() as conn:
             cur = conn.cursor()
+            balances_by_store = {row['store']: row for row in cur.execute(f'''
+                SELECT o.store,o.amount_cents AS opening_cents,
+                       o.amount_cents + COALESCE(SUM(c.amount_cents),0) AS balance_cents
+                FROM cash_treasury_openings o
+                LEFT JOIN cash_treasury_counts c
+                  ON c.store=o.store AND c.day>=o.start_date AND c.day<={p()}
+                WHERE o.start_date<={p()}
+                GROUP BY o.store,o.amount_cents
+            ''', (day, day)).fetchall()}
             counts = cur.execute(f'''
                 SELECT store,day,amount_cents,counted_by FROM cash_treasury_counts
                 WHERE day>={p()} AND day<={p()} ORDER BY day DESC,store
@@ -234,7 +243,9 @@ def install(app,api):
         selected_counts = {row['store']: row['amount_cents'] for row in counts if row['day'] == day}
         cards = [
             dict(store=store, label=LABELS[store], company=company(store),
-                 counted=selected_counts.get(store), declared=declared.get((report_day, store)))
+                 counted=selected_counts.get(store), declared=declared.get((report_day, store)),
+                 opening=balances_by_store.get(store, {}).get('opening_cents'),
+                 balance=balances_by_store.get(store, {}).get('balance_cents'))
             for store in ORDER
         ]
         discrepancies = []
@@ -252,7 +263,9 @@ def install(app,api):
         for key, label in [*COMPANIES.items(), (None, 'Totale generale')]:
             members = [card for card in cards if key is None or card['company'] == key]
             recorded = [card['counted'] for card in members if card['counted'] is not None]
+            complete_balance = all(card['balance'] is not None for card in members)
             summaries.append(dict(label=label, counted=sum(recorded) if recorded else None,
+                                  balance=sum(card['balance'] for card in members) if complete_balance else None,
                                   recorded=len(recorded), stores=len(members)))
         return api['render']('cash_daily_counts.html', request=request, user=user,
                              cards=cards, summaries=summaries, companies=COMPANIES, labels=LABELS,
