@@ -33,6 +33,11 @@ def ensure_schema(cur):
         counted_cents BIGINT NOT NULL, cash_cents BIGINT NOT NULL, previous_cents BIGINT,
         notes TEXT NOT NULL, counted_by TEXT NOT NULL, counted_at TEXT NOT NULL, token TEXT NOT NULL UNIQUE)''')
     cur.execute('CREATE INDEX IF NOT EXISTS ix_treasury_reconciliation ON cash_treasury_reconciliations(store,day,id)')
+    cur.execute('''CREATE TABLE IF NOT EXISTS cash_daily_openings (
+        store TEXT PRIMARY KEY,start_date TEXT NOT NULL,amount_cents BIGINT NOT NULL)''')
+    cur.execute('''CREATE TABLE IF NOT EXISTS cash_daily_counts (
+        store TEXT NOT NULL,day TEXT NOT NULL,amount_cents BIGINT NOT NULL,
+        counted_by TEXT NOT NULL,counted_at TEXT NOT NULL,PRIMARY KEY(store,day))''')
     cur.execute('''CREATE TABLE IF NOT EXISTS cash_treasury_counts (
         store TEXT NOT NULL,day TEXT NOT NULL,amount_cents BIGINT NOT NULL,
         counted_by TEXT NOT NULL,counted_at TEXT NOT NULL,PRIMARY KEY(store,day))''')
@@ -212,17 +217,20 @@ def install(app,api):
         month_end = count_date.replace(day=monthrange(count_date.year, count_date.month)[1]).isoformat()
         with connect() as conn:
             cur = conn.cursor()
-            balances_by_store = {row['store']: row for row in cur.execute(f'''
-                SELECT o.store,o.amount_cents AS opening_cents,
-                       o.amount_cents + COALESCE(SUM(c.amount_cents),0) AS balance_cents
-                FROM cash_treasury_openings o
-                LEFT JOIN cash_treasury_counts c
+            openings = {row['store']: row for row in cur.execute(
+                'SELECT store,start_date,amount_cents FROM cash_daily_openings'
+            ).fetchall()}
+            first_day = min([month_start.isoformat(), *(row['start_date'] for row in openings.values())])
+            balances_by_store = {row['store']: row['balance_cents'] for row in cur.execute(f'''
+                SELECT o.store,o.amount_cents + COALESCE(SUM(c.amount_cents),0) AS balance_cents
+                FROM cash_daily_openings o
+                LEFT JOIN cash_daily_counts c
                   ON c.store=o.store AND c.day>=o.start_date AND c.day<={p()}
                 WHERE o.start_date<={p()}
                 GROUP BY o.store,o.amount_cents
             ''', (day, day)).fetchall()}
             counts = cur.execute(f'''
-                SELECT store,day,amount_cents,counted_by FROM cash_treasury_counts
+                SELECT store,day,amount_cents,counted_by FROM cash_daily_counts
                 WHERE day>={p()} AND day<={p()} ORDER BY day DESC,store
             ''', (month_start.isoformat(), month_end)).fetchall()
             reports = cur.execute(f'''
@@ -230,7 +238,7 @@ def install(app,api):
                 FROM closure_reports r
                 LEFT JOIN closure_report_expenses e ON e.report_id=r.id
                 WHERE r.closure_date>={p()} AND r.closure_date<{p()}
-            ''', ((month_start - timedelta(days=1)).isoformat(), month_end)).fetchall()
+            ''', ((date.fromisoformat(first_day) - timedelta(days=1)).isoformat(), month_end)).fetchall()
         declared = defaultdict(int)
         authors = defaultdict(set)
         for report in reports:
@@ -240,14 +248,23 @@ def install(app,api):
             spent = sum(expense['cents'] for expense in expenses if expense.get('mode') != 'cash_fund')
             declared[key] += cash - spent
             authors[key].add(report['created_by'])
+        counts = [row for row in counts if row['store'] in openings
+                  and row['day'] >= openings[row['store']]['start_date']]
         selected_counts = {row['store']: row['amount_cents'] for row in counts if row['day'] == day}
-        cards = [
-            dict(store=store, label=LABELS[store], company=company(store),
-                 counted=selected_counts.get(store), declared=declared.get((report_day, store)),
-                 opening=balances_by_store.get(store, {}).get('opening_cents'),
-                 balance=balances_by_store.get(store, {}).get('balance_cents'))
-            for store in ORDER
-        ]
+        cards = []
+        for store in ORDER:
+            opening = openings.get(store)
+            balance = balances_by_store.get(store)
+            expected = None
+            if balance is not None:
+                first_report = (date.fromisoformat(opening['start_date']) - timedelta(days=1)).isoformat()
+                expected = opening['amount_cents'] + sum(
+                    value for (closure_day, key), value in declared.items()
+                    if key == store and first_report <= closure_day <= report_day
+                )
+            cards.append(dict(store=store, label=LABELS[store], company=company(store),
+                              counted=selected_counts.get(store), declared=declared.get((report_day, store)),
+                              opening=opening, balance=balance, expected=expected))
         discrepancies = []
         for row in counts:
             previous_day = (date.fromisoformat(row['day']) - timedelta(days=1)).isoformat()
@@ -266,6 +283,7 @@ def install(app,api):
             complete_balance = all(card['balance'] is not None for card in members)
             summaries.append(dict(label=label, counted=sum(recorded) if recorded else None,
                                   balance=sum(card['balance'] for card in members) if complete_balance else None,
+                                  expected=sum(card['expected'] for card in members) if complete_balance else None,
                                   recorded=len(recorded), stores=len(members)))
         return api['render']('cash_daily_counts.html', request=request, user=user,
                              cards=cards, summaries=summaries, companies=COMPANIES, labels=LABELS,
@@ -363,6 +381,22 @@ def install(app,api):
             logged(cur,user,store,'Eliminato saldo iniziale contanti')
         return back()
 
+    @app.post('/contanti-nei-negozi/partenza')
+    async def save_daily_opening(request: Request):
+        user, form = await form_for(request)
+        store = store_key(form.get('store'))
+        day = day_value(form.get('day'))
+        if day == date.min.isoformat():
+            raise HTTPException(422, 'Seleziona una data con un giorno precedente valido.')
+        value = cents(form.get('amount', ''))
+        with connect() as conn:
+            cur = conn.cursor()
+            cur.execute(f'''INSERT INTO cash_daily_openings(store,start_date,amount_cents)
+                VALUES({p()},{p()},{p()}) ON CONFLICT(store) DO UPDATE SET
+                start_date=excluded.start_date,amount_cents=excluded.amount_cents''', (store,day,value))
+            logged(cur,user,store,f'Saldo iniziale conteggi dal {day}')
+        return RedirectResponse('/contanti-nei-negozi?'+urlencode(dict(asof=day)),303)
+
     @app.post('/contanti-nei-negozi/conteggio')
     async def save_count(request:Request):
         user,form=await form_for(request)
@@ -376,7 +410,10 @@ def install(app,api):
         value=cents(raw)
         with connect() as conn:
             cur=conn.cursor()
-            cur.execute(f'''INSERT INTO cash_treasury_counts(store,day,amount_cents,counted_by,counted_at)
+            opening = cur.execute(f'SELECT start_date FROM cash_daily_openings WHERE store={p()}', (store,)).fetchone()
+            if not opening or day < opening['start_date']:
+                raise HTTPException(422, 'Imposta prima il saldo iniziale del negozio per questa data.')
+            cur.execute(f'''INSERT INTO cash_daily_counts(store,day,amount_cents,counted_by,counted_at)
                 VALUES({','.join([p()]*5)}) ON CONFLICT(store,day) DO UPDATE SET
                 amount_cents=excluded.amount_cents,counted_by=excluded.counted_by,counted_at=excluded.counted_at''',
                 (store,day,value,user['username'],now()))

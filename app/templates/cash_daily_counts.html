@@ -12,9 +12,20 @@
 <section class="card ct-balance">
 <small>{{ companies[card.company] }}</small>
 <h2>{{ card.label }}</h2>
-<p>Saldo iniziale <strong>{{ euro(card.opening) }}</strong></p>
+<details{% if not card.opening %} open{% endif %}>
+<summary>{{ 'Modifica saldo iniziale' if card.opening else 'Imposta saldo iniziale' }}</summary>
+<form class="ct-form" method="post" action="/contanti-nei-negozi/partenza">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="store" value="{{ card.store }}">
+<label>Data di partenza<input type="date" name="day" min="0001-01-02" max="{{ today }}" value="{{ card.opening.start_date if card.opening else asof }}" required></label>
+<label>Saldo iniziale senza fondo cassa (€)<input name="amount" inputmode="decimal" pattern="[0-9]{1,9}([.,][0-9]{1,2})?" value="{{ ('%.2f' % (card.opening.amount_cents/100)).replace('.',',') if card.opening else '' }}" required></label>
+<button class="btn">Salva saldo iniziale</button>
+</form>
+</details>
+{% if card.balance is not none %}
+<p>Saldo iniziale al {{ card.opening.start_date }} <strong>{{ euro(card.opening.amount_cents) }}</strong></p>
+<p>Saldo atteso dai report <strong>{{ euro(card.expected) }}</strong></p>
 <p>Saldo reale al {{ asof }} <strong class="ct-money">{{ euro(card.balance) }}</strong></p>
-{% if card.balance is none %}<p>Saldo iniziale assente per la data selezionata.</p>{% endif %}
 <p>Contato il {{ asof }} <strong>{{ euro(card.counted) }}</strong></p>
 <p>Dichiarato <strong>{{ euro(card.declared) }}</strong></p>
 {% if card.declared is none %}<p>Nessun report di chiusura per il giorno precedente.</p>
@@ -29,13 +40,14 @@
 <label>Contante trovato (€)<input name="amount" inputmode="decimal" pattern="[0-9]{1,9}([.,][0-9]{1,2})?" value="{{ ('%.2f' % (card.counted/100)).replace('.',',') if card.counted is not none else '' }}" required></label>
 <button class="btn">{{ 'Aggiorna conteggio' if card.counted is not none else 'Salva conteggio' }}</button>
 </form>
+{% elif card.opening %}<p>La data selezionata precede la data di partenza.</p>{% endif %}
 </section>
 {% endfor %}
 </div>
 <section class="card ct-scroll">
 <h2>Totali al {{ asof }}</h2>
-<table><thead><tr><th>Azienda</th><th>Contante trovato del giorno</th><th>Saldo reale</th><th>Negozi registrati</th></tr></thead><tbody>
-{% for item in summaries %}<tr><th scope="row">{{ item.label }}</th><td>{{ euro(item.counted) }}</td><td>{{ euro(item.balance) }}</td><td>{{ item.recorded }} su {{ item.stores }}</td></tr>{% endfor %}
+<table><thead><tr><th>Azienda</th><th>Contante trovato del giorno</th><th>Saldo atteso</th><th>Saldo reale</th><th>Negozi registrati</th></tr></thead><tbody>
+{% for item in summaries %}<tr><th scope="row">{{ item.label }}</th><td>{{ euro(item.counted) }}</td><td>{{ euro(item.expected) }}</td><td>{{ euro(item.balance) }}</td><td>{{ item.recorded }} su {{ item.stores }}</td></tr>{% endfor %}
 </tbody></table>
 </section>
 <section class="card ct-scroll">
