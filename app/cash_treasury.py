@@ -1,8 +1,10 @@
 """Physical cash by store, expense funding and inter-company advances (integer cents)."""
+import json
 import re
 import secrets
+from calendar import monthrange
 from collections import defaultdict
-from datetime import date,datetime
+from datetime import date,datetime,timedelta
 from decimal import Decimal,ROUND_HALF_UP
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
@@ -192,11 +194,72 @@ def install(app,api):
         if not base:raise HTTPException(422,'Prima configura il saldo iniziale di '+LABELS[store]+'.')
         if day<base['start_date']:raise HTTPException(422,'La data precede il saldo iniziale di '+LABELS[store]+'.')
     def logged(cur,user,store,name):api['_log'](cur,store=store,username=user['username'],action='CONTANTI',category='CONTANTI',name=name,delta=0)
-    def back():return RedirectResponse('/contanti-nei-negozi',303)
+    def back():return RedirectResponse('/contanti-nei-negozi/tesoreria',303)
     @app.on_event('startup')
     def startup():
         with connect() as conn:ensure_schema(conn.cursor())
     @app.get('/contanti-nei-negozi')
+    def daily_counts(request: Request, asof: str = ''):
+        user = admin(request)
+        today = api['_rome_today']().isoformat()
+        day = day_value(asof) if asof else today
+        count_date = date.fromisoformat(day)
+        if count_date == date.min:
+            raise HTTPException(422, 'Seleziona una data con un giorno precedente valido.')
+        report_day = (count_date - timedelta(days=1)).isoformat()
+        month_start = max(count_date.replace(day=1), date.min + timedelta(days=1))
+        month = day[:7]
+        month_end = count_date.replace(day=monthrange(count_date.year, count_date.month)[1]).isoformat()
+        with connect() as conn:
+            cur = conn.cursor()
+            counts = cur.execute(f'''
+                SELECT store,day,amount_cents,counted_by FROM cash_treasury_counts
+                WHERE day>={p()} AND day<={p()} ORDER BY day DESC,store
+            ''', (month_start.isoformat(), month_end)).fetchall()
+            reports = cur.execute(f'''
+                SELECT r.store,r.closure_date,r.created_by,r.lines_json,e.lines_json AS expenses_json
+                FROM closure_reports r
+                LEFT JOIN closure_report_expenses e ON e.report_id=r.id
+                WHERE r.closure_date>={p()} AND r.closure_date<{p()}
+            ''', ((month_start - timedelta(days=1)).isoformat(), month_end)).fetchall()
+        declared = defaultdict(int)
+        authors = defaultdict(set)
+        for report in reports:
+            key = (report['closure_date'], report['store'])
+            cash = sum(line['cents'] for line in json.loads(report['lines_json']) if line['name'] == 'Cash')
+            expenses = json.loads(report['expenses_json'] or '[]')
+            spent = sum(expense['cents'] for expense in expenses if expense.get('mode') != 'cash_fund')
+            declared[key] += cash - spent
+            authors[key].add(report['created_by'])
+        selected_counts = {row['store']: row['amount_cents'] for row in counts if row['day'] == day}
+        cards = [
+            dict(store=store, label=LABELS[store], company=company(store),
+                 counted=selected_counts.get(store), declared=declared.get((report_day, store)))
+            for store in ORDER
+        ]
+        discrepancies = []
+        for row in counts:
+            previous_day = (date.fromisoformat(row['day']) - timedelta(days=1)).isoformat()
+            key = (previous_day, row['store'])
+            expected = declared.get(key)
+            if expected is not None and row['amount_cents'] != expected and row['store'] in LABELS:
+                discrepancies.append(dict(
+                    day=row['day'], report_day=previous_day, store=row['store'], counted=row['amount_cents'],
+                    declared=expected, difference=row['amount_cents']-expected,
+                    authors=', '.join(sorted(authors[key])), counted_by=row['counted_by'],
+                ))
+        summaries = []
+        for key, label in [*COMPANIES.items(), (None, 'Totale generale')]:
+            members = [card for card in cards if key is None or card['company'] == key]
+            recorded = [card['counted'] for card in members if card['counted'] is not None]
+            summaries.append(dict(label=label, counted=sum(recorded) if recorded else None,
+                                  recorded=len(recorded), stores=len(members)))
+        return api['render']('cash_daily_counts.html', request=request, user=user,
+                             cards=cards, summaries=summaries, companies=COMPANIES, labels=LABELS,
+                             discrepancies=discrepancies, month=month,
+                             asof=day, report_day=report_day, today=today, csrf=token(request))
+
+    @app.get('/contanti-nei-negozi/tesoreria')
     def index(request:Request,asof:str=''):
         user=admin(request)
         today=api['_rome_today']().isoformat()
@@ -240,7 +303,7 @@ def install(app,api):
             begin(cur)
             require_base(cur,store,day)
             if cur.execute(f'SELECT id FROM cash_treasury_reconciliations WHERE token={p()}',(key,)).fetchone():
-                return RedirectResponse('/contanti-nei-negozi?'+urlencode(dict(asof=day)),303)
+                return RedirectResponse('/contanti-nei-negozi/tesoreria?'+urlencode(dict(asof=day)),303)
             if cur.execute(f'SELECT id FROM cash_treasury_reconciliations WHERE store={p()} AND day>{p()}',(store,day)).fetchone():
                 raise HTTPException(409,'Esiste un conteggio successivo per questo negozio. Aggiorna il conteggio più recente.')
             op,stream,_,_,_=events(cur)
@@ -256,7 +319,7 @@ def install(app,api):
                 (store,day,expected_cents,counted_cents,cash_cents,previous_cents,notes,counted_by,counted_at,token)
                 VALUES({','.join([p()]*10)})''',(store,day,expected,value,cash,previous,notes,user['username'],now(),key))
             logged(cur,user,store,f'Riconciliazione contanti del {day}')
-        return RedirectResponse('/contanti-nei-negozi?'+urlencode(dict(asof=day)),303)
+        return RedirectResponse('/contanti-nei-negozi/tesoreria?'+urlencode(dict(asof=day)),303)
 
     @app.post('/contanti-nei-negozi/elimina-conteggio')
     async def delete_reconciliation(request:Request):
@@ -272,7 +335,7 @@ def install(app,api):
             if not row:
                 return back()
             logged(cur,user,row['store'],f'Eliminato conteggio #{ident} del {row["day"]}')
-        return RedirectResponse('/contanti-nei-negozi?'+urlencode(dict(asof=row['day'])),303)
+        return RedirectResponse('/contanti-nei-negozi/tesoreria?'+urlencode(dict(asof=row['day'])),303)
 
     @app.post('/contanti-nei-negozi/elimina-saldo-iniziale')
     async def delete_opening(request:Request):
@@ -292,6 +355,8 @@ def install(app,api):
         user,form=await form_for(request)
         store=store_key(form.get('store'))
         day=day_value(form.get('day'))
+        if day == date.min.isoformat():
+            raise HTTPException(422, 'Seleziona una data con un giorno precedente valido.')
         raw=str(form.get('amount','')).strip()
         if not raw:
             raise HTTPException(422,'Inserisci il contante effettivamente contato.')

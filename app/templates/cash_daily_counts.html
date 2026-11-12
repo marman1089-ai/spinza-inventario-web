@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% set title="Contanti nei negozi" %}
+{% macro euro(value) %}{{ ('%.2f' % (value/100)).replace('.',',') ~ ' €' if value is not none else '—' }}{% endmacro %}
+{% block content %}
+<link rel="stylesheet" href="/static/css/cash-treasury.css?v=1">
+<div class="ct-page">
+<section class="card ct-hero"><div><h1>Contanti nei negozi</h1><p>Inserisci il contante trovato, escluso il fondo cassa.</p></div><a class="btn2" href="/contanti-nei-negozi/tesoreria">Tesoreria</a></section>
+<form class="ct-asof" method="get"><label>Data del conteggio<input type="date" name="asof" value="{{ asof }}" min="0001-01-02" max="{{ today }}" required></label><button class="btn2">Visualizza</button></form>
+<p>Conteggi del <strong>{{ asof }}</strong> confrontati con i report di chiusura del <strong>{{ report_day }}</strong>.</p>
+<div class="ct-cards">
+{% for card in cards %}
+<section class="card ct-balance">
+<small>{{ companies[card.company] }}</small>
+<h2>{{ card.label }}</h2>
+<p>Contato <strong>{{ euro(card.counted) }}</strong></p>
+<p>Dichiarato <strong>{{ euro(card.declared) }}</strong></p>
+{% if card.declared is none %}<p>Nessun report di chiusura per il giorno precedente.</p>
+{% elif card.counted is not none %}
+{% set difference = card.counted - card.declared %}
+<p><strong>{% if difference == 0 %}Combaciano{% elif difference < 0 %}Ammanco di {{ euro(-difference) }}{% else %}Eccedenza di {{ euro(difference) }}{% endif %}</strong></p>
+{% endif %}
+<form class="ct-form" method="post" action="/contanti-nei-negozi/conteggio">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="store" value="{{ card.store }}">
+<input type="hidden" name="day" value="{{ asof }}">
+<label>Contante trovato (€)<input name="amount" inputmode="decimal" pattern="[0-9]{1,9}([.,][0-9]{1,2})?" value="{{ ('%.2f' % (card.counted/100)).replace('.',',') if card.counted is not none else '' }}" required></label>
+<button class="btn">{{ 'Aggiorna conteggio' if card.counted is not none else 'Salva conteggio' }}</button>
+</form>
+</section>
+{% endfor %}
+</div>
+<section class="card ct-scroll">
+<h2>Totali del conteggio</h2>
+<table><thead><tr><th>Azienda</th><th>Contante trovato</th><th>Negozi registrati</th></tr></thead><tbody>
+{% for item in summaries %}<tr><th scope="row">{{ item.label }}</th><td>{{ euro(item.counted) }}</td><td>{{ item.recorded }} su {{ item.stores }}</td></tr>{% endfor %}
+</tbody></table>
+</section>
+<section class="card ct-scroll">
+<h2>Storico scostamenti · {{ month }}</h2>
+{% if discrepancies %}
+<table><thead><tr><th>Negozio</th><th>Conteggio</th><th>Chiusura</th><th>Dichiarato da</th><th>Contato da</th><th>Dichiarato</th><th>Contato</th><th>Scostamento</th></tr></thead><tbody>
+{% for item in discrepancies %}
+<tr><th scope="row">{{ labels[item.store] }}</th><td><a href="?asof={{ item.day }}">{{ item.day }}</a></td><td><a href="/report-chiusura?store={{ item.store }}&amp;day={{ item.report_day }}">{{ item.report_day }}</a></td><td>{{ item.authors }}</td><td>{{ item.counted_by }}</td><td>{{ euro(item.declared) }}</td><td>{{ euro(item.counted) }}</td><td>{{ '+' if item.difference > 0 else '' }}{{ euro(item.difference) }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% else %}<p>Nessuno scostamento nei conteggi confrontabili di questo mese.</p>{% endif %}
+</section>
+</div>
+{% endblock %}
