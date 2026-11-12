@@ -221,18 +221,11 @@ def install(app,api):
                 'SELECT store,start_date,amount_cents FROM cash_daily_openings'
             ).fetchall()}
             first_day = min([month_start.isoformat(), *(row['start_date'] for row in openings.values())])
-            balances_by_store = {row['store']: row['balance_cents'] for row in cur.execute(f'''
-                SELECT o.store,o.amount_cents + COALESCE(SUM(c.amount_cents),0) AS balance_cents
-                FROM cash_daily_openings o
-                LEFT JOIN cash_daily_counts c
-                  ON c.store=o.store AND c.day>=o.start_date AND c.day<={p()}
-                WHERE o.start_date<={p()}
-                GROUP BY o.store,o.amount_cents
-            ''', (day, day)).fetchall()}
             counts = cur.execute(f'''
-                SELECT store,day,amount_cents,counted_by FROM cash_daily_counts
-                WHERE day>={p()} AND day<={p()} ORDER BY day DESC,store
-            ''', (month_start.isoformat(), month_end)).fetchall()
+                SELECT c.store,c.day,c.amount_cents,c.counted_by
+                FROM cash_daily_counts c JOIN cash_daily_openings o ON o.store=c.store
+                WHERE c.day>=o.start_date AND c.day<={p()} ORDER BY c.day DESC,c.store
+            ''', (month_end,)).fetchall()
             reports = cur.execute(f'''
                 SELECT r.store,r.closure_date,r.created_by,r.lines_json,e.lines_json AS expenses_json
                 FROM closure_reports r
@@ -248,25 +241,29 @@ def install(app,api):
             spent = sum(expense['cents'] for expense in expenses if expense.get('mode') != 'cash_fund')
             declared[key] += cash - spent
             authors[key].add(report['created_by'])
-        counts = [row for row in counts if row['store'] in openings
-                  and row['day'] >= openings[row['store']]['start_date']]
         selected_counts = {row['store']: row['amount_cents'] for row in counts if row['day'] == day}
         cards = []
         for store in ORDER:
             opening = openings.get(store)
-            balance = balances_by_store.get(store)
-            expected = None
-            if balance is not None:
-                first_report = (date.fromisoformat(opening['start_date']) - timedelta(days=1)).isoformat()
-                expected = opening['amount_cents'] + sum(
-                    value for (closure_day, key), value in declared.items()
-                    if key == store and first_report <= closure_day <= report_day
-                )
+            balance = expected = None
+            if opening and opening['start_date'] <= day:
+                recorded = [row for row in counts if row['store'] == store and row['day'] <= day]
+                balance = opening['amount_cents'] + sum(row['amount_cents'] for row in recorded)
+                comparable = []
+                for row in recorded:
+                    previous_day = (date.fromisoformat(row['day']) - timedelta(days=1)).isoformat()
+                    key = (previous_day, store)
+                    if key in declared:
+                        comparable.append((row['amount_cents'], declared[key]))
+                if comparable:
+                    expected = balance + sum(reported - counted for counted, reported in comparable)
             cards.append(dict(store=store, label=LABELS[store], company=company(store),
                               counted=selected_counts.get(store), declared=declared.get((report_day, store)),
                               opening=opening, balance=balance, expected=expected))
         history = []
         for row in counts:
+            if row["day"] < month_start.isoformat():
+                continue
             previous_day = (date.fromisoformat(row['day']) - timedelta(days=1)).isoformat()
             key = (previous_day, row['store'])
             expected = declared.get(key)
@@ -283,7 +280,7 @@ def install(app,api):
             complete_balance = all(card['balance'] is not None for card in members)
             summaries.append(dict(label=label, counted=sum(recorded) if recorded else None,
                                   balance=sum(card['balance'] for card in members) if complete_balance else None,
-                                  expected=sum(card['expected'] for card in members) if complete_balance else None,
+                                  expected=sum(card['expected'] for card in members) if all(card['expected'] is not None for card in members) else None,
                                   recorded=len(recorded), stores=len(members)))
         return api['render']('cash_daily_counts.html', request=request, user=user,
                              cards=cards, summaries=summaries, companies=COMPANIES, labels=LABELS,
@@ -408,6 +405,20 @@ def install(app,api):
             ).fetchone()
             if removed:
                 logged(cur, user, store, 'Rimosso saldo iniziale dei conteggi')
+        return RedirectResponse('/contanti-nei-negozi', 303)
+
+    @app.post('/contanti-nei-negozi/riparti')
+    async def reset_daily_counts(request: Request):
+        user, _ = await form_for(request)
+        with connect() as conn:
+            cur = conn.cursor()
+            if using_postgres():
+                cur.execute('LOCK TABLE cash_daily_openings, cash_daily_counts IN EXCLUSIVE MODE')
+            else:
+                cur.execute('BEGIN IMMEDIATE')
+            cur.execute('DELETE FROM cash_daily_counts')
+            cur.execute('DELETE FROM cash_daily_openings')
+            logged(cur, user, 'ALL', 'Azzerati saldi iniziali e conteggi giornalieri')
         return RedirectResponse('/contanti-nei-negozi', 303)
 
     @app.post('/contanti-nei-negozi/conteggio')

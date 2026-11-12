@@ -35,7 +35,7 @@
 </details>
 {% if card.balance is not none %}
 <p>Saldo iniziale al {{ card.opening.start_date }} <strong>{{ euro(card.opening.amount_cents) }}</strong></p>
-<p>Saldo atteso dai report <strong>{{ euro(card.expected) }}</strong></p>
+<p>Saldo atteso sui giorni verificabili <strong>{{ euro(card.expected) }}</strong></p>
 <p>Saldo reale al {{ asof }} <strong class="ct-money">{{ euro(card.balance) }}</strong></p>
 <p>Contato il {{ asof }} <strong>{{ euro(card.counted) }}</strong></p>
 <p>Dichiarato <strong>{{ euro(card.declared) }}</strong></p>
@@ -77,5 +77,9 @@
 </tbody></table>
 {% else %}<p>Nessun conteggio registrato per questo mese.</p>{% endif %}
 </section>
+<form method="post" action="/contanti-nei-negozi/riparti" onsubmit="return confirm('Cancellare i saldi iniziali e tutti i conteggi giornalieri di tutti i negozi?');">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<button class="btn2">Azzera saldi iniziali e conteggi</button>
+</form>
 </div>
 {% endblock %}
