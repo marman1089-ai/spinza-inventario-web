@@ -7493,7 +7493,6 @@ def closures_page(request: Request, q: str = ""):
 
     store = _effective_store(request, user)
     brand = "ALL" if store == "ALL" else store
-    archive_state = {"pending":0,"working":0,"error":0,"done":0,"configured":False,"token":""}
 
     q = (q or "").strip()
     ph = _ph()
@@ -7514,17 +7513,8 @@ def closures_page(request: Request, q: str = ""):
         sql += " AND " + available_document('chiusure')
         sql += " ORDER BY store, closure_date DESC, id DESC" if store == "ALL" else " ORDER BY closure_date DESC, id DESC"
         rows = cur.execute(sql, tuple(params)).fetchall()
-    with connect() as digital_conn:
-        digital_rows = digital_conn.cursor().execute(f"SELECT * FROM digital_documents WHERE kind={_ph()}", ("chiusure",)).fetchall()
-        allowed_ids = {r['id'] for r in rows}
-        doc_summaries = {r['doc_id']:r for r in digital_rows if r['doc_id'] in allowed_ids}
-        for summary in doc_summaries.values():
-            summary['lines'] = json.loads(summary.get('lines_json') or '[]')
-        jobs_sql = f"SELECT * FROM document_ai_jobs WHERE kind={_ph()}"
-        jobs = digital_conn.cursor().execute(jobs_sql, ('chiusure',)).fetchall()
-        job_map = {r['doc_id']:r for r in jobs if r['doc_id'] in allowed_ids}
     active_store = request.session.get("active_store") if is_admin(request) else None
-    return render("closures.html", user=user, rows=rows, doc_summaries=doc_summaries, archive_state=archive_state, job_map=job_map, q=q, stores=STORES, brand=brand, active_store=active_store)
+    return render("closures.html", user=user, rows=rows, q=q, stores=STORES, brand=brand, active_store=active_store)
 
 
 @app.post("/chiusure/upload")
@@ -7708,12 +7698,8 @@ def secondary_expenses_page(request: Request, q: str = ""):
         sql += " ORDER BY store, expense_date DESC, id DESC" if store == "ALL" else " ORDER BY expense_date DESC, id DESC"
         rows = cur.execute(sql, tuple(params)).fetchall()
 
-    with connect() as digital_conn:
-        digital_rows = digital_conn.cursor().execute(f"SELECT * FROM digital_documents WHERE kind={_ph()}", ("spese-secondarie",)).fetchall()
-        allowed_ids = {r['id'] for r in rows}
-        doc_summaries = {r['doc_id']:r for r in digital_rows if r['doc_id'] in allowed_ids}
     active_store = request.session.get("active_store") if is_admin(request) else None
-    return render("secondary_expenses.html", user=user, rows=rows, doc_summaries=doc_summaries, q=q, stores=STORES, brand=brand, active_store=active_store)
+    return render("secondary_expenses.html", user=user, rows=rows, q=q, stores=STORES, brand=brand, active_store=active_store)
 
 
 @app.post("/spese-secondarie/upload")
@@ -8745,12 +8731,8 @@ def invoices_page(request: Request, supplier: str = "", q_date: str = ""):
         key = _supplier_key(r['supplier'])
         r['logo_key'] = key if key in logo_keys else None
 
-    with connect() as digital_conn:
-        digital_rows = digital_conn.cursor().execute(f"SELECT * FROM digital_documents WHERE kind={_ph()}", ("fatture",)).fetchall()
-        allowed_ids = {r['id'] for r in rows}
-        doc_summaries = {r['doc_id']:r for r in digital_rows if r['doc_id'] in allowed_ids}
     active_store = request.session.get("active_store") if is_admin(request) else None
-    return render("invoices.html", user=user, rows=rows, doc_summaries=doc_summaries, supplier=supplier, q_date=q_date, stores=STORES, brand=brand, active_store=active_store, suppliers=suppliers)
+    return render("invoices.html", user=user, rows=rows, supplier=supplier, q_date=q_date, stores=STORES, brand=brand, active_store=active_store, suppliers=suppliers)
 
 
 @app.post("/fatture/upload")
