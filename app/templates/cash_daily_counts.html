@@ -1,85 +1,94 @@
 {% extends "base.html" %}
 {% set title="Contanti nei negozi" %}
 {% macro euro(value) %}{{ ('%.2f' % (value/100)).replace('.',',') ~ ' €' if value is not none else '—' }}{% endmacro %}
+{% macro outcome(row) %}
+{% if row.difference is none %}Report assente
+{% elif row.difference == 0 %}<strong class="cash-ok">Conforme</strong>
+{% elif row.difference < 0 %}<strong class="cash-short">Ammanco {{ euro(row.difference) }}</strong>
+{% else %}<strong class="cash-ok">Eccedenza +{{ euro(row.difference) }}</strong>{% endif %}
+{% endmacro %}
 {% block content %}
 <link rel="stylesheet" href="/static/css/cash-treasury.css?v=1">
-<style>
-.ct-history-match { color: #22a06b; }
-.ct-history-short { color: #e5484d; }
-</style>
+<style>.cash-ok{color:#22a06b}.cash-short{color:#e5484d}.cash-menu{display:flex;gap:10px;flex-wrap:wrap}</style>
 <div class="ct-page">
-<section class="card ct-hero"><div><h1>Contanti nei negozi</h1><p>Inserisci il contante trovato, escluso il fondo cassa.</p></div><a class="btn2" href="/contanti-nei-negozi/tesoreria">Tesoreria</a></section>
-<form class="ct-asof" method="get"><label>Data del conteggio<input type="date" name="asof" value="{{ asof }}" min="0001-01-02" max="{{ today }}" required></label><button class="btn2">Visualizza</button></form>
-<p>Conteggi del <strong>{{ asof }}</strong> confrontati con i report di chiusura del <strong>{{ report_day }}</strong>.</p>
+<header class="card ct-hero"><h1>Contanti nei negozi</h1></header>
+<nav class="cash-menu" aria-label="Contanti nei negozi">
+<a class="btn2" href="{{ root }}/incassi"{% if view=='receipts' %} aria-current="page"{% endif %}>Registra incassi</a>
+<a class="btn2" href="{{ root }}/spese"{% if view=='spending' %} aria-current="page"{% endif %}>Registra spesa in cash</a>
+<a class="btn2" href="{{ root }}/bilanci"{% if view=='balances' %} aria-current="page"{% endif %}>Bilanci cash</a>
+</nav>
+{% if view in ('receipts','spending') %}
+<form class="ct-asof" method="get">
+<label>Data {{ 'del conteggio' if view=='receipts' else 'della spesa' }}<input type="date" name="day" value="{{ day }}" max="{{ today }}" required></label>
+<button class="btn2">Cambia data</button>
+</form>
+{% endif %}
+{% if view=='receipts' %}
+<section class="card">
+<h2>Registra incassi</h2>
+<p>Inserisci il contante che hai contato, escluso il fondo cassa. Il confronto usa la chiusura del {{ previous }}.</p>
+<form class="ct-form" method="post" action="{{ root }}/incassi">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="day" value="{{ day }}">
 <div class="ct-cards">
-{% for card in cards %}
-<section class="card ct-balance">
-<small>{{ companies[card.company] }}</small>
-<h2>{{ card.label }}</h2>
-<details{% if not card.opening %} open{% endif %}>
-<summary>{{ 'Modifica saldo iniziale' if card.opening else 'Imposta saldo iniziale' }}</summary>
-<form class="ct-form" method="post" action="/contanti-nei-negozi/partenza">
-<input type="hidden" name="csrf" value="{{ csrf }}">
-<input type="hidden" name="store" value="{{ card.store }}">
-<label>Data di partenza<input type="date" name="day" min="0001-01-02" max="{{ today }}" value="{{ card.opening.start_date if card.opening else asof }}" required></label>
-<label>Saldo iniziale senza fondo cassa (€)<input name="amount" inputmode="decimal" pattern="[0-9]{1,9}([.,][0-9]{1,2})?" value="{{ ('%.2f' % (card.opening.amount_cents/100)).replace('.',',') if card.opening else '' }}" required></label>
-<button class="btn">Salva saldo iniziale</button>
-</form>
-{% if card.opening %}
-<form class="ct-form" method="post" action="/contanti-nei-negozi/azzera-partenza" onsubmit="return confirm('Svuotare il saldo iniziale di questo negozio?');">
-<input type="hidden" name="csrf" value="{{ csrf }}">
-<input type="hidden" name="store" value="{{ card.store }}">
-<button class="btn2">Svuota saldo iniziale</button>
-</form>
-{% endif %}
-</details>
-{% if card.balance is not none %}
-<p>Saldo iniziale al {{ card.opening.start_date }} <strong>{{ euro(card.opening.amount_cents) }}</strong></p>
-<p>Saldo atteso sui giorni verificabili <strong>{{ euro(card.expected) }}</strong></p>
-<p>Saldo reale al {{ asof }} <strong class="ct-money">{{ euro(card.balance) }}</strong></p>
-<p>Contato il {{ asof }} <strong>{{ euro(card.counted) }}</strong></p>
-<p>Dichiarato <strong>{{ euro(card.declared) }}</strong></p>
-{% if card.declared is none %}<p>Nessun report di chiusura per il giorno precedente.</p>
-{% elif card.counted is not none %}
-{% set difference = card.counted - card.declared %}
-<p><strong>{% if difference == 0 %}Combaciano{% elif difference < 0 %}Ammanco di {{ euro(-difference) }}{% else %}Eccedenza di {{ euro(difference) }}{% endif %}</strong></p>
-{% endif %}
-<form class="ct-form" method="post" action="/contanti-nei-negozi/conteggio">
-<input type="hidden" name="csrf" value="{{ csrf }}">
-<input type="hidden" name="store" value="{{ card.store }}">
-<input type="hidden" name="day" value="{{ asof }}">
-<label>Contante trovato (€)<input name="amount" inputmode="decimal" pattern="[0-9]{1,9}([.,][0-9]{1,2})?" value="{{ ('%.2f' % (card.counted/100)).replace('.',',') if card.counted is not none else '' }}" required></label>
-<button class="btn">{{ 'Aggiorna conteggio' if card.counted is not none else 'Salva conteggio' }}</button>
-</form>
-{% elif card.opening %}<p>La data selezionata precede la data di partenza.</p>{% endif %}
-</section>
+{% for store in stores_order %}
+{% set row=current.get(store) %}
+<div>
+<h3>{{ labels[store] }}</h3>
+<p>{{ companies['sc' if store=='spinza' else 'reburger'] }}</p>
+<p>Dichiarato {{ euro(declared[store]) }}{% if declared[store] is none %} · Report assente{% endif %}</p>
+{% if row %}<p>Registrato {{ euro(row.amount_cents) }} · {{ outcome(row) }}</p>{% endif %}
+<label>Contante contato (€)<input name="{{ store }}" inputmode="decimal" pattern="[0-9]{1,9}([.,][0-9]{1,2})?"></label>
+</div>
 {% endfor %}
 </div>
-<section class="card ct-scroll">
-<h2>Totali al {{ asof }}</h2>
-<table><thead><tr><th>Azienda</th><th>Contante trovato del giorno</th><th>Saldo atteso</th><th>Saldo reale</th><th>Negozi registrati</th></tr></thead><tbody>
-{% for item in summaries %}<tr><th scope="row">{{ item.label }}</th><td>{{ euro(item.counted) }}</td><td>{{ euro(item.expected) }}</td><td>{{ euro(item.balance) }}</td><td>{{ item.recorded }} su {{ item.stores }}</td></tr>{% endfor %}
-</tbody></table>
+<p>Compila i negozi da registrare o correggere. Inserisci 0 per registrare un conteggio a zero.</p>
+<button class="btn">Salva incassi del {{ day }}</button>
+</form>
 </section>
 <section class="card ct-scroll">
-<h2>Storico conteggi · {{ month }}</h2>
+<h2>Archivio incassi · {{ day[:7] }}</h2>
 {% if history %}
-<table><thead><tr><th>Negozio</th><th>Conteggio</th><th>Chiusura</th><th>Dichiarato da</th><th>Contato da</th><th>Dichiarato</th><th>Contato</th><th>Esito</th></tr></thead><tbody>
-{% for item in history %}
-<tr><th scope="row">{{ labels[item.store] }}</th><td><a href="?asof={{ item.day }}">{{ item.day }}</a></td><td><a href="/report-chiusura?store={{ item.store }}&amp;day={{ item.report_day }}">{{ item.report_day }}</a></td><td>{{ item.authors }}</td><td>{{ item.counted_by }}</td><td>{{ euro(item.declared) }}</td><td>{{ euro(item.counted) }}</td><td>
-{% if item.difference is none %}Report assente
-{% elif item.difference == 0 %}<strong class="ct-history-match">Conforme</strong>
-{% elif item.difference < 0 %}<strong class="ct-history-short">Ammanco {{ euro(item.difference) }}</strong>
-{% else %}<strong class="ct-history-match">Eccedenza +{{ euro(item.difference) }}</strong>
-{% endif %}
-</td></tr>
+<table><thead><tr><th>Conteggio</th><th>Negozio</th><th>Reale</th><th>Dichiarato</th><th>Chiusura</th><th>Dichiarato da</th><th>Contato da</th><th>Esito</th></tr></thead><tbody>
+{% for row in history %}
+<tr><td><a href="?day={{ row.day }}">{{ row.day }}</a></td><th scope="row">{{ labels[row.store] }}</th><td>{{ euro(row.amount_cents) }}</td><td>{{ euro(row.declared) }}</td><td>{% if row.declared is not none %}<a href="/report-chiusura?store={{ row.store }}&amp;day={{ row.report_day }}">{{ row.report_day }}</a>{% else %}{{ row.report_day }}{% endif %}</td><td>{{ row.authors or '—' }}</td><td>{{ row.counted_by }}</td><td>{{ outcome(row) }}</td></tr>
 {% endfor %}
 </tbody></table>
-{% else %}<p>Nessun conteggio registrato per questo mese.</p>{% endif %}
+{% else %}<p>Nessun incasso registrato per questo mese.</p>{% endif %}
 </section>
-<form method="post" action="/contanti-nei-negozi/riparti" onsubmit="return confirm('Cancellare i saldi iniziali e tutti i conteggi giornalieri di tutti i negozi?');">
+{% elif view=='spending' %}
+<section class="card">
+<h2>Registra spesa in cash</h2>
+<form class="ct-form" method="post" action="{{ root }}/spese">
 <input type="hidden" name="csrf" value="{{ csrf }}">
-<button class="btn2">Azzera saldi iniziali e conteggi</button>
+<input type="hidden" name="submission" value="{{ submission }}">
+<input type="hidden" name="day" value="{{ day }}">
+<label>Descrizione<input name="description" maxlength="250" required></label>
+<label>Importo totale (€)<input name="amount" inputmode="decimal" pattern="[0-9]{1,9}([.,][0-9]{1,2})?" required></label>
+<label>Quota pagata con contanti Reburger (%)<input type="number" name="reburger_percent" min="0" max="100" step="0.01" required></label>
+<p>Il resto è a carico di S&amp;C (Spinza). Inserisci 50 per dividere a metà, 100 per solo Reburger o 0 per solo Spinza.</p>
+<button class="btn">Salva spesa del {{ day }}</button>
 </form>
+</section>
+<section class="card ct-scroll">
+<h2>Archivio spese · {{ day[:7] }}</h2>
+{% if expenses %}
+<table><thead><tr><th>Data</th><th>Spesa</th><th>Totale</th><th>Reburger</th><th>S&amp;C</th></tr></thead><tbody>
+{% for row in expenses %}<tr><td>{{ row.day }}</td><th scope="row">{{ row.description }}</th><td>{{ euro(row.reburger_cents+row.sc_cents) }}</td><td>{{ euro(row.reburger_cents) }}</td><td>{{ euro(row.sc_cents) }}</td></tr>{% endfor %}
+</tbody></table>
+{% else %}<p>Nessuna spesa registrata per questo mese.</p>{% endif %}
+</section>
+{% elif view=='balances' %}
+<section class="card ct-scroll">
+<h2>Bilanci cash al {{ today }}</h2>
+<table><thead><tr><th>Azienda</th><th>Incassi contati</th><th>Spese pagate</th><th>Liquidità</th></tr></thead><tbody>
+{% for row in balances %}
+<tr><th scope="row">{{ row.label }}</th><td>{{ euro(row.income) }}</td><td>{{ euro(row.spent) }}</td><td><strong{% if row.balance<0 %} class="cash-short"{% endif %}>{{ euro(row.balance) }}</strong></td></tr>
+{% endfor %}
+</tbody></table>
+<h3>Incassi contati per negozio</h3>
+<ul>{% for store in stores_order %}<li>{{ labels[store] }} · {{ euro(income_by_store.get(store,0)) }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
 </div>
 {% endblock %}
