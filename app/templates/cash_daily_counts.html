@@ -3,6 +3,10 @@
 {% macro euro(value) %}{{ ('%.2f' % (value/100)).replace('.',',') ~ ' €' if value is not none else '—' }}{% endmacro %}
 {% block content %}
 <link rel="stylesheet" href="/static/css/cash-treasury.css?v=1">
+<style>
+.ct-history-match { color: #22a06b; }
+.ct-history-short { color: #e5484d; }
+</style>
 <div class="ct-page">
 <section class="card ct-hero"><div><h1>Contanti nei negozi</h1><p>Inserisci il contante trovato, escluso il fondo cassa.</p></div><a class="btn2" href="/contanti-nei-negozi/tesoreria">Tesoreria</a></section>
 <form class="ct-asof" method="get"><label>Data del conteggio<input type="date" name="asof" value="{{ asof }}" min="0001-01-02" max="{{ today }}" required></label><button class="btn2">Visualizza</button></form>
@@ -21,6 +25,13 @@
 <label>Saldo iniziale senza fondo cassa (€)<input name="amount" inputmode="decimal" pattern="[0-9]{1,9}([.,][0-9]{1,2})?" value="{{ ('%.2f' % (card.opening.amount_cents/100)).replace('.',',') if card.opening else '' }}" required></label>
 <button class="btn">Salva saldo iniziale</button>
 </form>
+{% if card.opening %}
+<form class="ct-form" method="post" action="/contanti-nei-negozi/azzera-partenza" onsubmit="return confirm('Svuotare il saldo iniziale di questo negozio?');">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="store" value="{{ card.store }}">
+<button class="btn2">Svuota saldo iniziale</button>
+</form>
+{% endif %}
 </details>
 {% if card.balance is not none %}
 <p>Saldo iniziale al {{ card.opening.start_date }} <strong>{{ euro(card.opening.amount_cents) }}</strong></p>
@@ -51,14 +62,20 @@
 </tbody></table>
 </section>
 <section class="card ct-scroll">
-<h2>Storico scostamenti · {{ month }}</h2>
-{% if discrepancies %}
-<table><thead><tr><th>Negozio</th><th>Conteggio</th><th>Chiusura</th><th>Dichiarato da</th><th>Contato da</th><th>Dichiarato</th><th>Contato</th><th>Scostamento</th></tr></thead><tbody>
-{% for item in discrepancies %}
-<tr><th scope="row">{{ labels[item.store] }}</th><td><a href="?asof={{ item.day }}">{{ item.day }}</a></td><td><a href="/report-chiusura?store={{ item.store }}&amp;day={{ item.report_day }}">{{ item.report_day }}</a></td><td>{{ item.authors }}</td><td>{{ item.counted_by }}</td><td>{{ euro(item.declared) }}</td><td>{{ euro(item.counted) }}</td><td>{{ '+' if item.difference > 0 else '' }}{{ euro(item.difference) }}</td></tr>
+<h2>Storico conteggi · {{ month }}</h2>
+{% if history %}
+<table><thead><tr><th>Negozio</th><th>Conteggio</th><th>Chiusura</th><th>Dichiarato da</th><th>Contato da</th><th>Dichiarato</th><th>Contato</th><th>Esito</th></tr></thead><tbody>
+{% for item in history %}
+<tr><th scope="row">{{ labels[item.store] }}</th><td><a href="?asof={{ item.day }}">{{ item.day }}</a></td><td><a href="/report-chiusura?store={{ item.store }}&amp;day={{ item.report_day }}">{{ item.report_day }}</a></td><td>{{ item.authors }}</td><td>{{ item.counted_by }}</td><td>{{ euro(item.declared) }}</td><td>{{ euro(item.counted) }}</td><td>
+{% if item.difference is none %}Report assente
+{% elif item.difference == 0 %}<strong class="ct-history-match">Conforme</strong>
+{% elif item.difference < 0 %}<strong class="ct-history-short">Ammanco {{ euro(item.difference) }}</strong>
+{% else %}<strong class="ct-history-match">Eccedenza +{{ euro(item.difference) }}</strong>
+{% endif %}
+</td></tr>
 {% endfor %}
 </tbody></table>
-{% else %}<p>Nessuno scostamento nei conteggi confrontabili di questo mese.</p>{% endif %}
+{% else %}<p>Nessun conteggio registrato per questo mese.</p>{% endif %}
 </section>
 </div>
 {% endblock %}

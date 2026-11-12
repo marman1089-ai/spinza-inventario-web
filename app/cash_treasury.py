@@ -265,15 +265,15 @@ def install(app,api):
             cards.append(dict(store=store, label=LABELS[store], company=company(store),
                               counted=selected_counts.get(store), declared=declared.get((report_day, store)),
                               opening=opening, balance=balance, expected=expected))
-        discrepancies = []
+        history = []
         for row in counts:
             previous_day = (date.fromisoformat(row['day']) - timedelta(days=1)).isoformat()
             key = (previous_day, row['store'])
             expected = declared.get(key)
-            if expected is not None and row['amount_cents'] != expected and row['store'] in LABELS:
-                discrepancies.append(dict(
+            if row['store'] in LABELS:
+                history.append(dict(
                     day=row['day'], report_day=previous_day, store=row['store'], counted=row['amount_cents'],
-                    declared=expected, difference=row['amount_cents']-expected,
+                    declared=expected, difference=row['amount_cents']-expected if expected is not None else None,
                     authors=', '.join(sorted(authors[key])), counted_by=row['counted_by'],
                 ))
         summaries = []
@@ -287,7 +287,7 @@ def install(app,api):
                                   recorded=len(recorded), stores=len(members)))
         return api['render']('cash_daily_counts.html', request=request, user=user,
                              cards=cards, summaries=summaries, companies=COMPANIES, labels=LABELS,
-                             discrepancies=discrepancies, month=month,
+                             history=history, month=month,
                              asof=day, report_day=report_day, today=today, csrf=token(request))
 
     @app.get('/contanti-nei-negozi/tesoreria')
@@ -396,6 +396,19 @@ def install(app,api):
                 start_date=excluded.start_date,amount_cents=excluded.amount_cents''', (store,day,value))
             logged(cur,user,store,f'Saldo iniziale conteggi dal {day}')
         return RedirectResponse('/contanti-nei-negozi?'+urlencode(dict(asof=day)),303)
+
+    @app.post('/contanti-nei-negozi/azzera-partenza')
+    async def clear_daily_opening(request: Request):
+        user, form = await form_for(request)
+        store = store_key(form.get('store'))
+        with connect() as conn:
+            cur = conn.cursor()
+            removed = cur.execute(
+                f'DELETE FROM cash_daily_openings WHERE store={p()} RETURNING store', (store,)
+            ).fetchone()
+            if removed:
+                logged(cur, user, store, 'Rimosso saldo iniziale dei conteggi')
+        return RedirectResponse('/contanti-nei-negozi', 303)
 
     @app.post('/contanti-nei-negozi/conteggio')
     async def save_count(request:Request):
