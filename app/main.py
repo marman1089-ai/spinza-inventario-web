@@ -9577,6 +9577,7 @@ def _kitchen_week(raw):
 def kitchen_weekly_invoices(request:Request,store:str='',week:str='',doc:int=0):
     user,_,default_store=_stock_context(request)
     if not user:return RedirectResponse('/',status_code=303)
+    if not is_admin(request): return PlainTextResponse('Riservato agli amministratori',status_code=403)
     store=store or default_store
     if store not in STORES or (not is_admin(request) and store!=user.get('store')):
         return PlainTextResponse('Negozio non autorizzato',status_code=403)
@@ -9609,6 +9610,7 @@ def kitchen_weekly_invoices(request:Request,store:str='',week:str='',doc:int=0):
 def kitchen_invoice_file(request:Request,doc_id:int,store:str='',week:str=''):
     user,_,default_store=_stock_context(request)
     if not user:return RedirectResponse('/',status_code=303)
+    if not is_admin(request): return PlainTextResponse('Riservato agli amministratori',status_code=403)
     store=store or default_store
     if store not in STORES or (not is_admin(request) and store!=user.get('store')):
         return PlainTextResponse('Non autorizzato',status_code=403)
@@ -9625,6 +9627,7 @@ def kitchen_invoice_file(request:Request,doc_id:int,store:str='',week:str=''):
 async def kitchen_invoice_save(request:Request):
     user,_,default_store=_stock_context(request)
     if not user:return RedirectResponse('/',status_code=303)
+    if not is_admin(request): return PlainTextResponse('Riservato agli amministratori',status_code=403)
     form=await request.form()
     store=str(form.get('store') or default_store)
     if store not in STORES or (not is_admin(request) and store!=user.get('store')):
@@ -9735,13 +9738,15 @@ async def stock_count_submit(request: Request):
             values.append((product,qty))
         count_end=counted.isoformat()+' 23:59:59'
         if using_postgres():
-            head=cur.execute(f"INSERT INTO inventory_period_count_headers(store,area,counted_at,username,created_at) VALUES({ph},{ph},{ph},{ph},CURRENT_TIMESTAMP) RETURNING id",(store,area,count_end,user['username'])).fetchone()
+            head=cur.execute(f"INSERT INTO inventory_period_count_headers(store,area,counted_at,username,created_at) VALUES({ph},{ph},{ph},{ph},{ph}) RETURNING id",(store,area,count_end,user['username'],datetime.now().isoformat(sep=' ',timespec='seconds'))).fetchone()
             count_id=head['id']
         else:
-            cur.execute(f"INSERT INTO inventory_period_count_headers(store,area,counted_at,username,created_at) VALUES({ph},{ph},{ph},{ph},CURRENT_TIMESTAMP)",(store,area,count_end,user['username']))
+            cur.execute(f"INSERT INTO inventory_period_count_headers(store,area,counted_at,username,created_at) VALUES({ph},{ph},{ph},{ph},{ph})",(store,area,count_end,user['username'],datetime.now().isoformat(sep=' ',timespec='seconds')))
             count_id=cur.lastrowid
         for product,qty in values:
             prev=None; arrivals=None; outgoing=None
+            if not latest and area=='prodotti':
+                prev=float(product['qty'] or 0)
             if latest:
                 old=cur.execute(f"SELECT observed FROM inventory_period_count_lines WHERE count_id={ph} AND product_id={ph}",(latest['id'],product['id'])).fetchone()
                 if old:
@@ -9773,6 +9778,8 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
         end_day=date.fromisoformat(end) if end else today
         if end_day<start_day: raise ValueError()
     except ValueError: return PlainTextResponse('Intervallo date non valido',status_code=400)
+    if area=='prodotti':
+        _ensure_kitchen_invoice_tables()
     ph=_ph()
     with connect() as conn:
         cur=conn.cursor()
@@ -9786,11 +9793,56 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
             if selected:
                 end_day=date.fromisoformat(str(selected['counted_at'])[:10])
                 previous=cur.execute(f"SELECT counted_at FROM inventory_period_count_headers WHERE store={ph} AND area={ph} AND (counted_at < {ph} OR (counted_at={ph} AND id<{ph})) ORDER BY counted_at DESC,id DESC LIMIT 1",(store,area,selected['counted_at'],selected['counted_at'],id)).fetchone()
-                start_day=date.fromisoformat(str(previous['counted_at'])[:10]) if previous else end_day
+                if previous:
+                    start_day=date.fromisoformat(str(previous['counted_at'])[:10])
+                elif area=='prodotti':
+                    start_day=start_day if start else date.fromisoformat(_kitchen_week(end_day.isoformat()))
+                    if start_day>end_day:
+                        return PlainTextResponse('La data di partenza supera quella del conteggio',status_code=400)
+                else:
+                    start_day=end_day
         headers=cur.execute(f"SELECT * FROM inventory_period_count_headers WHERE store={ph} AND area={ph} AND counted_at>={ph} AND counted_at<={ph} ORDER BY counted_at,id",(store,area,start_day.isoformat(),end_day.isoformat()+' 23:59:59')).fetchall()
         # Include l'ultimo punto di partenza prima dell'intervallo, se necessario.
         baseline=cur.execute(f"SELECT * FROM inventory_period_count_headers WHERE store={ph} AND area={ph} AND counted_at<{ph} ORDER BY counted_at DESC,id DESC LIMIT 1",(store,area,start_day.isoformat())).fetchone()
         if baseline: headers=[baseline]+headers
+        kitchen_periods=[]
+        pairs=list(zip(headers,headers[1:]))
+        if area=='prodotti' and headers and not baseline:
+            pairs.insert(0,(None,headers[0]))
+        for before,after in pairs if area=='prodotti' else ():
+            first=str(before['counted_at'])[:10] if before else start_day.isoformat()
+            last=str(after['counted_at'])[:10]
+            if first < start_day.isoformat() or last > end_day.isoformat():
+                continue
+            first_operator='>' if before else '>='
+            docs=cur.execute(f'''SELECT d.id,d.doc_date,r.status,r.id AS review_id
+                FROM invoices_docs d LEFT JOIN kitchen_invoice_reviews r ON r.id=(SELECT r2.id FROM kitchen_invoice_reviews r2
+                    WHERE r2.doc_id=d.id AND r2.store=d.store
+                    ORDER BY CASE WHEN r2.status='done' THEN 0 ELSE 1 END,r2.id DESC LIMIT 1)
+                WHERE d.store={ph} AND d.doc_date{first_operator}{ph} AND d.doc_date<={ph}
+                AND {available_document('fatture','d.id')} ORDER BY d.doc_date,d.id''',(store,first,last)).fetchall()
+            arrivals={}
+            completed=0
+            for doc in docs:
+                if doc['status']!='done':
+                    continue
+                completed+=1
+                for line in cur.execute(f'SELECT product_id,qty FROM kitchen_invoice_review_lines WHERE review_id={ph}',(doc['review_id'],)).fetchall():
+                    pid=line['product_id']
+                    arrivals[pid]=arrivals.get(pid,0)+line['qty']
+            previous={line['product_id']:line['observed'] for line in cur.execute(
+                f'SELECT product_id,observed FROM inventory_period_count_lines WHERE count_id={ph}',(before['id'],)).fetchall()} if before else {}
+            detail=[]
+            for line in cur.execute(f'SELECT * FROM inventory_period_count_lines WHERE count_id={ph} ORDER BY category,name',(after['id'],)).fetchall():
+                pid=line['product_id']
+                initial=previous.get(pid) if before else line['previous']
+                if initial is not None:
+                    received=arrivals.get(pid,0)
+                    detail.append(dict(name=line['name'],unit=line['unit'],start=initial,received=received,
+                                       end=line['observed'],used=initial+received-line['observed']))
+            weeks=sorted({_kitchen_week(str(doc['doc_date'])[:10]) for doc in docs} | {_kitchen_week(last)})
+            kitchen_periods.append(dict(first=first,last=last,details=detail,weeks=weeks,initial=before is None,
+                                        completed=completed,total=len(docs)))
         periods=[]; totals={}
         for before,after in zip(headers,headers[1:]):
             before_lines={r['product_id']:r for r in cur.execute(f"SELECT * FROM inventory_period_count_lines WHERE count_id={ph}",(before['id'],)).fetchall()}
@@ -9814,7 +9866,7 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
         known=cur.execute(f"SELECT counted_at FROM inventory_period_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC LIMIT 1",(store,area)).fetchone()
     return render('stock_report.html',user=user,area=area,store=store,stores=STORES,
         start=start_day.isoformat(),end=end_day.isoformat(),periods=periods,totals=summaries,
-        known=known,generated=id>0,id=id,selected=selected,selected_lines=selected_lines,archive=archive,invoices=invoices,request=request,delete_token=request.session.setdefault('inventory_report_csrf',secrets.token_urlsafe(32)))
+        known=known,kitchen_periods=kitchen_periods,generated=id>0,id=id,selected=selected,selected_lines=selected_lines,archive=archive,invoices=invoices,request=request,delete_token=request.session.setdefault('inventory_report_csrf',secrets.token_urlsafe(32)))
 
 
 @app.post('/inventario/bozza')

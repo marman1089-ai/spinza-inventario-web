@@ -17,13 +17,39 @@
 <h3>Conteggio salvato</h3><table style="width:100%"><thead><tr><th>Categoria</th><th>Prodotto</th><th>Quantità contata</th></tr></thead><tbody>{% for row in selected_lines %}<tr><td>{{ row.category }}</td><td>{{ row.name }}</td><td>{{ row.observed }} {{ row.unit }}</td></tr>{% endfor %}</tbody></table>{% endif %}
 <h3>Schede archiviate nel periodo</h3>{% for h in archive %}<p><a href="/inventario/report?area={{ area }}&store={{ store }}&id={{ h.id }}">#{{ h.id }} · {{ h.counted_at[:10] }} · {{ h.username }}</a></p>{% else %}<p>Nessuna scheda in questo periodo.</p>{% endfor %}
 <h3>Fatture dello stesso periodo</h3>{% for doc in invoices %}<p>{{ doc.doc_date }} · {{ doc.supplier }} · <a href="/inventario/fatture-periodo/{{ doc.id }}?store={{ store }}" target="_blank" rel="noopener">{{ doc.filename }}</a></p>{% else %}<p>Nessuna fattura nel periodo.</p>{% endfor %}
-{% if not periods %}<div class="card" style="margin-top:12px">Non esistono ancora due conteggi completi nel periodo selezionato. Esegui un primo conteggio e un secondo successivo per ottenere un report affidabile. I giorni senza conteggi ai confini non vengono stimati automaticamente.</div>{% endif %}
+{% if not periods and area != 'prodotti' %}<div class="card" style="margin-top:12px">Non esistono ancora due conteggi completi nel periodo selezionato. Esegui un primo conteggio e un secondo successivo per ottenere un report affidabile. I giorni senza conteggi ai confini non vengono stimati automaticamente.</div>{% endif %}
 {% if totals %}<h3>Totale uscite nei periodi disponibili</h3><table style="width:100%"><thead><tr><th>Prodotto</th><th>Uscito / consumato dal magazzino</th></tr></thead><tbody>
 {% for t in totals %}<tr><td>{{ t.name }}</td><td><strong>{{ '%.2f'|format(t.outgoing) }} {{ t.unit }}</strong></td></tr>{% endfor %}
 </tbody></table>{% endif %}
 {% for period in periods %}<h3>{{ period.from }} → {{ period.to }}</h3><table style="width:100%"><thead><tr><th>Prodotto</th><th>Inizio</th><th>Arrivi</th><th>Fine</th><th>Uscite</th></tr></thead><tbody>
 {% for row in period.detail %}<tr><td>{{ row.name }}</td><td>{{ row.start }}</td><td>+{{ row.arrivals }}</td><td>{{ row.end }}</td><td><strong>{{ '%.2f'|format(row.outgoing) }} {{ row.unit }}</strong></td></tr>{% endfor %}
 </tbody></table>{% endfor %}
-{% if area=='prodotti' %}<section class="card" style="margin:20px 0;padding:22px;border:1px solid #b7ddcf;border-radius:16px"><h2>🧾 Passaggio successivo: fatture della settimana</h2><p>Visualizza ogni fattura originale e trascrivi i prodotti ricevuti. Le fatture completate diventano verdi. Gli arrivi sono registrati separatamente dalle giacenze per evitare doppi carichi.</p><a class="shine-button" href="/inventario/fatture-settimana?store={{ store }}&week={{ end }}">Apri fatture della settimana →</a></section>{% endif %}
+{% if area=='prodotti' and user.role=='admin' %}
+<section class="card shine-panel">
+<h2>Consumo reale di cucina</h2>
+<p>Giacenza iniziale + arrivi dalle fatture confermate − giacenza finale. Per il primo report, la giacenza iniziale è quella presente in Cucina prima della conferma.</p>
+{% for period in kitchen_periods %}
+<h3>{{ period.first }} → {{ period.last }}</h3>
+{% if period.initial and id %}
+<form method="get" action="/inventario/report" class="row">
+<input type="hidden" name="area" value="{{ area }}"><input type="hidden" name="store" value="{{ store }}"><input type="hidden" name="id" value="{{ id }}">
+<label>Fatture a partire dal <input type="date" name="start" value="{{ period.first }}" max="{{ period.last }}" required></label>
+<button class="btn2">Ricalcola</button>
+</form>
+{% endif %}
+{% if period.initial and not period.details %}<p>La giacenza precedente non è stata salvata per questa scheda storica.</p>{% endif %}
+<p>{{ period.completed }} / {{ period.total }} fatture confermate.
+{% if not period.total %}Nessuna fattura disponibile nel periodo.
+{% elif period.completed < period.total %}Consumo provvisorio: ci sono fatture da completare.{% endif %}</p>
+{% for week in period.weeks %}<p><a class="btn2" href="/inventario/fatture-settimana?store={{ store }}&amp;week={{ week }}">Trascrivi fatture dal {{ week }}</a></p>{% endfor %}
+<table style="width:100%"><thead><tr><th>Prodotto</th><th>Giacenza iniziale</th><th>Arrivi da fattura</th><th>Giacenza finale</th><th>Consumo</th></tr></thead><tbody>
+{% for row in period.details %}<tr><td>{{ row.name }}</td><td>{{ row.start }}</td><td>{{ row.received }}</td><td>{{ row.end }}</td><td>{{ '%.2f'|format(row.used) }} {{ row.unit }}</td></tr>{% endfor %}
+</tbody></table>
+{% else %}
+<p>Apri una scheda archiviata per vedere il consumo del suo periodo.</p>
+{% endfor %}
+<p><a class="btn2" href="/fatture">Carica fatture in archivio</a></p>
+</section>
+{% endif %}
 <p><a class="btn2" href="/inventario/conteggio?area={{ area }}&store={{ store }}">📋 Nuovo conteggio</a></p></div>
 {% endblock %}
