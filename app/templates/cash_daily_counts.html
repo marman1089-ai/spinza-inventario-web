@@ -7,6 +7,15 @@
 {% elif row.difference < 0 %}<strong class="cash-short">Ammanco {{ euro(row.difference) }}</strong>
 {% else %}<strong class="cash-ok">Eccedenza +{{ euro(row.difference) }}</strong>{% endif %}
 {% endmacro %}
+{% macro delete_action(section, row, label) %}
+<form method="post" action="{{ root }}/{{ section }}/elimina" onsubmit="return confirm('Confermi l’eliminazione della voce?')">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="day" value="{{ row.day }}">
+{% if section=='incassi' %}<input type="hidden" name="store" value="{{ row.store }}">
+{% else %}<input type="hidden" name="token" value="{{ row.token }}">{% endif %}
+<button class="btn2" type="submit">{{ label }}</button>
+</form>
+{% endmacro %}
 {% block content %}
 <link rel="stylesheet" href="/static/css/cash-treasury.css?v=1">
 <style>.cash-ok{color:#22a06b}.cash-short{color:#e5484d}.cash-menu{display:flex;gap:10px;flex-wrap:wrap}</style>
@@ -49,9 +58,9 @@
 <section class="card ct-scroll">
 <h2>Archivio incassi · {{ day[:7] }}</h2>
 {% if history %}
-<table><thead><tr><th>Conteggio</th><th>Negozio</th><th>Reale</th><th>Dichiarato</th><th>Chiusura</th><th>Dichiarato da</th><th>Contato da</th><th>Esito</th></tr></thead><tbody>
+<table><thead><tr><th>Conteggio</th><th>Negozio</th><th>Reale</th><th>Dichiarato</th><th>Chiusura</th><th>Dichiarato da</th><th>Contato da</th><th>Esito</th><th>Azioni</th></tr></thead><tbody>
 {% for row in history %}
-<tr><td><a href="?day={{ row.day }}">{{ row.day }}</a></td><th scope="row">{{ labels[row.store] }}</th><td>{{ euro(row.amount_cents) }}</td><td>{{ euro(row.declared) }}</td><td>{% if row.declared is not none %}<a href="/report-chiusura?store={{ row.store }}&amp;day={{ row.report_day }}">{{ row.report_day }}</a>{% else %}{{ row.report_day }}{% endif %}</td><td>{{ row.authors or '—' }}</td><td>{{ row.counted_by }}</td><td>{{ outcome(row) }}</td></tr>
+<tr><td><a href="?day={{ row.day }}">{{ row.day }}</a></td><th scope="row">{{ labels[row.store] }}</th><td>{{ euro(row.amount_cents) }}</td><td>{{ euro(row.declared) }}</td><td>{% if row.declared is not none %}<a href="/report-chiusura?store={{ row.store }}&amp;day={{ row.report_day }}">{{ row.report_day }}</a>{% else %}{{ row.report_day }}{% endif %}</td><td>{{ row.authors or '—' }}</td><td>{{ row.counted_by }}</td><td>{{ outcome(row) }}</td><td>{{ delete_action('incassi', row, 'Elimina incasso') }}</td></tr>
 {% endfor %}
 </tbody></table>
 {% else %}<p>Nessun incasso registrato per questo mese.</p>{% endif %}
@@ -73,8 +82,8 @@
 <section class="card ct-scroll">
 <h2>Archivio spese · {{ day[:7] }}</h2>
 {% if expenses %}
-<table><thead><tr><th>Data</th><th>Spesa</th><th>Totale</th><th>Reburger</th><th>S&amp;C</th></tr></thead><tbody>
-{% for row in expenses %}<tr><td>{{ row.day }}</td><th scope="row">{{ row.description }}</th><td>{{ euro(row.reburger_cents+row.sc_cents) }}</td><td>{{ euro(row.reburger_cents) }}</td><td>{{ euro(row.sc_cents) }}</td></tr>{% endfor %}
+<table><thead><tr><th>Data</th><th>Spesa</th><th>Totale</th><th>Reburger</th><th>S&amp;C</th><th>Azioni</th></tr></thead><tbody>
+{% for row in expenses %}<tr><td>{{ row.day }}</td><th scope="row">{{ row.description }}</th><td>{{ euro(row.reburger_cents+row.sc_cents) }}</td><td>{{ euro(row.reburger_cents) }}</td><td>{{ euro(row.sc_cents) }}</td><td>{{ delete_action('spese', row, 'Elimina spesa') }}</td></tr>{% endfor %}
 </tbody></table>
 {% else %}<p>Nessuna spesa registrata per questo mese.</p>{% endif %}
 </section>

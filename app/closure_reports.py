@@ -53,7 +53,10 @@ def install(app, api):
         if not secrets.compare_digest(str(form.get('csrf','')),token(request)):
             raise HTTPException(403, 'Sessione scaduta: ricarica la pagina.')
     def can_delete(user,row):
-        return user.get('role')=='admin' or str(row['closure_date'])==datetime.now(ZoneInfo('Europe/Rome')).date().isoformat()
+        return user.get('role')=='admin' or (
+            bool(user.get('username')) and row['created_by']==user['username']
+            and str(row['closure_date'])==datetime.now(ZoneInfo('Europe/Rome')).date().isoformat()
+        )
     def export_report(cur, row):
         if cur.execute(f'SELECT 1 FROM closure_report_reviews WHERE report_id={ph()} AND reviewed_at IS NULL',(row['id'],)).fetchone():
             return
@@ -160,6 +163,8 @@ def install(app, api):
     async def delete_channel(request:Request):
         user,scope=auth(request); form=await request.form(); check(request,form)
         store=str(form.get('store','')); allowed(scope,store)
+        if user.get('role')!='admin':
+            raise HTTPException(403,'Solo un admin può eliminare i canali condivisi.')
         key=' '.join(str(form.get('name','')).split()).casefold()
         if not key or key in ('pos','cash','contanti'):
             raise HTTPException(422,'POS e Cash sono canali di base e non possono essere eliminati.')
@@ -182,7 +187,7 @@ def install(app, api):
             if user.get('role')!='admin' and cur.execute(f'SELECT 1 FROM closure_report_reviews WHERE report_id={ph()} AND reviewed_at IS NOT NULL',(report_id,)).fetchone():
                 raise HTTPException(403,'La chiusura confermata può essere eliminata solo da un admin.')
             if not can_delete(user,row):
-                raise HTTPException(403,'Puoi eliminare un report solo nel giorno della chiusura. Per le altre date serve un admin.')
+                raise HTTPException(403,'Puoi eliminare solo i tuoi report nel giorno della chiusura.')
             # Match the complete report reference, never #1 against #10.
             prefix=f"Report chiusura #{report_id}"
             income_prefixes=(prefix+' · ',prefix+' Â· ')

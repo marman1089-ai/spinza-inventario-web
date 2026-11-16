@@ -51,10 +51,10 @@
                 <td>{{ r.added_by }}</td>
                 <td class="muted">{{ r.ts }}</td>
                 <td style="white-space:nowrap;">
-                  <form method="post" action="/ordini/queue-delete" style="margin:0;display:inline;">
+                  {% if can_delete_order_request(user, r) %}<form method="post" action="/ordini/queue-delete" style="margin:0;display:inline;">
                     <input type="hidden" name="queue_id" value="{{ r.id }}" />
                     <button class="btn" type="submit" style="padding:6px 10px;">Elimina</button>
-                  </form>
+                  </form>{% endif %}
                 </td>
               </tr>
             {% endfor %}

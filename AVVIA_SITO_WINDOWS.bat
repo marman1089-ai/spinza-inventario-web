@@ -18,6 +18,6 @@ python run.py
 goto :fine
 :errore
 echo.
-echo Avvio non riuscito. Controlla AVVIO_RIPARATO.txt.
+echo Avvio non riuscito. Controlla il messaggio di errore qui sopra.
 pause
 :fine

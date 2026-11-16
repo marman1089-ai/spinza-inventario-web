@@ -136,6 +136,13 @@ class ReportsTest(unittest.TestCase):
                 clock.now.return_value=datetime.fromisoformat('2026-11-02T23:59:59+01:00')
                 page=routes['/report-chiusura'](Request(session))
                 self.assertIn(f'Elimina report #{spending_id}',page)
+                user['username']='colleague'
+                page=routes['/report-chiusura'](Request(session))
+                self.assertNotIn(f'Elimina report #{spending_id}',page)
+                with self.assertRaises(HTTPException) as denied:
+                    delete(spending_id)
+                self.assertEqual(denied.exception.status_code,403)
+                user['username']='test'
                 # Other references and stores must survive the deletion.
                 with db.connect() as c:
                     c.cursor().execute('INSERT INTO cash_entries VALUES(?,?,?,?,?,?)',('spinza','2026-11-02','POS',99,f'Report chiusura #{spending_id}0','test'))

@@ -268,6 +268,20 @@ def install(app, api):
                 """, (store,day,value,user['username']))
         return RedirectResponse(root+'/incassi?'+urlencode(dict(day=day)),303)
 
+    @app.post(root+'/incassi/elimina')
+    async def delete_receipt(request: Request):
+        _, form = await read_form(request)
+        store = form.get('store')
+        if store not in ORDER or not form.get('day'):
+            raise HTTPException(422, 'Indica il negozio e la data del conteggio.')
+        day = selected_day(form['day']).isoformat()
+        with connect() as conn:
+            conn.cursor().execute(
+                f"DELETE FROM cash_store_receipts WHERE store={p()} AND day={p()}",
+                (store, day),
+            )
+        return RedirectResponse(root+'/incassi?'+urlencode(dict(day=day)),303)
+
     @app.get(root+'/spese')
     def spending(request: Request, day: str = ''):
         user = admin(request)
@@ -298,6 +312,20 @@ def install(app, api):
                 INSERT INTO cash_company_spending(token,day,description,reburger_cents,sc_cents,recorded_by)
                 VALUES({p()},{p()},{p()},{p()},{p()},{p()}) ON CONFLICT(token) DO NOTHING
             """, (token,day,description,reburger,value-reburger,user['username']))
+        return RedirectResponse(root+'/spese?'+urlencode(dict(day=day)),303)
+
+    @app.post(root+'/spese/elimina')
+    async def delete_spending(request: Request):
+        _, form = await read_form(request)
+        token = str(form.get('token',''))
+        if not re.fullmatch(r'[A-Za-z0-9_-]{43}',token) or not form.get('day'):
+            raise HTTPException(422, 'Ricarica l’archivio delle spese.')
+        day = selected_day(form['day']).isoformat()
+        with connect() as conn:
+            conn.cursor().execute(
+                f"DELETE FROM cash_company_spending WHERE token={p()} AND day={p()}",
+                (token, day),
+            )
         return RedirectResponse(root+'/spese?'+urlencode(dict(day=day)),303)
 
     @app.get(root+'/bilanci')

@@ -142,7 +142,7 @@ async def receive_order(request,order_id,api):
                         (str(order.get('ts') or '')[:10],api['_today_str'](),remainder,product['id']))
                     queue=cur.execute(f'SELECT id FROM order_queue WHERE store={p} AND product_id={p} ORDER BY id'+suffix(),(real_store,product['id'])).fetchone()
                     if queue:
-                        cur.execute(f'UPDATE order_queue SET qty_to_order=qty_to_order+{p},added_by={p},ts={now} WHERE id={p}',(remainder,user['username'],queue['id']))
+                        cur.execute(f'UPDATE order_queue SET qty_to_order=qty_to_order+{p} WHERE id={p}',(remainder,queue['id']))
                     else:
                         cur.execute(f'INSERT INTO order_queue(store,product_id,category,name,qty_to_order,added_by) VALUES({",".join([p]*6)})',
                             (real_store,product['id'],line['category'],line['name'],remainder,user['username']))

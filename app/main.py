@@ -7082,6 +7082,8 @@ def item_edit(
 
 @app.post("/items/{item_id}/delete")
 def item_delete(request: Request, item_id: int, store: str = Form(""), next_url: str = Form("/inventario")):
+    if not is_admin(request):
+        raise HTTPException(403, "La rimozione dei prodotti condivisi è riservata agli admin.")
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -7483,6 +7485,13 @@ def _can_delete_uploaded_document(user, document):
 
 
 templates.globals['can_delete_uploaded_document'] = _can_delete_uploaded_document
+
+
+def _can_delete_order_request(user, row):
+    return _can_delete_uploaded_document(user, dict(store=row['store'], uploaded_by=row['added_by'], ts=row['ts']))
+
+
+templates.globals['can_delete_order_request'] = _can_delete_order_request
 
 
 @app.get("/chiusure", response_class=HTMLResponse)
@@ -7956,8 +7965,8 @@ def orders_add_from_inventory_with_qty(
 
         if existing:
             cur.execute(
-                f"UPDATE order_queue SET qty_to_order={ph}, added_by={ph}, ts={now} WHERE id={ph}",
-                (float(qty_to_order), user["username"], int(existing["id"])),
+                f"UPDATE order_queue SET qty_to_order={ph} WHERE id={ph}",
+                (float(qty_to_order), int(existing["id"])),
             )
         else:
             cur.execute(
@@ -8045,8 +8054,8 @@ def orders_queue_update(request: Request, queue_id: int = Form(...), qty_to_orde
             ).fetchone()
             if info:
                 cur.execute(
-                    f"UPDATE order_queue SET qty_to_order={ph}, ts={now}, added_by={ph} WHERE id={ph}",
-                    (float(qty_to_order), user["username"], int(queue_id)),
+                    f"UPDATE order_queue SET qty_to_order={ph} WHERE id={ph}",
+                    (float(qty_to_order), int(queue_id)),
                 )
                 _log(
                     cur,
@@ -8064,8 +8073,8 @@ def orders_queue_update(request: Request, queue_id: int = Form(...), qty_to_orde
             ).fetchone()
             if info:
                 cur.execute(
-                    f"UPDATE order_queue SET qty_to_order={ph}, ts={now}, added_by={ph} WHERE id={ph} AND store={ph}",
-                    (float(qty_to_order), user["username"], int(queue_id), store),
+                    f"UPDATE order_queue SET qty_to_order={ph} WHERE id={ph} AND store={ph}",
+                    (float(qty_to_order), int(queue_id), store),
                 )
                 _log(
                     cur,
@@ -8112,10 +8121,12 @@ def orders_queue_delete(request: Request, queue_id: int = Form(...)):
                 )
         else:
             info = cur.execute(
-                f"SELECT category, name, qty_to_order FROM order_queue WHERE id={ph} AND store={ph}",
+                f"SELECT store, category, name, qty_to_order, added_by, ts FROM order_queue WHERE id={ph} AND store={ph}",
                 (int(queue_id), store),
             ).fetchone()
             if info:
+                if not _can_delete_order_request(user, info):
+                    raise HTTPException(403, "Puoi eliminare solo le richieste che hai inserito oggi.")
                 cur.execute(f"DELETE FROM order_queue WHERE id={ph} AND store={ph}", (int(queue_id), store))
                 _log(
                     cur,
