@@ -265,6 +265,11 @@ class ReportsTest(unittest.TestCase):
                 prior_income=c.cursor().execute('SELECT COUNT(*) AS n FROM cash_entries').fetchone()['n']
                 prior_expenses=c.cursor().execute('SELECT COUNT(*) AS n FROM cash_expenses').fetchone()['n']
             self.assertEqual(send('/report-chiusura/salva',pending).status_code,303)
+            staff_page=routes['/report-chiusura'](Request(session),day='2026-11-02')
+            self.assertIn('action="/report-chiusura/salva"',staff_page)
+            self.assertIn('<option value="excluded" selected>',staff_page)
+            self.assertIn('Totale incassi del giorno <strong>160,00 €</strong>',staff_page)
+            self.assertIn('In attesa di conferma',staff_page)
             app.router.on_startup[-1]()
             with db.connect() as c:
                 rid=c.cursor().execute('SELECT report_id FROM closure_report_reviews').fetchone()['report_id']
