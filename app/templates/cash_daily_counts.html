@@ -90,13 +90,36 @@
 {% elif view=='balances' %}
 <section class="card ct-scroll">
 <h2>Bilanci cash al {{ today }}</h2>
-<table><thead><tr><th>Azienda</th><th>Incassi contati</th><th>Spese pagate</th><th>Liquidità</th></tr></thead><tbody>
+<p class="muted">Se una spesa supera la disponibilità di un’azienda, il bilancio calcola un prestito dalla liquidità disponibile dell’altra. Gli incassi rimasti dopo le spese del giorno vengono destinati al rimborso. I saldi includono questi rimborsi, da eseguire fisicamente tra le casse.</p>
+<table><thead><tr><th>Azienda</th><th>Incassi contati</th><th>Spese reali</th><th>Saldo senza prestiti</th><th>Da rimborsare</th><th>Da ricevere</th><th>Saldo dopo i prestiti</th><th>Scoperto</th></tr></thead><tbody>
 {% for row in balances %}
-<tr><th scope="row">{{ row.label }}</th><td>{{ euro(row.income) }}</td><td>{{ euro(row.spent) }}</td><td><strong{% if row.balance<0 %} class="cash-short"{% endif %}>{{ euro(row.balance) }}</strong></td></tr>
+<tr><th scope="row">{{ row.label }}</th><td>{{ euro(row.income) }}</td><td>{{ euro(row.spent) }}</td><td>{{ euro(row.expected) }}</td><td>{{ euro(row.debt) }}</td><td>{{ euro(row.credit) }}</td><td><strong{% if row.balance<0 %} class="cash-short"{% endif %}>{{ euro(row.balance) }}</strong></td><td>{{ euro(row.uncovered) }}</td></tr>
 {% endfor %}
 </tbody></table>
 <h3>Incassi contati per negozio</h3>
 <ul>{% for store in stores_order %}<li>{{ labels[store] }} · {{ euro(income_by_store.get(store,0)) }}</li>{% endfor %}</ul>
+</section>
+<section class="card">
+<h2>Registra prestito tra aziende</h2>
+<p class="muted">Il prestito sottrae contanti a chi li dà e li aggiunge a chi li riceve. Registralo qui una sola volta, nella data del trasferimento.</p>
+<form class="ct-form" method="post" action="{{ root }}/bilanci/prestiti">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="submission" value="{{ submission }}">
+<label>Data del prestito<input type="date" name="day" value="{{ today }}" max="{{ today }}" required></label>
+<label>Azienda che presta<select name="lender" required><option value="">Seleziona</option>{% for key,label in companies.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+<label>Azienda che riceve<select name="borrower" required><option value="">Seleziona</option>{% for key,label in companies.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+<label>Importo (€)<input name="amount" inputmode="decimal" pattern="[0-9]{1,9}([.,][0-9]{1,2})?" required></label>
+<label>Nota facoltativa<input name="notes" maxlength="250"></label>
+<button class="btn">Registra prestito</button>
+</form>
+</section>
+<section class="card ct-scroll">
+<h2>Movimenti tra aziende</h2>
+{% if movements %}
+<table><thead><tr><th>Data</th><th>Movimento</th><th>Da</th><th>A</th><th>Importo</th><th>Nota</th></tr></thead><tbody>
+{% for loan in movements %}<tr><td>{{ loan.day }}</td><td>{{ loan.kind }}</td><td>{{ companies[loan.lender] }}</td><td>{{ companies[loan.borrower] }}</td><td>{{ euro(loan.amount_cents) }}</td><td>{{ loan.notes or '—' }}</td></tr>{% endfor %}
+</tbody></table>
+{% else %}<p>Nessun movimento tra aziende.</p>{% endif %}
 </section>
 {% endif %}
 </div>
