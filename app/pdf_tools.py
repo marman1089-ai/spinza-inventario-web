@@ -1,7 +1,13 @@
 import io
 from typing import Tuple
 
-from PIL import Image
+from PIL import Image, ImageOps
+try:
+    from pillow_heif import register_heif_opener
+except ImportError:
+    register_heif_opener = None
+if register_heif_opener is not None:
+    register_heif_opener()
 try:
     import img2pdf
 except ImportError:
@@ -17,6 +23,7 @@ DEFAULT_JPEG_QUALITY = 85
 def _image_bytes_to_pdf(image_bytes: bytes, max_side: int, jpeg_quality: int) -> bytes:
     img = Image.open(io.BytesIO(image_bytes))
     img.load()
+    img = ImageOps.exif_transpose(img)
 
     # per PDF/JPEG serve RGB
     if img.mode != "RGB":
@@ -64,7 +71,7 @@ def ensure_pdf(
     # Alcuni browser/device inviano content_type vuoto o 'application/octet-stream'.
     # In quel caso decidiamo anche dall'estensione del filename.
     ext = (filename.rsplit('.', 1)[-1].lower() if '.' in filename else '')
-    is_image_ext = ext in ('jpg','jpeg','png','webp','heic')
+    is_image_ext = ext in ('jpg','jpeg','png','webp','heic','heif')
 
     base = filename.rsplit(".", 1)[0] if "." in filename else filename
     pdf_filename = f"{base}.pdf"
@@ -86,11 +93,13 @@ def merge_pdfs(pdf_bytes_list):
     """Merge a list of PDF byte strings into a single PDF."""
     if not pdf_bytes_list:
         return b""
-    if len(pdf_bytes_list) == 1:
-        return pdf_bytes_list[0]
     writer = PdfWriter()
     for b in pdf_bytes_list:
         reader = PdfReader(io.BytesIO(b))
+        if not len(reader.pages):
+            raise ValueError("PDF privo di pagine")
+        if len(pdf_bytes_list) == 1:
+            return b
         for page in reader.pages:
             writer.add_page(page)
     out = io.BytesIO()

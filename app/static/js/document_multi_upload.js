@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <ol class="du-items" aria-label="Pagine selezionate"></ol>`;
     const items = holder.querySelector('.du-items');
     const badge = holder.querySelector('.du-badge');
-    const valid = /\.(pdf|jpe?g|png|webp)$/i;
+    const valid = /\.(pdf|jpe?g|png|webp|heic|heif)$/i;
     function update() {
       let count=0;
       items.querySelectorAll('li').forEach(li=> { count += Array.from(li.querySelector('input').files).length; });
@@ -20,7 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function add(kind) {
       const input=document.createElement('input');
       input.type='file'; input.name='files';
-      input.accept=kind==='camera'?'image/*':'application/pdf,image/jpeg,image/png,image/webp';
+      input.accept=kind==='camera'?'image/*':'application/pdf,image/jpeg,image/png,image/webp,.heic,.heif';
       if(kind==='camera') input.setAttribute('capture','environment');
       else input.multiple=true;
       input.className='du-file-input';
@@ -32,7 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const files=Array.from(input.files||[]);
         if(!files.length) { li.remove(); update(); return; }
         if(files.some(f=> !valid.test(f.name) && !(kind==='camera' && f.type.startsWith('image/')))) {
-          alert('Sono consentiti soltanto PDF e immagini JPG, PNG o WEBP.'); li.remove(); update(); return;
+          alert('Sono consentiti soltanto PDF e immagini JPG, PNG, WEBP o HEIC/HEIF.'); li.remove(); update(); return;
         }
         li.classList.remove('du-pending');
         const label=document.createElement('span'); label.className='du-names';

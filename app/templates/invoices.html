@@ -1,5 +1,6 @@
 {% extends "base.html" %}{% set title="Fatture" %}{% block content %}
-{% if user.role!='admin' %}<p class="muted">I nuovi file caricati dai dipendenti compaiono in questo archivio dopo la conferma dell’admin.</p>{% endif %}
+{% if caricato %}<p class="card" role="status">{{ 'Documento salvato.' if user.role=='admin' else 'Documento inviato all’admin per la verifica.' }}</p>{% endif %}
+{% if user.role!='admin' %}<p class="muted">Puoi consultare i tuoi invii in attesa. Dopo la conferma saranno visibili nell’archivio del negozio.</p>{% endif %}
 
 <link rel="stylesheet" href="/static/multi_upload.css?v=3">
 <style>
@@ -14,9 +15,9 @@
 <form method="get" action="/fatture" class="shine-toolbar"><div class="supplier-picker" data-supplier-picker data-search="1"><input name="supplier" placeholder="Cerca fatture per fornitore" value="{{ supplier or '' }}" autocomplete="off" aria-label="Cerca fornitore"><select name="supplier_choice" class="supplier-native-select" aria-label="Elenco fornitori ricerca" size="1"><option value="">Tutti i fornitori</option>{% for name in suppliers %}<option value="{{ name }}">{{ name }}</option>{% endfor %}</select></div><button class="shine-button">Cerca</button></form>
 <h3>Carica nuovo documento</h3>
 <form method="post" action="/fatture/upload" enctype="multipart/form-data">
-  <div class="supplier-picker" data-supplier-picker><label>🔎 Cerca nell’elenco o aggiungi un fornitore nuovo</label><input name="supplier" placeholder="Cerca o seleziona fornitore" autocomplete="off" aria-label="Fornitore" aria-expanded="false" aria-controls="supplier-options"><select name="supplier_choice" class="supplier-native-select" aria-label="Elenco fornitori per nuova fattura" required><option value="">▼ Seleziona un fornitore dall’elenco</option>{% for name in suppliers %}<option value="{{ name }}">{{ name }}</option>{% endfor %}<option value="__new__">+ Aggiungi fornitore</option></select></div>
+  <div class="supplier-picker" data-supplier-picker><label>🔎 Cerca nell’elenco o aggiungi un fornitore nuovo</label><input name="supplier" placeholder="Cerca o seleziona fornitore" autocomplete="off" aria-label="Fornitore" aria-expanded="false" aria-controls="supplier-options"><select name="supplier_choice" class="supplier-native-select" aria-label="Elenco fornitori per nuova fattura"><option value="">▼ Seleziona un fornitore dall’elenco</option>{% for name in suppliers %}<option value="{{ name }}">{{ name }}</option>{% endfor %}<option value="__new__">+ Aggiungi fornitore</option></select></div>
   <input name="doc_date" type="date" aria-label="Data fattura">
-  <div class="upload-collector" data-document-upload></div>
+  <div class="upload-collector" data-document-upload><label>Foto o PDF <input type="file" name="files" multiple accept="image/jpeg,image/png,image/webp,.heic,.heif,application/pdf" required></label></div>
   <div class="multi-upload-hint">📷 Seleziona più foto oppure PDF: verranno salvati in <strong>un solo documento multipagina</strong>. <span class="upload-count" aria-live="polite"></span></div>
   <button class="shine-button">📤 Salva originale</button>
 </form>
@@ -30,7 +31,7 @@
 <div class="shine-doc-grid">{% for r in rows %}<div class="card shine-panel invoice-card">
 {% if r.logo_key %}<img class="supplier-logo" src="/fatture/logo/{{ r.logo_key|urlencode }}" alt="Logo {{ r.supplier }}" loading="lazy">{% endif %}
 <span class="eyebrow">{{ stores.get(r.store,r.store) }}</span><h3>🧾 {{ r.supplier or 'Fornitore non indicato' }}</h3>
-<p><strong>📅 Data fattura:</strong> {{ r.doc_date or 'Non indicata' }}</p><p><strong>👤 Caricata da:</strong> {{ r.uploaded_by or 'Non indicato' }}</p>
+{% if r.id in pending_ids %}<p class="pill">In attesa di verifica</p>{% endif %}<p><strong>📅 Data fattura:</strong> {{ r.doc_date or 'Non indicata' }}</p><p><strong>👤 Caricata da:</strong> {{ r.uploaded_by or 'Non indicato' }}</p>
 <p class="muted">📄 {{ r.filename or 'Documento' }}</p>
 {% if user.role=='admin' %}<details class="invoice-editor"><summary>✏️ Modifica fattura (fornitore / orientamento)</summary>
 <form method="post" action="/fatture/{{ r.id }}/modifica">
@@ -74,5 +75,5 @@ for(const picker of document.querySelectorAll('[data-supplier-picker]')){
  update();
 }
 })();
-</script><script src="/static/js/document_multi_upload.js?v=3" defer></script>
+</script><script src="/static/js/document_multi_upload.js?v=4" defer></script>
 {% endblock %}

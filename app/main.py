@@ -13,6 +13,7 @@ def _rome_today():
 import re
 import mimetypes
 from urllib.parse import quote, quote_plus, unquote_plus, urlencode, urlsplit, parse_qsl
+from pypdf.errors import PdfReadError
 from contextvars import ContextVar
 
 _render_request = ContextVar("render_request", default=None)
@@ -7519,11 +7520,54 @@ def closures_page(request: Request, q: str = ""):
             sql += f" AND CAST(closure_date AS TEXT) LIKE {ph}"
             params.append(f"%{q}%")
 
-        sql += " AND " + available_document('chiusure')
+        if not is_admin(request):
+            sql += " AND (" + available_document('chiusure') + f" OR uploaded_by={ph})"
+            params.append(user["username"])
+        else:
+            sql += " AND " + available_document('chiusure')
+        pending_ids = {r["doc_id"] for r in cur.execute(
+            f"SELECT doc_id FROM admin_document_reviews WHERE kind={ph} AND reviewed_at IS NULL", ('chiusure',)
+        ).fetchall()}
         sql += " ORDER BY store, closure_date DESC, id DESC" if store == "ALL" else " ORDER BY closure_date DESC, id DESC"
         rows = cur.execute(sql, tuple(params)).fetchall()
     active_store = request.session.get("active_store") if is_admin(request) else None
-    return render("closures.html", user=user, rows=rows, q=q, stores=STORES, brand=brand, active_store=active_store)
+    caricato = request.session.get("upload_notice") == "chiusure"
+    if caricato:
+        request.session.pop("upload_notice", None)
+    return render("closures.html", user=user, caricato=caricato, pending_ids=pending_ids, rows=rows, q=q, stores=STORES, brand=brand, active_store=active_store)
+
+
+async def _prepare_document_upload(files: list[UploadFile], base_name: str):
+    pdfs: list[bytes] = []
+    for f in files:
+        if not f.filename:
+            continue
+        filename_in = f.filename
+        content_type_in = f.content_type or "application/octet-stream"
+        if not (filename_in.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".pdf"))):
+            raise HTTPException(422, "Carica solo foto JPG, PNG, WEBP, HEIC/HEIF o documenti PDF.")
+        raw = await f.read(18 * 1024 * 1024 + 1)
+        if len(raw) > 18 * 1024 * 1024:
+            raise HTTPException(413, "Un singolo file supera 18 MB.")
+        try:
+            pdf_bytes, pdf_name, _ = await run_in_threadpool(ensure_pdf, raw, filename_in, content_type_in)
+        except (OSError, ValueError, SyntaxError) as exc:
+            raise HTTPException(422, "Impossibile leggere la foto. Prova un altro file.") from exc
+        if not pdf_bytes.startswith(b"%PDF"):
+            raise HTTPException(422, "Il file non è una foto o un PDF valido.")
+        if not pdfs:
+            filename = _archive_clean_name(pdf_name, base_name + ".pdf", max_len=176)
+            if not filename.lower().endswith(".pdf"):
+                filename += ".pdf"
+        pdfs.append(pdf_bytes)
+
+    if not pdfs:
+        raise HTTPException(422, "Aggiungi almeno una foto o un PDF prima di salvare.")
+    try:
+        content = await run_in_threadpool(merge_pdfs, pdfs)
+    except (ValueError, OSError, PdfReadError) as exc:
+        raise HTTPException(422, "Il PDF non è leggibile o è protetto.") from exc
+    return content, filename
 
 
 @app.post("/chiusure/upload")
@@ -7537,37 +7581,14 @@ async def closures_upload(request: Request, closure_date: str = Form(""), files:
         raise HTTPException(422, "Seleziona un singolo negozio prima di caricare documenti.")
 
     closure_date = closure_date or _today_str()
-    pdfs: list[bytes] = []
-    base_name = "chiusura"
-    for f in files:
-        if not f.filename:
-            continue
-        filename_in = f.filename
-        content_type_in = f.content_type or "application/octet-stream"
-        if not (filename_in.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".pdf"))):
-            raise HTTPException(422, "Carica solo foto JPG/PNG/WEBP o documenti PDF.")
-        raw = await f.read()
-        if len(raw) > 18 * 1024 * 1024:
-            raise HTTPException(413, "Un singolo file supera 18 MB.")
-        pdf_bytes, _, _ = await run_in_threadpool(ensure_pdf, raw, filename_in, content_type_in)
-        if not pdf_bytes.startswith(b"%PDF"):
-            raise HTTPException(422, "Il file non è una foto o un PDF valido.")
-        pdfs.append(pdf_bytes)
-
-    # Unisco tutto in un unico PDF (multi-pagina / multi-file)
-    if not pdfs:
-        return RedirectResponse("/chiusure", status_code=HTTP_303_SEE_OTHER)
-
-    content = await run_in_threadpool(merge_pdfs, pdfs) if len(pdfs) > 1 else pdfs[0]
-    first_name = (files[0].filename if files and files[0].filename else base_name) or base_name
-    filename = first_name if first_name.lower().endswith(".pdf") else f"{first_name}.pdf"
+    content, filename = await _prepare_document_upload(files, "chiusura")
     content_type = "application/pdf"
 
     # parse data
     try:
         _ = date.fromisoformat(closure_date)
-    except Exception:
-        return RedirectResponse("/chiusure", status_code=HTTP_303_SEE_OTHER)
+    except ValueError as exc:
+        raise HTTPException(422, "Data della chiusura non valida.") from exc
 
     ph = _ph()
     now = _now()
@@ -7590,6 +7611,7 @@ async def closures_upload(request: Request, closure_date: str = Form(""), files:
         )
 
     # OCR gratuito avviato nel browser dalla pagina documento.
+    request.session["upload_notice"] = "chiusure"
     return RedirectResponse("/chiusure", status_code=HTTP_303_SEE_OTHER)
 
 
@@ -7606,20 +7628,29 @@ def closures_download(request: Request, doc_id: int):
         cur = conn.cursor()
         if store == "ALL":
             row = cur.execute(
-                f"SELECT filename, content_type, data FROM closures WHERE id={ph}",
+                f"SELECT filename, content_type, data, uploaded_by FROM closures WHERE id={ph}",
                 (int(doc_id),),
             ).fetchone()
         else:
             row = cur.execute(
-                f"SELECT filename, content_type, data FROM closures WHERE id={ph} AND store={ph}",
+                f"SELECT filename, content_type, data, uploaded_by FROM closures WHERE id={ph} AND store={ph}",
                 (int(doc_id), store),
             ).fetchone()
+
+        if row and not is_admin(request) and row["uploaded_by"] != user["username"]:
+            pending = cur.execute(
+                f"SELECT 1 FROM admin_document_reviews WHERE kind={ph} AND doc_id={ph} AND reviewed_at IS NULL",
+                ('chiusure', doc_id),
+            ).fetchone()
+            if pending:
+                row = None
 
     if not row:
         return PlainTextResponse("Not found", status_code=404)
 
     from fastapi.responses import Response
-    headers = {"Content-Disposition": f"inline; filename=\"{row.get('filename') or 'chiusura'}\""}
+    filename = quote(row.get("filename") or "documento.pdf", safe="")
+    headers = {"Content-Disposition": "inline; filename*=UTF-8''" + filename}
     return Response(content=row["data"], media_type=row.get("content_type") or "application/octet-stream", headers=headers)
 
 @app.post("/chiusure/{doc_id}/delete")
@@ -7722,29 +7753,7 @@ async def secondary_expenses_upload(request: Request, expense_date: str = Form("
         raise HTTPException(422, "Seleziona un singolo negozio prima di caricare documenti.")
 
     expense_date = expense_date or _today_str()
-    pdfs: list[bytes] = []
-    base_name = "spesa"
-    for f in files:
-        if not f.filename:
-            continue
-        filename_in = f.filename
-        content_type_in = f.content_type or "application/octet-stream"
-        if not (filename_in.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".pdf"))):
-            raise HTTPException(422, "Carica solo foto JPG/PNG/WEBP o documenti PDF.")
-        raw = await f.read()
-        if len(raw) > 18 * 1024 * 1024:
-            raise HTTPException(413, "Un singolo file supera 18 MB.")
-        pdf_bytes, _, _ = await run_in_threadpool(ensure_pdf, raw, filename_in, content_type_in)
-        if not pdf_bytes.startswith(b"%PDF"):
-            raise HTTPException(422, "Il file non è una foto o un PDF valido.")
-        pdfs.append(pdf_bytes)
-
-    if not pdfs:
-        return RedirectResponse("/spese-secondarie", status_code=HTTP_303_SEE_OTHER)
-
-    content = await run_in_threadpool(merge_pdfs, pdfs) if len(pdfs) > 1 else pdfs[0]
-    first_name = (files[0].filename if files and files[0].filename else base_name) or base_name
-    filename = first_name if first_name.lower().endswith(".pdf") else f"{first_name}.pdf"
+    content, filename = await _prepare_document_upload(files, "spesa")
     content_type = "application/pdf"
 
     try:
@@ -8726,7 +8735,14 @@ def invoices_page(request: Request, supplier: str = "", q_date: str = ""):
             sql += f" AND CAST(doc_date AS TEXT) LIKE {ph}"
             params.append(f"%{q_date}%")
 
-        sql += " AND " + available_document('fatture')
+        if not is_admin(request):
+            sql += " AND (" + available_document('fatture') + f" OR uploaded_by={ph})"
+            params.append(user["username"])
+        else:
+            sql += " AND " + available_document('fatture')
+        pending_ids = {r["doc_id"] for r in cur.execute(
+            f"SELECT doc_id FROM admin_document_reviews WHERE kind={ph} AND reviewed_at IS NULL", ('fatture',)
+        ).fetchall()}
         sql += " ORDER BY store, doc_date DESC, id DESC" if store == "ALL" else " ORDER BY doc_date DESC, id DESC"
         rows = cur.execute(sql, tuple(params)).fetchall()
         supplier_rows = cur.execute("SELECT DISTINCT supplier FROM invoices_docs WHERE supplier IS NOT NULL AND TRIM(supplier) <> ''").fetchall()
@@ -8743,11 +8759,14 @@ def invoices_page(request: Request, supplier: str = "", q_date: str = ""):
         r['logo_key'] = key if key in logo_keys else None
 
     active_store = request.session.get("active_store") if is_admin(request) else None
-    return render("invoices.html", user=user, rows=rows, supplier=supplier, q_date=q_date, stores=STORES, brand=brand, active_store=active_store, suppliers=suppliers)
+    caricato = request.session.get("upload_notice") == "fatture"
+    if caricato:
+        request.session.pop("upload_notice", None)
+    return render("invoices.html", user=user, caricato=caricato, pending_ids=pending_ids, rows=rows, supplier=supplier, q_date=q_date, stores=STORES, brand=brand, active_store=active_store, suppliers=suppliers)
 
 
 @app.post("/fatture/upload")
-async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: str = Form(""), files: list[UploadFile] = File(...)):
+async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: str = Form(""), files: list[UploadFile] = File(...), supplier_choice: str = Form("")):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
@@ -8756,7 +8775,7 @@ async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: 
     if store not in STORES:
         raise HTTPException(422, "Seleziona un singolo negozio prima di caricare documenti.")
 
-    supplier = " ".join((supplier or "").split()).strip()
+    supplier = " ".join((supplier or (supplier_choice if supplier_choice != "__new__" else "")).split())
     if len(supplier) > 180:
         raise HTTPException(422, "Nome fornitore troppo lungo")
     # Usa il nome già registrato per evitare duplicati con maiuscole diverse.
@@ -8768,30 +8787,7 @@ async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: 
     from .control import iso
     doc_date = iso(doc_date or _today_str())
     doc_date = doc_date or _today_str()
-    pdfs: list[bytes] = []
-    base_name = "fattura"
-    for f in files:
-        if not f.filename:
-            continue
-        filename_in = f.filename
-        content_type_in = f.content_type or "application/octet-stream"
-        if not (filename_in.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".pdf"))):
-            raise HTTPException(422, "Carica solo foto JPG/PNG/WEBP o documenti PDF.")
-        raw = await f.read()
-        if len(raw) > 18 * 1024 * 1024:
-            raise HTTPException(413, "Un singolo file supera 18 MB.")
-        pdf_bytes, _, _ = await run_in_threadpool(ensure_pdf, raw, filename_in, content_type_in)
-        if not pdf_bytes.startswith(b"%PDF"):
-            raise HTTPException(422, "Il file non è una foto o un PDF valido.")
-        pdfs.append(pdf_bytes)
-
-    # Unisco tutto in un unico PDF (multi-pagina / multi-file)
-    if not pdfs:
-        return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
-
-    content = await run_in_threadpool(merge_pdfs, pdfs) if len(pdfs) > 1 else pdfs[0]
-    first_name = (files[0].filename if files and files[0].filename else base_name) or base_name
-    filename = first_name if first_name.lower().endswith(".pdf") else f"{first_name}.pdf"
+    content, filename = await _prepare_document_upload(files, "fattura")
     content_type = "application/pdf"
 
     ph = _ph()
@@ -8815,6 +8811,7 @@ async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: 
         )
 
     # OCR gratuito avviato nel browser dalla pagina documento.
+    request.session["upload_notice"] = "fatture"
     return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
 
 
@@ -9180,20 +9177,29 @@ def invoices_download(request: Request, doc_id: int):
         cur = conn.cursor()
         if store == "ALL":
             row = cur.execute(
-                f"SELECT filename, content_type, data FROM invoices_docs WHERE id={ph}",
+                f"SELECT filename, content_type, data, uploaded_by FROM invoices_docs WHERE id={ph}",
                 (int(doc_id),),
             ).fetchone()
         else:
             row = cur.execute(
-                f"SELECT filename, content_type, data FROM invoices_docs WHERE id={ph} AND store={ph}",
+                f"SELECT filename, content_type, data, uploaded_by FROM invoices_docs WHERE id={ph} AND store={ph}",
                 (int(doc_id), store),
             ).fetchone()
+
+        if row and not is_admin(request) and row["uploaded_by"] != user["username"]:
+            pending = cur.execute(
+                f"SELECT 1 FROM admin_document_reviews WHERE kind={ph} AND doc_id={ph} AND reviewed_at IS NULL",
+                ('fatture', doc_id),
+            ).fetchone()
+            if pending:
+                row = None
 
     if not row:
         return PlainTextResponse("Not found", status_code=404)
 
     from fastapi.responses import Response
-    headers = {"Content-Disposition": f"inline; filename=\"{row.get('filename') or 'fattura'}\""}
+    filename = quote(row.get("filename") or "documento.pdf", safe="")
+    headers = {"Content-Disposition": "inline; filename*=UTF-8''" + filename}
     return Response(content=row["data"], media_type=row.get("content_type") or "application/octet-stream", headers=headers)
 
 @app.post("/fatture/{doc_id}/delete")
