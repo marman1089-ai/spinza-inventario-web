@@ -28,10 +28,10 @@
 <section class="card">
   <h2>{{ queue|length }} chiusure da controllare</h2>
   <div style="overflow:auto"><table>
-    <thead><tr><th>Data</th><th>Negozio</th><th>Inserita da</th><th>Incassi dichiarati</th><th></th></tr></thead>
+    <thead><tr><th>Data</th><th>Negozio</th><th>Turno</th><th>Inserita da</th><th>Incassi dichiarati</th><th></th></tr></thead>
     <tbody>{% for report in queue %}
-      <tr><td>{{ report.closure_date }}</td><td>{{ stores[report.store] }}</td><td>{{ report.created_by }}</td><td>{{ '%.2f'|format(report.total_cents/100)|replace('.',',') }} €</td><td><a class="btn2" href="?report_id={{ report.id }}">Controlla #{{ report.id }}</a></td></tr>
-    {% else %}<tr><td colspan="5">Nessuna chiusura in attesa per la vista selezionata.</td></tr>{% endfor %}</tbody>
+      <tr><td>{{ report.closure_date }}</td><td>{{ stores[report.store] }}</td><td>{{ report.start_time ~ "–" ~ report.end_time if report.start_time else "Orari non indicati" }}{% if report.start_time and report.end_time < report.start_time %} (+1 giorno){% endif %}</td><td>{{ report.created_by }}</td><td>{{ '%.2f'|format(report.total_cents/100)|replace('.',',') }} €</td><td><a class="btn2" href="?report_id={{ report.id }}">Controlla #{{ report.id }}</a></td></tr>
+    {% else %}<tr><td colspan="6">Nessuna chiusura in attesa per la vista selezionata.</td></tr>{% endfor %}</tbody>
   </table></div>
 </section>
 <section class="card">

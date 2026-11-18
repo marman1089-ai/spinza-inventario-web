@@ -28,11 +28,25 @@ def init_reports():
             report_id INTEGER PRIMARY KEY, reviewed_at TEXT, reviewed_by TEXT)''')
         cur.execute(f"CREATE TABLE IF NOT EXISTS closure_reports (id {ident}, store TEXT NOT NULL, closure_date TEXT NOT NULL, lines_json TEXT NOT NULL, total_cents BIGINT NOT NULL, notes TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL, submission_token TEXT NOT NULL UNIQUE)")
         cur.execute('CREATE INDEX IF NOT EXISTS ix_closure_reports_scope ON closure_reports(store,closure_date)')
+        cur.execute('CREATE TABLE IF NOT EXISTS closure_report_shifts (report_id INTEGER PRIMARY KEY, start_time TEXT NOT NULL, end_time TEXT NOT NULL)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_exports (report_id INTEGER PRIMARY KEY)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_expenses (report_id INTEGER PRIMARY KEY, lines_json TEXT NOT NULL)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_cash_checks (report_id INTEGER PRIMARY KEY, counted_cents BIGINT, notes TEXT NOT NULL, updated_by TEXT NOT NULL, updated_at TEXT NOT NULL)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_cash_funds (report_id INTEGER PRIMARY KEY, initial_cents BIGINT NOT NULL)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_deleted_tokens (submission_token TEXT PRIMARY KEY)')
+
+
+def report_shift(form):
+    start = str(form.get('shift_start','')).strip()
+    end = str(form.get('shift_end','')).strip()
+    if not start and not end and form.get('shift_required') != '1':
+        return None
+    pattern = r'(?:[01]\d|2[0-3]):[0-5]\d'
+    if not re.fullmatch(pattern,start) or not re.fullmatch(pattern,end):
+        raise HTTPException(422, 'Inserisci inizio e fine turno nel formato ore e minuti.')
+    if start == end:
+        raise HTTPException(422, 'Inizio e fine turno devono essere diversi.')
+    return start,end
 
 
 def install(app, api):
@@ -114,6 +128,7 @@ def install(app, api):
             if user.get('role')=='admin':
                 cash_checks={r['report_id']:r for r in cur.execute(f'SELECT c.* FROM closure_report_cash_checks c JOIN closure_reports r ON r.id=c.report_id WHERE r.store={ph()}',(selected,)).fetchall()}
             counts=cur.execute(f'SELECT closure_date,COUNT(*) AS n FROM closure_reports WHERE store={ph()} AND closure_date>={ph()} AND closure_date<={ph()} GROUP BY closure_date',(selected,anchor.isoformat(),anchor.replace(day=calendar.monthrange(anchor.year,anchor.month)[1]).isoformat())).fetchall()
+            shift_rows=cur.execute(f'SELECT s.* FROM closure_report_shifts s JOIN closure_reports r ON r.id=s.report_id WHERE r.store={ph()}',(selected,)).fetchall()
             review_status={r['report_id']:r['reviewed_at'] for r in cur.execute('SELECT report_id,reviewed_at FROM closure_report_reviews').fetchall()}
         by_day={str(r['closure_date']):r['n'] for r in counts}
         def link(**kw): return '/report-chiusura?'+urlencode(dict(store=selected,**kw))
@@ -131,7 +146,9 @@ def install(app, api):
         calendar_ctx=dict(weeks=weeks,month_label=month_names[anchor.month-1]+' '+str(anchor.year),month_value=anchor.strftime('%Y-%m'),prev_month=link(month=prev.strftime('%Y-%m'))+'#closing-calendar',next_month=link(month=next_month.strftime('%Y-%m'))+'#closing-calendar',current_month=link(month=today.strftime('%Y-%m'))+'#closing-calendar',selected_day=selected_day.isoformat() if selected_day else '',form_date=selected_day.isoformat() if selected_day else today.isoformat(),days_saved=len(by_day))
         expenses_by_id={r['report_id']:json.loads(r['lines_json']) for r in expense_rows}
         funds_by_id={r['report_id']:r['initial_cents'] for r in fund_rows}
+        shifts_by_id={r['report_id']:r for r in shift_rows}
         for r in rows:
+            r['shift']=shifts_by_id.get(r['id'])
             r['lines']=json.loads(r['lines_json'])
             r['expenses']=expenses_by_id.get(r['id'],[])
             r['expense_total']=sum(e['cents'] for e in r['expenses'])
@@ -147,7 +164,16 @@ def install(app, api):
                 r['cash_check']=cash_checks.get(r['id'])
                 counted=r['cash_check']['counted_cents'] if r['cash_check'] else None
                 r['cash_difference']=counted-r['expected_cash'] if counted is not None else None
-        return api['render']('closure_reports.html',**calendar_ctx,request=request,user=user,brand=scope,stores=stores,selected=selected,channels=names,rows=rows,start=start,end=end,saved=saved,deleted=deleted,today=datetime.now(ZoneInfo('Europe/Rome')).date().isoformat(),csrf=token(request),submission=secrets.token_urlsafe(32),period_total=sum(r['total_cents'] for r in rows))
+        daily_reports={}
+        for row in rows:
+            group=daily_reports.setdefault(str(row['closure_date']),dict(day=str(row['closure_date']),reports=[],total=0,channels={}))
+            group['reports'].append(row)
+            group['total']+=row['total_cents']
+            for line in row['lines']:
+                group['channels'][line['name']]=group['channels'].get(line['name'],0)+line['cents']
+        for group in daily_reports.values():
+            group['reports'].sort(key=lambda row: (row['shift']['start_time'] if row['shift'] else '',row['id']))
+        return api['render']('closure_reports.html',daily_reports=list(daily_reports.values()),**calendar_ctx,request=request,user=user,brand=scope,stores=stores,selected=selected,channels=names,rows=rows,start=start,end=end,saved=saved,deleted=deleted,today=datetime.now(ZoneInfo('Europe/Rome')).date().isoformat(),csrf=token(request),submission=secrets.token_urlsafe(32),period_total=sum(r['total_cents'] for r in rows))
     @app.post('/report-chiusura/canali')
     async def add_channel(request:Request):
         user,scope=auth(request); form=await request.form(); check(request,form)
@@ -202,6 +228,7 @@ def install(app, api):
             cur.execute(f'DELETE FROM closure_report_expenses WHERE report_id={ph()}',(report_id,))
             cur.execute(f'DELETE FROM closure_report_exports WHERE report_id={ph()}',(report_id,))
             cur.execute(f'DELETE FROM closure_report_reviews WHERE report_id={ph()}',(report_id,))
+            cur.execute(f'DELETE FROM closure_report_shifts WHERE report_id={ph()}',(report_id,))
             cur.execute(f'DELETE FROM closure_reports WHERE id={ph()} AND store={ph()}',(report_id,store))
             api['_log'](cur,store=store,username=user['username'],action='DELETE',category='CASSA',name=prefix+' - eliminato con entrate e uscite collegate',delta=0)
         return RedirectResponse('/report-chiusura?'+urlencode(dict(store=store,deleted='true'))+'#closing-history',303)
@@ -295,7 +322,7 @@ def install(app, api):
             cur=conn.cursor()
             clause='' if scope=='ALL' else f' AND r.store={ph()}'
             args=() if scope=='ALL' else (scope,)
-            queue=cur.execute('SELECT r.id,r.store,r.closure_date,r.created_by,r.total_cents FROM closure_reports r JOIN closure_report_reviews v ON v.report_id=r.id WHERE v.reviewed_at IS NULL'+clause+' ORDER BY r.closure_date DESC,r.id DESC',args).fetchall()
+            queue=cur.execute('SELECT r.id,r.store,r.closure_date,r.created_by,r.total_cents,s.start_time,s.end_time FROM closure_reports r JOIN closure_report_reviews v ON v.report_id=r.id LEFT JOIN closure_report_shifts s ON s.report_id=r.id WHERE v.reviewed_at IS NULL'+clause+' ORDER BY r.closure_date DESC,r.id DESC',args).fetchall()
             draft=None
             if report_id:
                 draft=next((row for row in queue if row['id']==report_id),None)
@@ -307,6 +334,7 @@ def install(app, api):
                 expenses=cur.execute(f'SELECT lines_json FROM closure_report_expenses WHERE report_id={ph()}',(report_id,)).fetchone()
                 fund=cur.execute(f'SELECT initial_cents FROM closure_report_cash_funds WHERE report_id={ph()}',(report_id,)).fetchone()
                 draft=dict(row)
+                draft['shift']=cur.execute(f'SELECT start_time,end_time FROM closure_report_shifts WHERE report_id={ph()}',(report_id,)).fetchone()
                 draft['expenses']=json.loads(expenses['lines_json']) if expenses else []
                 draft['amounts']={line['name']:line['cents'] for line in json.loads(row['lines_json'])}
                 draft['amounts']['Cash']-=sum(e['cents'] for e in draft['expenses'] if e.get('mode')=='add_to_cash')
@@ -354,6 +382,9 @@ def install(app, api):
                 raise HTTPException(409,'Report già confermato.')
             known=channels(cur,row['store'])+[line['name'] for line in json.loads(row['lines_json'])]
             day,notes,lines,total,expenses,fund_initial=parse_report(form,known)
+            shift=report_shift(form)
+            if shift:
+                cur.execute(f'INSERT INTO closure_report_shifts(report_id,start_time,end_time) VALUES({ph()},{ph()},{ph()}) ON CONFLICT(report_id) DO UPDATE SET start_time=excluded.start_time,end_time=excluded.end_time',(report_id,*shift))
             cur.execute(f'UPDATE closure_reports SET closure_date={ph()},notes={ph()},lines_json={ph()},total_cents={ph()} WHERE id={ph()}',(day,notes,json.dumps(lines,ensure_ascii=False),total,report_id))
             cur.execute(f'INSERT INTO closure_report_expenses(report_id,lines_json) VALUES({ph()},{ph()}) ON CONFLICT(report_id) DO UPDATE SET lines_json=excluded.lines_json',(report_id,json.dumps(expenses,ensure_ascii=False)))
             cur.execute(f'DELETE FROM closure_report_cash_funds WHERE report_id={ph()}',(report_id,))
@@ -375,9 +406,12 @@ def install(app, api):
             if cur.execute(f'SELECT submission_token FROM closure_report_deleted_tokens WHERE submission_token={ph()}',(submission,)).fetchone():
                 raise HTTPException(409,'Questo report è stato eliminato. Ricarica la pagina per inserire una nuova chiusura.')
             day,notes,lines,total,expenses,fund_initial=parse_report(form,channels(cur,store))
+            shift=report_shift(form)
             cur.execute(f"INSERT INTO closure_reports(store,closure_date,lines_json,total_cents,notes,created_by,created_at,submission_token) VALUES({','.join([ph()]*8)}) ON CONFLICT(submission_token) DO NOTHING RETURNING id",(store,day,json.dumps(lines,ensure_ascii=False),total,notes,user['username'],datetime.now(ZoneInfo('Europe/Rome')).isoformat(timespec='seconds'),submission))
             inserted=cur.fetchone()
             if inserted:
+                if shift:
+                    cur.execute(f'INSERT INTO closure_report_shifts(report_id,start_time,end_time) VALUES({ph()},{ph()},{ph()})',(inserted['id'],*shift))
                 if user.get('role')!='admin':
                     cur.execute(f'INSERT INTO closure_report_reviews(report_id) VALUES({ph()})',(inserted['id'],))
                 if fund_initial is not None:
