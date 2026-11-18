@@ -28,6 +28,7 @@ def init_reports():
             report_id INTEGER PRIMARY KEY, reviewed_at TEXT, reviewed_by TEXT)''')
         cur.execute(f"CREATE TABLE IF NOT EXISTS closure_reports (id {ident}, store TEXT NOT NULL, closure_date TEXT NOT NULL, lines_json TEXT NOT NULL, total_cents BIGINT NOT NULL, notes TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL, submission_token TEXT NOT NULL UNIQUE)")
         cur.execute('CREATE INDEX IF NOT EXISTS ix_closure_reports_scope ON closure_reports(store,closure_date)')
+        cur.execute('CREATE TABLE IF NOT EXISTS closure_report_cumulative (report_id INTEGER PRIMARY KEY, lines_json TEXT NOT NULL)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_shifts (report_id INTEGER PRIMARY KEY, start_time TEXT NOT NULL, end_time TEXT NOT NULL)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_exports (report_id INTEGER PRIMARY KEY)')
         cur.execute('CREATE TABLE IF NOT EXISTS closure_report_expenses (report_id INTEGER PRIMARY KEY, lines_json TEXT NOT NULL)')
@@ -91,6 +92,65 @@ def install(app, api):
             elif expense.get('mode')=='included': notes+=' (già compresa nell’incasso)'
             api['_insert_cash_expense_compat'](cur,row['store'],row['closure_date'],'Spese chiusura','','Contanti',expense['cents']/100,notes,row['created_by'])
             api['_log'](cur,store=row['store'],username=row['created_by'],action='CREATE',category='CASSA',name=notes,delta=-expense['cents']/100)
+    def clear_export(cur,row):
+        prefix=f"Report chiusura #{row['id']}"
+        income_prefixes=(prefix+' · ',prefix+' Â· ')
+        cur.execute(f'DELETE FROM cash_entries WHERE store={ph()} AND flow_date={ph()} AND (notes={ph()} OR substr(notes,1,{ph()})={ph()} OR substr(notes,1,{ph()})={ph()})',
+                    (row['store'],row['closure_date'],prefix,len(income_prefixes[0]),income_prefixes[0],len(income_prefixes[1]),income_prefixes[1]))
+        expense_prefix=prefix+' - '
+        cur.execute(f'DELETE FROM cash_expenses WHERE store={ph()} AND flow_date={ph()} AND substr(notes,1,{ph()})={ph()}',
+                    (row['store'],row['closure_date'],len(expense_prefix),expense_prefix))
+        cur.execute(f'DELETE FROM closure_report_exports WHERE report_id={ph()}',(row['id'],))
+
+    def store_cumulative(cur,report_id,lines,expenses):
+        base=[dict(line) for line in lines]
+        added=sum(e['cents'] for e in expenses if e.get('mode')=='add_to_cash')
+        for line in base:
+            if line['name']=='Cash':
+                line['cents']-=added
+        cur.execute(f'INSERT INTO closure_report_cumulative(report_id,lines_json) VALUES({ph()},{ph()}) ON CONFLICT(report_id) DO UPDATE SET lines_json=excluded.lines_json',
+                    (report_id,json.dumps(base,ensure_ascii=False)))
+
+    def rebuild_day(cur,store,day):
+        reports=cur.execute(f"""
+            SELECT r.*,s.start_time,c.lines_json AS cumulative_json,e.lines_json AS expense_json
+            FROM closure_reports r LEFT JOIN closure_report_shifts s ON s.report_id=r.id
+            LEFT JOIN closure_report_cumulative c ON c.report_id=r.id
+            LEFT JOIN closure_report_expenses e ON e.report_id=r.id
+            WHERE r.store={ph()} AND r.closure_date={ph()}
+            ORDER BY COALESCE(s.start_time,''),r.id
+        """,(store,day)).fetchall()
+        previous={}
+        for row in reports:
+            expenses=json.loads(row['expense_json'] or '[]')
+            added=sum(e['cents'] for e in expenses if e.get('mode')=='add_to_cash')
+            current=json.loads(row['lines_json'])
+            if not row['cumulative_json']:
+                for line in current:
+                    value=line['cents']-(added if line['name']=='Cash' else 0)
+                    previous[line['name']]=previous.get(line['name'],0)+value
+                continue
+            cumulative=json.loads(row['cumulative_json'])
+            by_name={line['name']:line for line in cumulative}
+            lines=[]
+            for name in dict.fromkeys([line['name'] for line in cumulative]+list(previous)):
+                base=by_name.get(name,dict(name=name,cents=0))
+                difference=base['cents']-previous.get(name,0)
+                if difference<0:
+                    raise HTTPException(422,f"Il totale cumulativo di {name} è inferiore ai turni precedenti. Controlla gli importi e l’ordine dei turni.")
+                line=dict(base,cents=difference+(added if name=='Cash' else 0))
+                lines.append(line)
+            previous={line['name']:line['cents'] for line in cumulative}
+            if lines!=current:
+                exported=cur.execute(f'SELECT 1 FROM closure_report_exports WHERE report_id={ph()}',(row['id'],)).fetchone()
+                if exported:
+                    clear_export(cur,row)
+                total=sum(line['cents'] for line in lines)
+                payload=json.dumps(lines,ensure_ascii=False)
+                cur.execute(f'UPDATE closure_reports SET lines_json={ph()},total_cents={ph()} WHERE id={ph()}',(payload,total,row['id']))
+                if exported:
+                    export_report(cur,dict(row,lines_json=payload,total_cents=total))
+
     @app.on_event('startup')
     def startup_reports():
         init_reports()
@@ -128,6 +188,7 @@ def install(app, api):
             if user.get('role')=='admin':
                 cash_checks={r['report_id']:r for r in cur.execute(f'SELECT c.* FROM closure_report_cash_checks c JOIN closure_reports r ON r.id=c.report_id WHERE r.store={ph()}',(selected,)).fetchall()}
             counts=cur.execute(f'SELECT closure_date,COUNT(*) AS n FROM closure_reports WHERE store={ph()} AND closure_date>={ph()} AND closure_date<={ph()} GROUP BY closure_date',(selected,anchor.isoformat(),anchor.replace(day=calendar.monthrange(anchor.year,anchor.month)[1]).isoformat())).fetchall()
+            cumulative_rows=cur.execute(f'SELECT c.* FROM closure_report_cumulative c JOIN closure_reports r ON r.id=c.report_id WHERE r.store={ph()}',(selected,)).fetchall()
             shift_rows=cur.execute(f'SELECT s.* FROM closure_report_shifts s JOIN closure_reports r ON r.id=s.report_id WHERE r.store={ph()}',(selected,)).fetchall()
             review_status={r['report_id']:r['reviewed_at'] for r in cur.execute('SELECT report_id,reviewed_at FROM closure_report_reviews').fetchall()}
         by_day={str(r['closure_date']):r['n'] for r in counts}
@@ -146,8 +207,10 @@ def install(app, api):
         calendar_ctx=dict(weeks=weeks,month_label=month_names[anchor.month-1]+' '+str(anchor.year),month_value=anchor.strftime('%Y-%m'),prev_month=link(month=prev.strftime('%Y-%m'))+'#closing-calendar',next_month=link(month=next_month.strftime('%Y-%m'))+'#closing-calendar',current_month=link(month=today.strftime('%Y-%m'))+'#closing-calendar',selected_day=selected_day.isoformat() if selected_day else '',form_date=selected_day.isoformat() if selected_day else today.isoformat(),days_saved=len(by_day))
         expenses_by_id={r['report_id']:json.loads(r['lines_json']) for r in expense_rows}
         funds_by_id={r['report_id']:r['initial_cents'] for r in fund_rows}
+        cumulative_by_id={r['report_id']:json.loads(r['lines_json']) for r in cumulative_rows}
         shifts_by_id={r['report_id']:r for r in shift_rows}
         for r in rows:
+            r['cumulative']=cumulative_by_id.get(r['id'])
             r['shift']=shifts_by_id.get(r['id'])
             r['lines']=json.loads(r['lines_json'])
             r['expenses']=expenses_by_id.get(r['id'],[])
@@ -207,6 +270,8 @@ def install(app, api):
         with connect() as conn:
             cur=conn.cursor()
             if not using_postgres(): cur.execute('BEGIN IMMEDIATE')
+            if using_postgres():
+                cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ('closure-reports-write',))
             lock=' FOR UPDATE' if using_postgres() else ''
             row=cur.execute(f'SELECT * FROM closure_reports WHERE id={ph()} AND store={ph()}'+lock,(report_id,store)).fetchone()
             if not row: raise HTTPException(404,'Report non trovato.')
@@ -228,8 +293,10 @@ def install(app, api):
             cur.execute(f'DELETE FROM closure_report_expenses WHERE report_id={ph()}',(report_id,))
             cur.execute(f'DELETE FROM closure_report_exports WHERE report_id={ph()}',(report_id,))
             cur.execute(f'DELETE FROM closure_report_reviews WHERE report_id={ph()}',(report_id,))
+            cur.execute(f'DELETE FROM closure_report_cumulative WHERE report_id={ph()}',(report_id,))
             cur.execute(f'DELETE FROM closure_report_shifts WHERE report_id={ph()}',(report_id,))
             cur.execute(f'DELETE FROM closure_reports WHERE id={ph()} AND store={ph()}',(report_id,store))
+            rebuild_day(cur,store,str(row['closure_date']))
             api['_log'](cur,store=store,username=user['username'],action='DELETE',category='CASSA',name=prefix+' - eliminato con entrate e uscite collegate',delta=0)
         return RedirectResponse('/report-chiusura?'+urlencode(dict(store=store,deleted='true'))+'#closing-history',303)
     @app.post('/report-chiusura/verifica-cash')
@@ -282,7 +349,7 @@ def install(app, api):
             expenses.append(dict(name=name,cents=value,mode=mode))
         fund_expenses=sum(e['cents'] for e in expenses if e['mode']=='cash_fund')
         fund_mode=form.get('cash_fund_mode')
-        if fund_mode is None: fund_mode='excluded'
+        if fund_mode is None and form.get('cumulative_mode')!='1': fund_mode='excluded'
         if fund_mode not in ('included','excluded'):
             raise HTTPException(422,'Indica se il contante include il fondo cassa.')
         raw_fund=str(form.get('cash_fund_initial','')).strip()
@@ -337,7 +404,12 @@ def install(app, api):
                 draft['shift']=cur.execute(f'SELECT start_time,end_time FROM closure_report_shifts WHERE report_id={ph()}',(report_id,)).fetchone()
                 draft['expenses']=json.loads(expenses['lines_json']) if expenses else []
                 draft['amounts']={line['name']:line['cents'] for line in json.loads(row['lines_json'])}
-                draft['amounts']['Cash']-=sum(e['cents'] for e in draft['expenses'] if e.get('mode')=='add_to_cash')
+                cumulative=cur.execute(f'SELECT lines_json FROM closure_report_cumulative WHERE report_id={ph()}',(report_id,)).fetchone()
+                draft['cumulative']=bool(cumulative)
+                if cumulative:
+                    draft['amounts']={line['name']:line['cents'] for line in json.loads(cumulative['lines_json'])}
+                else:
+                    draft['amounts']['Cash']-=sum(e['cents'] for e in draft['expenses'] if e.get('mode')=='add_to_cash')
                 draft['channels']=list(dict.fromkeys(channels(cur,row['store'])+list(draft['amounts'])))
                 cash_line=next(line for line in json.loads(row['lines_json']) if line['name']=='Cash')
                 draft['fund_mode']=cash_line.get('fund_mode','excluded')
@@ -372,6 +444,8 @@ def install(app, api):
             cur=conn.cursor()
             if not using_postgres():
                 cur.execute('BEGIN IMMEDIATE')
+            if using_postgres():
+                cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ('closure-reports-write',))
             lock=' FOR UPDATE' if using_postgres() else ''
             row=cur.execute(f'SELECT * FROM closure_reports WHERE id={ph()}'+lock,(report_id,)).fetchone()
             if not row:
@@ -391,7 +465,13 @@ def install(app, api):
             if fund_initial is not None:
                 cur.execute(f'INSERT INTO closure_report_cash_funds(report_id,initial_cents) VALUES({ph()},{ph()})',(report_id,fund_initial))
             cur.execute(f'UPDATE closure_report_reviews SET reviewed_at={ph()},reviewed_by={ph()} WHERE report_id={ph()}',(datetime.now(ZoneInfo('Europe/Rome')).isoformat(timespec='seconds'),user['username'],report_id))
-            export_report(cur,dict(row,closure_date=day,notes=notes,lines_json=json.dumps(lines,ensure_ascii=False)))
+            if form.get('cumulative_mode')=='1':
+                store_cumulative(cur,report_id,lines,expenses)
+            rebuild_day(cur,row['store'],str(row['closure_date']))
+            if day!=str(row['closure_date']):
+                rebuild_day(cur,row['store'],day)
+            updated=cur.execute(f'SELECT * FROM closure_reports WHERE id={ph()}',(report_id,)).fetchone()
+            export_report(cur,updated)
         return RedirectResponse('/admin/file-da-verificare',303)
 
     @app.post('/report-chiusura/salva')
@@ -405,11 +485,15 @@ def install(app, api):
             if not using_postgres(): cur.execute('BEGIN IMMEDIATE')
             if cur.execute(f'SELECT submission_token FROM closure_report_deleted_tokens WHERE submission_token={ph()}',(submission,)).fetchone():
                 raise HTTPException(409,'Questo report è stato eliminato. Ricarica la pagina per inserire una nuova chiusura.')
+            if using_postgres():
+                cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ('closure-reports-write',))
             day,notes,lines,total,expenses,fund_initial=parse_report(form,channels(cur,store))
             shift=report_shift(form)
             cur.execute(f"INSERT INTO closure_reports(store,closure_date,lines_json,total_cents,notes,created_by,created_at,submission_token) VALUES({','.join([ph()]*8)}) ON CONFLICT(submission_token) DO NOTHING RETURNING id",(store,day,json.dumps(lines,ensure_ascii=False),total,notes,user['username'],datetime.now(ZoneInfo('Europe/Rome')).isoformat(timespec='seconds'),submission))
             inserted=cur.fetchone()
             if inserted:
+                if form.get('cumulative_mode')=='1':
+                    store_cumulative(cur,inserted['id'],lines,expenses)
                 if shift:
                     cur.execute(f'INSERT INTO closure_report_shifts(report_id,start_time,end_time) VALUES({ph()},{ph()},{ph()})',(inserted['id'],*shift))
                 if user.get('role')!='admin':
@@ -421,5 +505,7 @@ def install(app, api):
             row=cur.execute(f'SELECT * FROM closure_reports WHERE submission_token={ph()}'+lock,(submission,)).fetchone()
             if not row or row['store']!=store:
                 raise HTTPException(409,'Invio non disponibile.')
+            rebuild_day(cur,store,str(row['closure_date']))
+            row=cur.execute(f'SELECT * FROM closure_reports WHERE id={ph()}',(row['id'],)).fetchone()
             export_report(cur,row)
         return RedirectResponse('/report-chiusura?store='+store+'&saved=true',303)

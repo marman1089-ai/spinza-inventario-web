@@ -274,7 +274,7 @@ class ReportsTest(unittest.TestCase):
             self.assertEqual(send('/report-chiusura/salva',pending).status_code,303)
             staff_page=routes['/report-chiusura'](Request(session),day='2026-11-02')
             self.assertIn('action="/report-chiusura/salva"',staff_page)
-            self.assertIn('<option value="excluded" selected>',staff_page)
+            self.assertIn('<option value="" disabled selected>Seleziona una modalità</option>',staff_page)
             self.assertIn('Totale incassi del giorno <strong>160,00 €</strong>',staff_page)
             self.assertIn('In attesa di conferma',staff_page)
             app.router.on_startup[-1]()
