@@ -229,6 +229,12 @@ def _split_logs(rows):
 # =========================
 # SESSION HELPERS
 # =========================
+def _employee_stores(cur, user_id, home_store):
+    rows = cur.execute(f"SELECT store FROM user_store_access WHERE user_id={_ph()}", (user_id,)).fetchall()
+    assigned = {row['store'] for row in rows} if rows else {home_store}
+    return {key:label for key,label in STORES.items() if key in assigned}
+
+
 def require_login(request: Request):
     user = request.session.get("user")
     if not user:
@@ -255,20 +261,30 @@ def require_login(request: Request):
                 return None
             cur.execute(f"UPDATE users SET last_seen={now} WHERE id={ph}", (int(user_id),))
 
+            home_store = db_user.get("store")
+            allowed_stores = dict(STORES) if db_user["role"]=="admin" else _employee_stores(cur, db_user["id"], home_store)
+            selected = home_store
+            if db_user["role"]!="admin":
+                if not allowed_stores:
+                    request.session.pop("user",None)
+                    return None
+                selected = request.session.get("employee_store",home_store)
+                if selected not in allowed_stores:
+                    selected = next(iter(allowed_stores))
+                request.session["employee_store"] = selected
             fresh_user = {
                 "id": db_user["id"],
                 "username": db_user["username"],
                 "role": db_user["role"],
-                "store": db_user.get("store"),
-                "store_label": STORES.get(db_user.get("store"), db_user.get("store")),
+                "home_store": home_store,
+                "store": selected,
+                "store_label": STORES.get(selected,selected),
+                "allowed_stores": allowed_stores,
             }
             request.session["user"] = fresh_user
             return fresh_user
     except Exception:
-        # fallback: almeno mantieni la sessione esistente senza rompere la navigazione
-        if user.get("store"):
-            user["store_label"] = STORES.get(user.get("store"), user.get("store"))
-        return user
+        return None
 
 def get_selected_store(request: Request):
     return request.session.get("selected_store")
@@ -356,11 +372,16 @@ def _render_admin(request: Request, *, user, users, msg=None, error=None):
 
     from .admin_dashboard import dashboard
     with connect() as conn:
-        admin_dashboard=dashboard(conn.cursor(),_current_store_scope(request,user),STORES,_rome_today())
+        cur=conn.cursor()
+        for employee in decorated:
+            employee["allowed_stores"]=_employee_stores(cur,employee["id"],employee["store"])
+        admin_dashboard=dashboard(cur,_current_store_scope(request,user),STORES,_rome_today())
+    access_csrf=request.session.setdefault("user_access_csrf",secrets.token_urlsafe(32))
     return render(
         "admin.html",
         user=user,
         users=decorated,
+        access_csrf=access_csrf,
         msg=msg,
         error=error,
         stores=STORES,
@@ -496,10 +517,20 @@ def login_post(request: Request, username: str = Form(...), password: str = Form
     ph = _ph()
     with connect() as conn:
         cur = conn.cursor()
-        row = cur.execute(
-            f"SELECT * FROM users WHERE username={ph} AND store={ph}",
-            (username, store),
-        ).fetchone()
+        candidates = cur.execute(f"SELECT * FROM users WHERE username={ph}",(username,)).fetchall()
+        matches = []
+        for candidate in candidates:
+            accessible = {candidate["store"]} if candidate["role"]=="admin" else _employee_stores(cur,candidate["id"],candidate["store"])
+            if store not in accessible:
+                continue
+            valid = False
+            if candidate.get("pw_salt") and candidate.get("pw_hash"):
+                valid = verify_password(password,candidate["pw_salt"],candidate["pw_hash"])
+            elif candidate.get("legacy_sha256"):
+                valid = legacy_sha256(password)==candidate["legacy_sha256"]
+            if valid:
+                matches.append(candidate)
+        row = matches[0] if len(matches)==1 else None
 
         if not row:
             return render("login.html", error="Credenziali non valide.", store=store, store_label=STORES[store], brand=store)
@@ -519,6 +550,7 @@ def login_post(request: Request, username: str = Form(...), password: str = Form
         if not ok:
             return render("login.html", error="Credenziali non valide.", store=store, store_label=STORES[store], brand=store)
 
+        request.session["employee_store"] = store
         request.session["user"] = {
             "id": row["id"],
             "username": row["username"],
@@ -5382,6 +5414,7 @@ def admin_login_post(request: Request, username: str = Form(...), password: str 
         if not ok:
             return render("admin_login.html", error="Credenziali admin non valide.", user=None)
 
+        request.session.pop("employee_store",None)
         request.session["user"] = {"id": row["id"], "username": row["username"], "role": row["role"]}
 
     return RedirectResponse("/admin", status_code=HTTP_303_SEE_OTHER)
@@ -5405,6 +5438,35 @@ def admin_page(request: Request, store: str = ""):
         ).fetchall()
 
     return _render_admin(request, user=user, users=users)
+
+@app.post("/admin/users/{user_id}/stores")
+async def admin_user_stores(request: Request, user_id: int):
+    user = require_login(request)
+    if not user or not is_admin(request):
+        raise HTTPException(403, "Solo gli admin possono modificare gli accessi.")
+    form = await request.form()
+    expected = request.session.get("user_access_csrf")
+    if not expected or not secrets.compare_digest(str(form.get("csrf","")),expected):
+        raise HTTPException(403, "Sessione scaduta. Riapri il pannello admin.")
+    assigned = set(form.getlist("stores"))
+    if not assigned or not assigned.issubset(STORES):
+        raise HTTPException(422, "Seleziona almeno un negozio valido.")
+    ph = _ph()
+    with connect() as conn:
+        cur = conn.cursor()
+        if not using_postgres():
+            cur.execute("BEGIN IMMEDIATE")
+        lock = " FOR UPDATE" if using_postgres() else ""
+        target = cur.execute(f"SELECT id,role FROM users WHERE id={ph}"+lock,(user_id,)).fetchone()
+        if not target:
+            raise HTTPException(404, "Account non trovato.")
+        if target["role"]=="admin":
+            raise HTTPException(422, "Gli admin hanno già accesso a tutti i negozi.")
+        cur.execute(f"DELETE FROM user_store_access WHERE user_id={ph}",(user_id,))
+        for store in sorted(assigned):
+            cur.execute(f"INSERT INTO user_store_access(user_id,store) VALUES({ph},{ph})",(user_id,store))
+    return RedirectResponse("/admin",303)
+
 
 @app.post("/admin/users/add", response_class=HTMLResponse)
 def admin_add_user(
@@ -5580,6 +5642,7 @@ def admin_delete_user(request: Request, user_id: int):
             (int(user_id),),
         ).fetchone()
         if target and target["role"] != "admin":
+            cur.execute(f"DELETE FROM user_store_access WHERE user_id={ph}", (int(user_id),))
             cur.execute(f"DELETE FROM users WHERE id={ph}", (int(user_id),))
             msg = f"Utente '{target['username']}' eliminato."
         users = cur.execute("SELECT id, store, username, role, last_seen FROM users ORDER BY role DESC, store, username").fetchall()
@@ -5640,13 +5703,16 @@ def set_active_store(request: Request, store: str = Form(...), next_url: str = F
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
-    if not is_admin(request):
-        return RedirectResponse("/inventario", status_code=HTTP_303_SEE_OTHER)
-
     store = (store or "").strip()
-    if store != "ALL" and store not in STORES:
-        store = "spinza"
-    request.session["active_store"] = store
+    if is_admin(request):
+        if store != "ALL" and store not in STORES:
+            raise HTTPException(403,"Negozio non consentito.")
+        request.session["active_store"] = store
+    else:
+        if store not in user.get("allowed_stores",{}):
+            raise HTTPException(403,"Non hai accesso a questo negozio.")
+        request.session["employee_store"] = store
+        request.session["user"] = dict(user,store=store,store_label=STORES[store])
 
     return RedirectResponse(_store_switch_url(next_url,store),status_code=303)
 
@@ -6340,7 +6406,7 @@ def profile_change_password(
         else:
             row = cur.execute(
                 f"SELECT * FROM users WHERE username={ph} AND store={ph}",
-                (user["username"], user.get("store")),
+                (user["username"], user.get("home_store",user.get("store"))),
             ).fetchone()
 
         if not row:

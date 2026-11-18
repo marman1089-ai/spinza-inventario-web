@@ -70,7 +70,7 @@
                 {% if u.role == 'admin' %}
                   <span class="pill">Tutti</span>
                 {% else %}
-                  <span class="pill">{{ stores.get(u.store, u.store) }}</span>
+                  {% for key,label in u.allowed_stores.items() %}<span class="pill">{{ label }}</span>{% endfor %}
                 {% endif %}
               </td>
               <td><strong>{{ u.username }}</strong></td>
@@ -85,6 +85,15 @@
               </td>
               <td style="text-align:right;">
                 {% if u.role != 'admin' %}
+                  <details style="display:inline-block;text-align:left;">
+                    <summary class="pill">Negozi accessibili</summary>
+                    <form method="post" action="/admin/users/{{ u.id }}/stores">
+                      <input type="hidden" name="csrf" value="{{ access_csrf }}">
+                      {% for key,label in stores.items() %}<p><label><input type="checkbox" name="stores" value="{{ key }}" {% if key in u.allowed_stores %}checked{% endif %}> {{ label }}</label></p>{% endfor %}
+                      <button class="btn2" type="submit">Salva accessi</button>
+                    </form>
+                  </details>
+
                   <details style="display:inline-block;text-align:left;">
                     <summary class="pill" style="cursor:pointer;">✏️ Cambia username</summary>
                     <div style="margin-top:10px;">

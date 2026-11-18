@@ -214,6 +214,13 @@ def init_db():
         ON users(store, username)
         """)
 
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS user_store_access (
+                user_id BIGINT NOT NULL, store TEXT NOT NULL,
+                PRIMARY KEY(user_id,store)
+            )
+        """)
+
         # optional: unique admin username globale (partial index non sempre disponibile)
         try:
             _safe_exec(cur, """

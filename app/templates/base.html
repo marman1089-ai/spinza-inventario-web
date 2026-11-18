@@ -324,14 +324,14 @@
       {% else %}
         <strong style="font-size:18px;letter-spacing:.02em">Gestionale</strong>
       {% endif %}
-      {% if user and user.role == 'admin' %}
+      {% if user and (user.role == 'admin' or user.allowed_stores|default({})|length > 1) %}
       <form class="brand-store-switch" method="post" action="/set-active-store">
         <input type="hidden" name="next_url" value="{{ request.url.path if request is defined and request.url is defined else '/inventario' }}{{ ('?' ~ request.url.query) if request is defined and request.url is defined and request.url.query else '' }}">
         <label for="header-store">Negozio attivo</label>
         <select id="header-store" name="store" aria-label="Cambia negozio" onchange="this.form.next_url.value=location.pathname+location.search+location.hash;try{sessionStorage.setItem('scrollY',String(window.scrollY||0))}catch(e){}this.form.classList.add('is-switching');this.form.querySelector('label').textContent='Cambio negozio…';this.form.submit()">
           {% set chosen = header_store or active_store or 'spinza' %}
           {% for key,label in [('spinza',"Spinza Santa'Agostino"),('reburger_maggio','Reburger San Felice'),('reburger_camaldoli','Reburger Camaldoli'),('ALL','Tutti i negozi')] %}
-          <option value="{{ key }}" {% if chosen==key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          {% if user.role=='admin' or key in user.allowed_stores %}<option value="{{ key }}" {% if chosen==key %}selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}
         </select><noscript><button>Cambia</button></noscript>
       </form>
       {% endif %}
