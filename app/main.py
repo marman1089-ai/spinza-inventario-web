@@ -7523,8 +7523,6 @@ def closures_page(request: Request, q: str = ""):
         if not is_admin(request):
             sql += " AND (" + available_document('chiusure') + f" OR uploaded_by={ph})"
             params.append(user["username"])
-        else:
-            sql += " AND " + available_document('chiusure')
         pending_ids = {r["doc_id"] for r in cur.execute(
             f"SELECT doc_id FROM admin_document_reviews WHERE kind={ph} AND reviewed_at IS NULL", ('chiusure',)
         ).fetchall()}

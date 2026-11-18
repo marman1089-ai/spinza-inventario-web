@@ -43,6 +43,16 @@ class UploadTests(unittest.TestCase):
         for kind in ('chiusure','fatture'):
             self.assertEqual(self.client.get(f'/{kind}/{documents[kind]}').status_code,404)
         self.login()
+        archive=self.client.get('/chiusure')
+        self.assertIn('In attesa di verifica',archive.text)
+        self.assertIn(f'/chiusure/{documents["chiusure"]}',archive.text)
+        self.assertIn(f'/admin/file-da-verificare/documenti/chiusure/{documents["chiusure"]}',archive.text)
+        self.assertEqual(self.client.get(f'/chiusure/{documents["chiusure"]}').status_code,200)
+        self.login(1,'ALL')
+        self.assertIn(f'/chiusure/{documents["chiusure"]}',self.client.get('/chiusure').text)
+        self.login(1,'reburger_maggio')
+        self.assertNotIn(f'/chiusure/{documents["chiusure"]}',self.client.get('/chiusure').text)
+        self.login()
         for kind,doc_id in documents.items():
             review=f'/admin/file-da-verificare/documenti/{kind}/{doc_id}'
             page=self.client.get(review)
