@@ -9669,6 +9669,10 @@ def _ensure_kitchen_invoice_tables():
             id {pk}, review_id BIGINT NOT NULL, product_id BIGINT NOT NULL,
             qty DOUBLE PRECISION NOT NULL, UNIQUE(review_id,product_id))""")
         c.execute('CREATE INDEX IF NOT EXISTS ix_kitchen_review_week ON kitchen_invoice_reviews(store,week_start)')
+        if using_postgres():
+            c.execute("ALTER TABLE kitchen_invoice_review_lines ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT ''")
+        elif 'unit' not in {r['name'] for r in c.execute('PRAGMA table_info(kitchen_invoice_review_lines)').fetchall()}:
+            c.execute("ALTER TABLE kitchen_invoice_review_lines ADD COLUMN unit TEXT NOT NULL DEFAULT ''")
 
 
 def _kitchen_week(raw):
@@ -9693,7 +9697,7 @@ def kitchen_weekly_invoices(request:Request,store:str='',week:str='',doc:int=0):
         c=conn.cursor()
         docs=c.execute(f"SELECT id,supplier,doc_date,filename FROM invoices_docs WHERE store={ph} AND doc_date>={ph} AND doc_date<={ph} AND {available_document('fatture')} ORDER BY doc_date,id",(store,week,week_end)).fetchall()
         reviews=c.execute(f"SELECT doc_id,status,updated_by,updated_at,id FROM kitchen_invoice_reviews WHERE store={ph} AND week_start={ph}",(store,week)).fetchall()
-        products=c.execute(f"SELECT id,name,category,unit FROM products WHERE store={ph} AND area={ph} ORDER BY category,name",(store,'prodotti')).fetchall()
+        products=c.execute(f"SELECT id,name,category,unit,location FROM products WHERE store={ph} AND area={ph} ORDER BY category,name",(store,'prodotti')).fetchall()
         revmap={int(r['doc_id']):dict(r) for r in reviews}
         docids={int(r['id']) for r in docs}
         selected=doc if doc in docids else (int(docs[0]['id']) if docs else 0)
@@ -9704,10 +9708,12 @@ def kitchen_weekly_invoices(request:Request,store:str='',week:str='',doc:int=0):
         arrivals=c.execute(f"""SELECT l.product_id, SUM(l.qty) AS total FROM kitchen_invoice_review_lines l
             JOIN kitchen_invoice_reviews r ON r.id=l.review_id
             WHERE r.store={ph} AND r.week_start={ph} AND r.status='done' GROUP BY l.product_id""",(store,week)).fetchall()
+    from .kitchen_ai import view_context
+    ai_context=view_context(request,store,week,selected)
     return render('kitchen_invoice_week.html',request=request,user=user,store=store,stores=STORES,
         week=week,week_end=week_end,docs=docs,reviews=revmap,selected=selected,
         saved={str(x['product_id']):x['qty'] for x in saved},products=products,
-        progress=progress,arrivals={int(x['product_id']):float(x['total']) for x in arrivals})
+        progress=progress,arrivals={int(x['product_id']):float(x['total']) for x in arrivals},**ai_context)
 
 
 @app.get('/inventario/fatture-settimana/file/{doc_id}')
@@ -9747,8 +9753,8 @@ async def kitchen_invoice_save(request:Request):
         c=conn.cursor()
         document=c.execute(f"SELECT id FROM invoices_docs WHERE id={ph} AND store={ph} AND doc_date>={ph} AND doc_date<={ph} AND {available_document('fatture')}",(doc_id,store,week,end)).fetchone()
         if not document:return PlainTextResponse('Fattura non trovata per questa settimana',status_code=404)
-        products=c.execute(f"SELECT id FROM products WHERE store={ph} AND area={ph}",(store,'prodotti')).fetchall()
-        allowed={int(r['id']) for r in products}
+        products=c.execute(f"SELECT id,unit FROM products WHERE store={ph} AND area={ph}",(store,'prodotti')).fetchall()
+        allowed={int(r['id']) for r in products};units={int(r['id']):r['unit'] for r in products}
         quantities=[]
         for key,value in form.multi_items():
             if not key.startswith('p_') or str(value).strip()=='':continue
@@ -9770,7 +9776,7 @@ async def kitchen_invoice_save(request:Request):
             rid=int(c.lastrowid)
         c.execute(f"DELETE FROM kitchen_invoice_review_lines WHERE review_id={ph}",(rid,))
         for pid,qty in quantities:
-            c.execute(f"INSERT INTO kitchen_invoice_review_lines(review_id,product_id,qty) VALUES({ph},{ph},{ph})",(rid,pid,qty))
+            c.execute(f"INSERT INTO kitchen_invoice_review_lines(review_id,product_id,qty,unit) VALUES({ph},{ph},{ph},{ph})",(rid,pid,qty,units[pid]))
         nextdoc=doc_id
         if status=='done':
             rows=c.execute(f"SELECT id FROM invoices_docs WHERE store={ph} AND doc_date>={ph} AND doc_date<={ph} AND {available_document('fatture')} ORDER BY doc_date,id",(store,week,end)).fetchall()
@@ -9925,28 +9931,47 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
                     ORDER BY CASE WHEN r2.status='done' THEN 0 ELSE 1 END,r2.id DESC LIMIT 1)
                 WHERE d.store={ph} AND d.doc_date{first_operator}{ph} AND d.doc_date<={ph}
                 AND {available_document('fatture','d.id')} ORDER BY d.doc_date,d.id''',(store,first,last)).fetchall()
-            arrivals={}
+            from .kitchen_ai import convert_quantity
+            arrivals={};unit_notes=[]
             completed=0
             for doc in docs:
                 if doc['status']!='done':
                     continue
                 completed+=1
-                for line in cur.execute(f'SELECT product_id,qty FROM kitchen_invoice_review_lines WHERE review_id={ph}',(doc['review_id'],)).fetchall():
+                for line in cur.execute(f'SELECT product_id,qty,unit FROM kitchen_invoice_review_lines WHERE review_id={ph}',(doc['review_id'],)).fetchall():
                     pid=line['product_id']
-                    arrivals[pid]=arrivals.get(pid,0)+line['qty']
-            previous={line['product_id']:line['observed'] for line in cur.execute(
-                f'SELECT product_id,observed FROM inventory_period_count_lines WHERE count_id={ph}',(before['id'],)).fetchall()} if before else {}
+                    arrivals.setdefault(pid,[]).append((line['qty'],line.get('unit') or ''))
+            previous={line['product_id']:line for line in cur.execute(
+                f'SELECT product_id,observed,unit FROM inventory_period_count_lines WHERE count_id={ph}',(before['id'],)).fetchall()} if before else {}
             detail=[]
             for line in cur.execute(f'SELECT * FROM inventory_period_count_lines WHERE count_id={ph} ORDER BY category,name',(after['id'],)).fetchall():
                 pid=line['product_id']
-                initial=previous.get(pid) if before else line['previous']
+                earlier=previous.get(pid) if before else None
+                initial=earlier['observed'] if earlier else (line['previous'] if not before else None)
+                if earlier and earlier.get('unit')!=line.get('unit'):
+                    converted=convert_quantity(initial,earlier.get('unit'),line.get('unit'))
+                    if converted is None:
+                        unit_notes.append(f"{line['name']}: unità dei conteggi cambiata; consumo non calcolabile.")
+                        continue
+                    initial=converted
                 if initial is not None:
-                    received=arrivals.get(pid,0)
+                    received=0
+                    for quantity,unit in arrivals.get(pid,[]):
+                        if not unit:
+                            unit_notes.append(f"{line['name']}: arrivo storico senza unità registrata, da verificare.")
+                            received+=quantity
+                        else:
+                            converted=convert_quantity(quantity,unit,line['unit'])
+                            if converted is None:
+                                unit_notes.append(f"{line['name']}: unità di un acquisto incompatibile con il conteggio; acquisto da verificare.")
+                            else:received+=converted
+                    if initial+received-line['observed']<0:
+                        unit_notes.append(f"{line['name']}: differenza negativa, verifica acquisti mancanti, unità e conteggi.")
                     detail.append(dict(name=line['name'],unit=line['unit'],start=initial,received=received,
                                        end=line['observed'],used=initial+received-line['observed']))
             weeks=sorted({_kitchen_week(str(doc['doc_date'])[:10]) for doc in docs} | {_kitchen_week(last)})
             kitchen_periods.append(dict(first=first,last=last,details=detail,weeks=weeks,initial=before is None,
-                                        completed=completed,total=len(docs)))
+                                        completed=completed,total=len(docs),warnings=list(dict.fromkeys(unit_notes))))
         periods=[]; totals={}
         for before,after in zip(headers,headers[1:]):
             before_lines={r['product_id']:r for r in cur.execute(f"SELECT * FROM inventory_period_count_lines WHERE count_id={ph}",(before['id'],)).fetchall()}
@@ -10153,3 +10178,6 @@ async def inventory_save_quantities(request: Request):
 
 from .archive_media import install as install_archive_media
 install_archive_media(app, globals())
+
+from .kitchen_ai import install as install_kitchen_ai
+install_kitchen_ai(app, globals())

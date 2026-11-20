@@ -11,7 +11,7 @@
 .invoice-card{position:relative;padding-right:92px}.logo-form{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 </style>
 <div class="shine-hero"><span class="eyebrow">ARCHIVIO DOCUMENTALE</span><h1>🧾 Fatture</h1><p>Carica e consulta gli originali in foto o PDF.</p></div>
-<div class="card shine-panel">
+{% if user.role=='admin' %}<div class="card shine-panel"><h2>Fatture e consumi della cucina</h2><p>Leggi le fatture con l’AI e conferma i prodotti acquistati per confrontarli con i conteggi settimanali.</p><a class="shine-button" href="/inventario/fatture-settimana?store={{ active_store if active_store in stores else 'spinza' }}">Apri lettura AI e fatture settimanali</a></div>{% endif %}<div class="card shine-panel">
 <form method="get" action="/fatture" class="shine-toolbar"><div class="supplier-picker" data-supplier-picker data-search="1"><input name="supplier" placeholder="Cerca fatture per fornitore" value="{{ supplier or '' }}" autocomplete="off" aria-label="Cerca fornitore"><select name="supplier_choice" class="supplier-native-select" aria-label="Elenco fornitori ricerca" size="1"><option value="">Tutti i fornitori</option>{% for name in suppliers %}<option value="{{ name }}">{{ name }}</option>{% endfor %}</select></div><button class="shine-button">Cerca</button></form>
 <h3>Carica nuovo documento</h3>
 <form method="post" action="/fatture/upload" enctype="multipart/form-data">

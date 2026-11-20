@@ -18,15 +18,17 @@
 <h3>Schede archiviate nel periodo</h3>{% for h in archive %}<p><a href="/inventario/report?area={{ area }}&store={{ store }}&id={{ h.id }}">#{{ h.id }} · {{ h.counted_at[:10] }} · {{ h.username }}</a></p>{% else %}<p>Nessuna scheda in questo periodo.</p>{% endfor %}
 <h3>Fatture dello stesso periodo</h3>{% for doc in invoices %}<p>{{ doc.doc_date }} · {{ doc.supplier }} · <a href="/inventario/fatture-periodo/{{ doc.id }}?store={{ store }}" target="_blank" rel="noopener">{{ doc.filename }}</a></p>{% else %}<p>Nessuna fattura nel periodo.</p>{% endfor %}
 {% if not periods and area != 'prodotti' %}<div class="card" style="margin-top:12px">Non esistono ancora due conteggi completi nel periodo selezionato. Esegui un primo conteggio e un secondo successivo per ottenere un report affidabile. I giorni senza conteggi ai confini non vengono stimati automaticamente.</div>{% endif %}
+{% if area=='prodotti' %}<details><summary>Confronto separato da ordini e scambi · non sommare al report fatture cucina</summary>{% endif %}
 {% if totals %}<h3>Totale uscite nei periodi disponibili</h3><table style="width:100%"><thead><tr><th>Prodotto</th><th>Uscito / consumato dal magazzino</th></tr></thead><tbody>
 {% for t in totals %}<tr><td>{{ t.name }}</td><td><strong>{{ '%.2f'|format(t.outgoing) }} {{ t.unit }}</strong></td></tr>{% endfor %}
 </tbody></table>{% endif %}
 {% for period in periods %}<h3>{{ period.from }} → {{ period.to }}</h3><table style="width:100%"><thead><tr><th>Prodotto</th><th>Inizio</th><th>Arrivi</th><th>Fine</th><th>Uscite</th></tr></thead><tbody>
 {% for row in period.detail %}<tr><td>{{ row.name }}</td><td>{{ row.start }}</td><td>+{{ row.arrivals }}</td><td>{{ row.end }}</td><td><strong>{{ '%.2f'|format(row.outgoing) }} {{ row.unit }}</strong></td></tr>{% endfor %}
 </tbody></table>{% endfor %}
+{% if area=='prodotti' %}</details>{% endif %}
 {% if area=='prodotti' and user.role=='admin' %}
 <section class="card shine-panel">
-<h2>Consumo reale di cucina</h2>
+<h2>Consumo stimato della cucina</h2><p>Acquisti confermati dalle fatture e due conteggi completi. Include scarti, consumi del personale, trasferimenti e rettifiche non registrati separatamente: non equivale al solo venduto. Se una consegna ha data diversa dalla fattura o manca un documento, il periodo va verificato.</p>
 <p>Giacenza iniziale + arrivi dalle fatture confermate − giacenza finale. Per il primo report, la giacenza iniziale è quella presente in Cucina prima della conferma.</p>
 {% for period in kitchen_periods %}
 <h3>{{ period.first }} → {{ period.last }}</h3>
@@ -41,9 +43,10 @@
 <p>{{ period.completed }} / {{ period.total }} fatture confermate.
 {% if not period.total %}Nessuna fattura disponibile nel periodo.
 {% elif period.completed < period.total %}Consumo provvisorio: ci sono fatture da completare.{% endif %}</p>
-{% for week in period.weeks %}<p><a class="btn2" href="/inventario/fatture-settimana?store={{ store }}&amp;week={{ week }}">Trascrivi fatture dal {{ week }}</a></p>{% endfor %}
+{% for warning in period.warnings %}<p class="kw-status">⚠ {{ warning }}</p>{% endfor %}
+{% for week in period.weeks %}<p><a class="btn2" href="/inventario/fatture-settimana?store={{ store }}&amp;week={{ week }}">Leggi fatture con AI dal {{ week }}</a></p>{% endfor %}
 <table style="width:100%"><thead><tr><th>Prodotto</th><th>Giacenza iniziale</th><th>Arrivi da fattura</th><th>Giacenza finale</th><th>Consumo</th></tr></thead><tbody>
-{% for row in period.details %}<tr><td>{{ row.name }}</td><td>{{ row.start }}</td><td>{{ row.received }}</td><td>{{ row.end }}</td><td>{{ '%.2f'|format(row.used) }} {{ row.unit }}</td></tr>{% endfor %}
+{% for row in period.details %}<tr><td>{{ row.name }}</td><td>{{ row.start }}</td><td>{{ row.received }}</td><td>{{ row.end }}</td><td>{{ '%.2f'|format(row.used) }} {{ row.unit }}{% if row.used<0 %} · Da verificare{% endif %}</td></tr>{% endfor %}
 </tbody></table>
 {% else %}
 <p>Apri una scheda archiviata per vedere il consumo del suo periodo.</p>
