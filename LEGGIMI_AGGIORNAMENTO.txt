@@ -1,9 +1,56 @@
+INVENTARIO — UN SOLO PULSANTE DI SALVATAGGIO FISSO
+
+Sostituisci entrambi i file inclusi nelle stesse cartelle del gestionale:
+app/templates/inventario.html
+app/static/js/inventory-batch.js
+Riavvia o ridistribuisci il gestionale e ricarica la pagina dell'inventario.
+Conserva il database corrente.
+
+Il pulsante Salva tutte le modifiche rimane fisso in basso sullo schermo,
+fuori dal contenitore animato dell'inventario, anche scorrendo l'elenco.
+Sono state eliminate la scelta della modalità e le spunte delle singole righe.
+Le quantità modificate e la calcolatrice restano in attesa: solo il pulsante
+fisso invia le modifiche, insieme, in un unico salvataggio.
+Invio sulla tastiera non salva il singolo prodotto.
+Creazione prodotti, ordini, importazioni e modifica dell'anagrafica mantengono
+le proprie operazioni precedenti.
+Questa correzione non aggiorna né sostituisce i file dei report chiusura.
+
+Verificato con Chrome nelle dimensioni PC e telefono, con admin e dipendente:
+posizione costante a inizio, metà e fondo elenco; pulsante cliccabile;
+assenza delle spunte; Invio senza scrittura; salvataggio unico effettivo.
+
+
 GESTIONALE AGGIORNATO — RICEVUTE E ORGANIZZAZIONE
 
+NUOVO AGGIORNAMENTO RICEVUTE
+- Pulsante Elimina ricevuta, riservato agli admin e con conferma.
+- Eliminare una ricevuta non modifica le spese o le quote già registrate.
+- Scegliendo una spesa, data, descrizione, destinazione e pagante vengono
+  compilati se vuoti, senza sovrascrivere i valori già presenti.
+- Le spese ripartite riportano entrambe le aziende con le rispettive quote.
+- Resta possibile caricare una ricevuta indipendente, senza collegamenti.
+- Nuovo campo Pagata da, aggiunto automaticamente conservando i dati esistenti.
+- Test server e client su compilazione, permessi, eliminazione e date: superati.
+
+CORREZIONE ARCHIVIO RICEVUTE
+Corretto il confronto tra date testuali delle spese aziendali e oggetti DATE
+restituiti da PostgreSQL per le vecchie uscite in contanti.
+Il confronto provocava Internal Server Error nell'elenco delle ricevute.
+La correzione normalizza le date lette senza cambiare i dati nel database.
+Test di regressione: errore riprodotto simulando i valori DATE di PostgreSQL,
+poi superato dopo la correzione, insieme ai test di caricamento e collegamento.
+Per aggiornare un'installazione che ha già tutte le altre modifiche,
+sostituire questi tre file e riavviare/ridistribuire l'applicazione:
+app/cash_documents.py
+app/templates/cash_documents.html
+app/static/js/cash-receipts.js
+Conservare il database. La nuova colonna viene aggiunta automaticamente.
+
 NOVITÀ INVENTARIO E PRESTAZIONI
-- Inventario: modalità Salva tutto alla fine, attiva per quantità e calcolatrice.
+- Inventario: un solo pulsante fisso per salvare quantità e calcolatrice.
 - Pulsante fisso in basso, adattato a PC e telefono, con numero di prodotti da salvare.
-- Disattivando la modalità puoi continuare con i salvataggi singoli precedenti.
+- Eliminate la scelta della modalità e le spunte per salvare le singole quantità.
 - Un solo invio finale per tutte le modifiche; salvataggio atomico.
 - I conflitti con modifiche di altri utenti vengono segnalati senza sovrascriverli.
 - In caso di errore, le modifiche restano nella pagina per riprovare.
@@ -56,6 +103,7 @@ app/templates/closure_reports_all.html
 app/archive_media.py
 app/static/js/inventory-batch.js
 app/static/js/archive-upload-progress.js
+app/static/js/cash-receipts.js
 
 VERIFICHE
 - Test integrazione: upload facoltativo, data passata, collegamento successivo,

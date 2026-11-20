@@ -4,13 +4,13 @@
 <p>Solo le quantità <strong>confermate</strong> entrano nel confronto con i conteggi settimanali. La lettura non modifica la giacenza attuale e non carica nuovamente la merce.</p>
 {% if not ai_configured %}<p role="status">Chiave API non configurata sul server. Su Render aggiungi OPENAI_API_KEY e riavvia il servizio. Non inserire la chiave in questa pagina.</p>{% else %}<p class="muted">AI configurata · {{ ai_model }}. Ogni nuova lettura usa il credito API. Le fatture vecchie vengono lette solo quando lo richiedi.</p>{% endif %}
 {% if docs %}<form method="post" action="/inventario/fatture-settimana/ai/accoda" class="row">
-<input type="hidden" name="csrf" value="{{ ai_csrf }}"><input type="hidden" name="store" value="{{ store }}"><input type="hidden" name="week" value="{{ week }}">
+<input type="hidden" name="csrf" value="{{ ai_csrf }}">{% if report_id %}<input type="hidden" name="report_id" value="{{ report_id }}">{% endif %}<input type="hidden" name="store" value="{{ store }}"><input type="hidden" name="week" value="{{ week }}">
 <button class="shine-button" {% if not ai_configured %}disabled{% endif %}>Leggi le fatture mancanti della settimana</button><span class="muted">Salta quelle già lette o completate.</span></form>{% endif %}
 <p id="kitchen-ai-status" role="status" aria-live="polite">{% if ai_pending %}Lettura in corso: puoi restare qui oppure tornare più tardi.{% endif %}</p><button type="button" id="kitchen-ai-refresh" class="btn2" hidden>Mostra i nuovi risultati</button>
 {% if selected %}<hr><h3>Fattura selezionata #{{ selected }}</h3>
 {% if ai_job %}<p><strong>{{ labels.get(ai_job.state,ai_job.state) }}</strong>{% if ai_job.error %}: {{ ai_job.error }}{% endif %}</p>{% endif %}
 <form method="post" action="/inventario/fatture-settimana/ai/accoda" {% if ai_job %}onsubmit="return confirm('Rileggere questa fattura usa nuovamente credito API. Gli arrivi già confermati restano validi fino alla nuova conferma. Continuare?');"{% endif %}>
-<input type="hidden" name="csrf" value="{{ ai_csrf }}"><input type="hidden" name="store" value="{{ store }}"><input type="hidden" name="week" value="{{ week }}"><input type="hidden" name="doc_id" value="{{ selected }}">{% if ai_job %}<input type="hidden" name="force" value="1">{% endif %}
+<input type="hidden" name="csrf" value="{{ ai_csrf }}">{% if report_id %}<input type="hidden" name="report_id" value="{{ report_id }}">{% endif %}<input type="hidden" name="store" value="{{ store }}"><input type="hidden" name="week" value="{{ week }}"><input type="hidden" name="doc_id" value="{{ selected }}">{% if ai_job %}<input type="hidden" name="force" value="1">{% endif %}
 <button class="btn2" {% if not ai_configured or (ai_job and ai_job.state in ['pending','working']) %}disabled{% endif %}>{{ 'Rileggi questa fattura' if ai_job else 'Leggi questa fattura con AI' }}</button></form>
 {% endif %}
 {% if ai_proposal %}
@@ -19,7 +19,7 @@
 {% if ai_job.state=='ready' %}
 {% set src=docs|selectattr('id','equalto',selected)|first %}
 <form method="post" action="/inventario/fatture-settimana/ai/conferma" id="kitchen-ai-review">
-<input type="hidden" name="csrf" value="{{ ai_csrf }}"><input type="hidden" name="store" value="{{ store }}"><input type="hidden" name="doc_id" value="{{ selected }}"><input type="hidden" name="revision" value="{{ ai_job.revision }}">
+<input type="hidden" name="csrf" value="{{ ai_csrf }}">{% if report_id %}<input type="hidden" name="report_id" value="{{ report_id }}">{% endif %}<input type="hidden" name="store" value="{{ store }}"><input type="hidden" name="doc_id" value="{{ selected }}"><input type="hidden" name="revision" value="{{ ai_job.revision }}">
 <div class="row" style="gap:12px;flex-wrap:wrap"><label>Data fattura da confermare<input type="date" name="invoice_date" value="{{ ai_proposal.date or src.doc_date }}" required></label><label>Fornitore<input name="supplier" value="{{ ai_proposal.supplier or src.supplier }}" maxlength="180" required></label></div>
 <p>Documento {{ ai_proposal.invoice_number or 'numero non leggibile' }} · P.IVA {{ ai_proposal.supplier_vat or 'non leggibile' }} · Totale {{ ai_proposal.amount if ai_proposal.amount is not none else 'da verificare' }} {{ ai_proposal.currency or '' }} · Imponibile {{ ai_proposal.taxable_amount if ai_proposal.taxable_amount is not none else '—' }} · IVA {{ ai_proposal.vat_amount if ai_proposal.vat_amount is not none else '—' }}</p>
 <p><strong>Controlla ogni conversione.</strong> Per un articolo inventariato come “25kg”, 2 significa due sacchi da 25 kg. Se manca la pezzatura, verifica l’originale. Per righe estranee alla cucina scegli “Non cucina / escludi”.</p>

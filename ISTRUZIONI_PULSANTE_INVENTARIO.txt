@@ -1,0 +1,21 @@
+INVENTARIO — UN SOLO PULSANTE DI SALVATAGGIO FISSO
+
+Sostituisci entrambi i file inclusi nelle stesse cartelle del gestionale:
+app/templates/inventario.html
+app/static/js/inventory-batch.js
+Riavvia o ridistribuisci il gestionale e ricarica la pagina dell'inventario.
+Conserva il database corrente.
+
+Il pulsante Salva tutte le modifiche rimane fisso in basso sullo schermo,
+fuori dal contenitore animato dell'inventario, anche scorrendo l'elenco.
+Sono state eliminate la scelta della modalità e le spunte delle singole righe.
+Le quantità modificate e la calcolatrice restano in attesa: solo il pulsante
+fisso invia le modifiche, insieme, in un unico salvataggio.
+Invio sulla tastiera non salva il singolo prodotto.
+Creazione prodotti, ordini, importazioni e modifica dell'anagrafica mantengono
+le proprie operazioni precedenti.
+Questa correzione non aggiorna né sostituisce i file dei report chiusura.
+
+Verificato con Chrome nelle dimensioni PC e telefono, con admin e dipendente:
+posizione costante a inizio, metà e fondo elenco; pulsante cliccabile;
+assenza delle spunte; Invio senza scrittura; salvataggio unico effettivo.

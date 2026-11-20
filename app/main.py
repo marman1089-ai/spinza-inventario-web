@@ -9682,7 +9682,7 @@ def _kitchen_week(raw):
 
 
 @app.get('/inventario/fatture-settimana',response_class=HTMLResponse)
-def kitchen_weekly_invoices(request:Request,store:str='',week:str='',doc:int=0):
+def kitchen_weekly_invoices(request:Request,store:str='',week:str='',doc:int=0,report_id:int=0):
     user,_,default_store=_stock_context(request)
     if not user:return RedirectResponse('/',status_code=303)
     if not is_admin(request): return PlainTextResponse('Riservato agli amministratori',status_code=403)
@@ -9713,7 +9713,7 @@ def kitchen_weekly_invoices(request:Request,store:str='',week:str='',doc:int=0):
     return render('kitchen_invoice_week.html',request=request,user=user,store=store,stores=STORES,
         week=week,week_end=week_end,docs=docs,reviews=revmap,selected=selected,
         saved={str(x['product_id']):x['qty'] for x in saved},products=products,
-        progress=progress,arrivals={int(x['product_id']):float(x['total']) for x in arrivals},**ai_context)
+        progress=progress,arrivals={int(x['product_id']):float(x['total']) for x in arrivals},report_id=report_id,**ai_context)
 
 
 @app.get('/inventario/fatture-settimana/file/{doc_id}')
@@ -9893,6 +9893,9 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
     ph=_ph()
     with connect() as conn:
         cur=conn.cursor()
+        from .kitchen_periods import schema as initial_schema
+        initial_schema(cur)
+        initial_dates={r['count_id']:r['start_date'] for r in cur.execute(f'SELECT count_id,start_date FROM inventory_initial_baselines WHERE store={ph}',(store,)).fetchall()}
         selected=None
         selected_lines=[]
         if id:
@@ -9906,7 +9909,7 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
                 if previous:
                     start_day=date.fromisoformat(str(previous['counted_at'])[:10])
                 elif area=='prodotti':
-                    start_day=start_day if start else date.fromisoformat(_kitchen_week(end_day.isoformat()))
+                    start_day=date.fromisoformat(initial_dates[id]) if id in initial_dates else (start_day if start else date.fromisoformat(_kitchen_week(end_day.isoformat())))
                     if start_day>end_day:
                         return PlainTextResponse('La data di partenza supera quella del conteggio',status_code=400)
                 else:
@@ -9920,7 +9923,7 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
         if area=='prodotti' and headers and not baseline:
             pairs.insert(0,(None,headers[0]))
         for before,after in pairs if area=='prodotti' else ():
-            first=str(before['counted_at'])[:10] if before else start_day.isoformat()
+            first=str(before['counted_at'])[:10] if before else initial_dates.get(after['id'],start_day.isoformat())
             last=str(after['counted_at'])[:10]
             if first < start_day.isoformat() or last > end_day.isoformat():
                 continue
@@ -9971,7 +9974,7 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
                                        end=line['observed'],used=initial+received-line['observed']))
             weeks=sorted({_kitchen_week(str(doc['doc_date'])[:10]) for doc in docs} | {_kitchen_week(last)})
             kitchen_periods.append(dict(first=first,last=last,details=detail,weeks=weeks,initial=before is None,
-                                        completed=completed,total=len(docs),warnings=list(dict.fromkeys(unit_notes))))
+                                        completed=completed,total=len(docs),warnings=list(dict.fromkeys(unit_notes)),report_id=after['id'],initial_known=bool(before or after['id'] in initial_dates),days=(date.fromisoformat(last)-date.fromisoformat(first)).days+(1 if before is None else 0)))
         periods=[]; totals={}
         for before,after in zip(headers,headers[1:]):
             before_lines={r['product_id']:r for r in cur.execute(f"SELECT * FROM inventory_period_count_lines WHERE count_id={ph}",(before['id'],)).fetchall()}
@@ -10181,3 +10184,6 @@ install_archive_media(app, globals())
 
 from .kitchen_ai import install as install_kitchen_ai
 install_kitchen_ai(app, globals())
+
+from .kitchen_periods import install as install_kitchen_periods
+install_kitchen_periods(app, globals())

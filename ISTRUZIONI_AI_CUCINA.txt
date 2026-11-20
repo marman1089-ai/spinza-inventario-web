@@ -1,0 +1,68 @@
+AI FATTURE E CONSUMI SETTIMANALI CUCINA
+
+INSTALLAZIONE
+Pubblica tutti i file contenuti nell'aggiornamento nel repository/cartella del
+servizio Render, mantenendo gli stessi percorsi. Conserva il database attuale.
+Riavvia/ridistribuisci il servizio. Le tabelle aggiuntive vengono create all'avvio.
+Non inserire chiavi API nel codice o negli ZIP.
+Su Render devono essere configurate:
+OPENAI_API_KEY = la tua chiave segreta
+OPENAI_DOCUMENT_MODEL = gpt-6.1-terra
+Non attivare ENABLE_LEGACY_DOCUMENT_OCR: questa funzione usa una coda dedicata,
+che legge solo le fatture cucina selezionate e non scandisce tutto l'archivio.
+Non sono richieste nuove dipendenze.
+
+PRIMO UTILIZZO
+1. Accedi come admin e scegli il negozio.
+2. Da Fatture apri Lettura AI e fatture settimanali; scegli la settimana.
+3. Come prima prova, premi Leggi questa fattura con AI su UN documento.
+4. Attendi la trascrizione; il lavoro continua senza tenere bloccata la pagina.
+5. Controlla data, fornitore, prodotti associati, posizione e conversioni.
+   Esempio: inventario Farina 25kg, acquisto 50kg = 2 sacchi nel campo quantità.
+6. Correggi i dubbi e associa tutte le righe; escludi esplicitamente quelle non
+   della cucina. Non segnare un ingrediente non riconosciuto come Non cucina.
+   Se manca un prodotto, aggiungilo all'inventario e rileggi con il catalogo aggiornato.
+7. Conferma gli arrivi. Non viene modificata la giacenza attuale né caricato di
+   nuovo l'acquisto in inventario; i dati servono al report consumi.
+8. I dipendenti confermano una scheda di conteggio completa ogni settimana.
+   Il pulsante di salvataggio quantità ordinario non sostituisce l'archiviazione
+   del conteggio settimanale: usare Conferma conteggio e genera report.
+9. Apri Report consumi cucina. Il calcolo è:
+   conteggio iniziale + acquisti confermati - conteggio finale.
+
+LIMITI DEL CALCOLO
+Il risultato è un consumo stimato di magazzino, non il solo venduto: comprende
+scarti, consumi del personale, trasferimenti e rettifiche non registrati separatamente.
+Gli acquisti vengono attribuiti al periodo usando la data documento confermata.
+Se consegna e fattura hanno date diverse, verificare il periodo prima di usarlo.
+Non esiste una certezza di completezza se mancano fatture o conteggi.
+Resi e note credito non devono essere trasformati in acquisti positivi:
+registrarli separatamente come rettifiche e verificare il consumo del periodo.
+Le differenze negative e le unità incompatibili vengono segnalate.
+Per articoli con confezioni/pesi ignoti occorre una verifica umana.
+Per gli originali inviati dai dipendenti resta necessaria la conferma admin
+in File da verificare prima che compaiano tra le fatture settimanali.
+
+CONTROLLI E COSTI
+Ogni nuova lettura utilizza il credito API. Le fatture già lette/completate non
+vengono accodate nuovamente dal pulsante settimanale. Rileggi usa nuovo credito.
+Le bozze e gli arrivi manuali non vengono sostituiti senza conferma; se cambiano
+fattura, catalogo o quantità nel frattempo, la conferma viene bloccata.
+Gli originali vengono inviati al servizio OpenAI per la lettura richiesta.
+Il risultato AI rimane una proposta da verificare; non conferma movimenti contabili.
+Su Render gratuito i lavori possono interrompersi quando il servizio dorme.
+I lavori rimangono nel database; le letture interrotte vengono recuperate dopo
+30 minuti. Gli errori richiedono un nuovo tentativo esplicito. Una ripetizione
+può generare un nuovo costo anche se il risultato precedente non è stato salvato.
+
+VERIFICHE ESEGUITE
+8 test locali superati: coda senza duplicazioni, permessi admin e CSRF,
+conversioni, fatture digitali, mancata modifica della giacenza, conferma unica,
+conflitti con correzioni manuali, date, gestione errori, richiesta API strutturata.
+I test hanno usato database di prova e risposte AI simulate: nessun credito reale.
+Verificati dal sito online inventario e report esistenti, senza modificarne i dati.
+Non è stata effettuata una lettura API reale né installato questo codice su Render.
+Per il primo test reale basta una fattura dopo la pubblicazione.
+
+Tutte le altre funzioni, incluse ricevute e pulsante inventario fisso, sono
+conservate. I file delle chiusure rimangono quelli della versione funzionante.

@@ -31,22 +31,21 @@
 <h2>Consumo stimato della cucina</h2><p>Acquisti confermati dalle fatture e due conteggi completi. Include scarti, consumi del personale, trasferimenti e rettifiche non registrati separatamente: non equivale al solo venduto. Se una consegna ha data diversa dalla fattura o manca un documento, il periodo va verificato.</p>
 <p>Giacenza iniziale + arrivi dalle fatture confermate − giacenza finale. Per il primo report, la giacenza iniziale è quella presente in Cucina prima della conferma.</p>
 {% for period in kitchen_periods %}
-<h3>{{ period.first }} → {{ period.last }}</h3>
-{% if period.initial and id %}
-<form method="get" action="/inventario/report" class="row">
-<input type="hidden" name="area" value="{{ area }}"><input type="hidden" name="store" value="{{ store }}"><input type="hidden" name="id" value="{{ id }}">
-<label>Fatture a partire dal <input type="date" name="start" value="{{ period.first }}" max="{{ period.last }}" required></label>
-<button class="btn2">Ricalcola</button>
-</form>
+<h3>{{ period.first if period.initial_known else 'Quantità iniziali' }} → {{ period.last }}</h3>
+<p>Durata: {{ (period.days|string)+' giorni' if period.initial_known else 'da impostare con la data iniziale' }} · {{ 'Quantità iniziali impostate → primo conteggio' if period.initial else 'Conteggio precedente → conteggio successivo' }}</p>
+{% if period.initial %}
+<form method="post" action="/inventario/report/data-iniziale" class="row"><input type="hidden" name="csrf" value="{{ delete_token }}"><input type="hidden" name="store" value="{{ store }}"><input type="hidden" name="report_id" value="{{ period.report_id }}"><label>Data delle quantità iniziali (inizio giornata)<input type="date" name="start_date" value="{{ period.first if period.initial_known else '' }}" max="{{ period.last }}" required></label><button class="btn2">Salva data iniziale e calcola il periodo</button></form>
+{% if not period.initial_known %}<p role="status"><strong>Imposta la data da cui erano valide le quantità iniziali che avevi scritto. Non serve un secondo report salvato.</strong> Le quantità iniziali sono quelle conservate prima del primo conteggio; non vengono prese dalle giacenze di oggi.</p>{% endif %}
 {% endif %}
+{% if period.initial_known %}<form method="post" action="/inventario/report/ai-periodo"><input type="hidden" name="csrf" value="{{ delete_token }}"><input type="hidden" name="store" value="{{ store }}"><input type="hidden" name="report_id" value="{{ period.report_id }}"><button class="btn2">Leggi con AI le fatture di questo periodo</button><p class="muted">Seleziona soltanto le fatture nelle date del confronto e salta quelle già lette o confermate. Verifica le proposte per aggiornare il report.</p></form>{% endif %}
 {% if period.initial and not period.details %}<p>La giacenza precedente non è stata salvata per questa scheda storica.</p>{% endif %}
 <p>{{ period.completed }} / {{ period.total }} fatture confermate.
 {% if not period.total %}Nessuna fattura disponibile nel periodo.
 {% elif period.completed < period.total %}Consumo provvisorio: ci sono fatture da completare.{% endif %}</p>
 {% for warning in period.warnings %}<p class="kw-status">⚠ {{ warning }}</p>{% endfor %}
-{% for week in period.weeks %}<p><a class="btn2" href="/inventario/fatture-settimana?store={{ store }}&amp;week={{ week }}">Leggi fatture con AI dal {{ week }}</a></p>{% endfor %}
+{% for week in period.weeks %}<p><a class="btn2" href="/inventario/fatture-settimana?store={{ store }}&amp;week={{ week }}&amp;report_id={{ period.report_id }}">Leggi fatture con AI dal {{ week }}</a></p>{% endfor %}
 <table style="width:100%"><thead><tr><th>Prodotto</th><th>Giacenza iniziale</th><th>Arrivi da fattura</th><th>Giacenza finale</th><th>Consumo</th></tr></thead><tbody>
-{% for row in period.details %}<tr><td>{{ row.name }}</td><td>{{ row.start }}</td><td>{{ row.received }}</td><td>{{ row.end }}</td><td>{{ '%.2f'|format(row.used) }} {{ row.unit }}{% if row.used<0 %} · Da verificare{% endif %}</td></tr>{% endfor %}
+{% for row in period.details %}<tr><td>{{ row.name }}</td><td>{{ row.start }}</td><td>{{ row.received }}</td><td>{{ row.end }}</td><td>{% if period.initial_known %}{{ '%.2f'|format(row.used) }} {{ row.unit }}{% if row.used<0 %} · Da verificare{% endif %}{% else %}Imposta la data iniziale{% endif %}</td></tr>{% endfor %}
 </tbody></table>
 {% else %}
 <p>Apri una scheda archiviata per vedere il consumo del suo periodo.</p>

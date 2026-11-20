@@ -9,8 +9,8 @@ function setup(){
  const nodes={'inventory-save-dock':dock,'inventory-defer':mode,'inventory-save-all':button,'inventory-save-status':status};
  let request,reloaded=false,fail=false;
  const window={addEventListener(){},location:{reload(){reloaded=true;}}};
- const context={document:{getElementById:id=>nodes[id],querySelectorAll:s=>s==='.inv-set-form'?[form]:[input,mode]},window,fetch:async(url,opts)=>{request=JSON.parse(opts.body);return {ok:!fail,json:async()=>fail?{detail:'Conflitto'}:{saved:1}};}};
- vm.runInNewContext(source,context);
+ const context={document:{body:{appendChild(node){node.parentIsBody=true;}},getElementById:id=>nodes[id],querySelectorAll:s=>s==='.inv-set-form'?[form]:[input,mode]},window,fetch:async(url,opts)=>{request=JSON.parse(opts.body);return {ok:!fail,json:async()=>fail?{detail:'Conflitto'}:{saved:1}};}};
+ vm.runInNewContext(source,context);assert.equal(dock.parentIsBody,true);
  return {input,mode,button,status,form,window,get request(){return request;},get reloaded(){return reloaded;},set fail(v){fail=v;}};
 }
 test('stages typing and calculator without requests, then sends one batch',async()=>{
@@ -20,6 +20,6 @@ test('stages typing and calculator without requests, then sends one batch',async
 });
 test('failed save keeps pending changes and permits retry',async()=>{
  const ui=setup();ui.input.value='23';ui.input.handlers.input();ui.fail=true;await ui.button.handlers.click();assert.equal(ui.reloaded,false);assert.equal(ui.status.textContent,'Conflitto');assert.equal(ui.input.value,'23');assert.equal(ui.button.disabled,false);
- ui.mode.checked=false;ui.mode.handlers.change();assert.equal(ui.mode.checked,true);
+ let prevented=false;ui.form.handlers.submit({preventDefault(){prevented=true;}});assert.equal(prevented,true);assert.equal(ui.request.changes[0].qty,23);
  ui.fail=false;await ui.button.handlers.click();assert.equal(ui.reloaded,true);
 });

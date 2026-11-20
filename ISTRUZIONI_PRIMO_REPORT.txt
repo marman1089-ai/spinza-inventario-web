@@ -1,0 +1,40 @@
+PRIMO PERIODO CUCINA: QUANTITÀ INIZIALI + PRIMO REPORT
+
+Conserva il database corrente. Pubblica tutti i file dell'aggiornamento nei
+percorsi indicati e ridistribuisci il servizio Render. Questo aggiornamento
+richiede la precedente integrazione AI fatture cucina; la versione completa
+include già tutti i file necessari.
+
+COME USARLO
+1. Come admin scegli il negozio e apri il PRIMO report cucina archiviato.
+2. Nel riquadro Consumo stimato della cucina, inserisci la Data delle quantità
+   iniziali (inizio giornata): è la data da cui erano valide le quantità che
+   avevi scritto prima del primo conteggio. Premi Salva data iniziale.
+3. Le quantità iniziali vengono prese dallo storico conservato PRIMA del primo
+   conteggio, non dall'inventario attuale. La data viene salvata definitivamente,
+   resta modificabile dall'admin e non viene inventata dal software.
+4. Il primo periodo va da questa data fino al primo conteggio (fine giornata).
+   Sono incluse le fatture di entrambi i giorni estremi.
+5. Premi Leggi con AI le fatture di questo periodo. Vengono selezionati soltanto
+   i documenti di quel negozio e di quelle date. I documenti già letti o completati
+   vengono saltati. Non viene letto l'intero archivio.
+6. Verifica prodotti e conversioni e conferma gli arrivi. Torna al report con il
+   collegamento Torna al report del periodo per vedere i consumi aggiornati.
+7. I periodi successivi usano automaticamente il conteggio precedente e quello
+   successivo. Le fatture del giorno del conteggio precedente sono escluse,
+   perché il conteggio è archiviato come fine giornata: non vengono sommate due volte.
+
+Non serve attendere due report salvati per il primo confronto: le quantità
+iniziali conservate fanno da primo punto. Se un vecchio report NON conserva
+quelle quantità, il sistema lo segnala. Non è corretto ricostruirle dalle
+quantità di oggi: serviranno i dati iniziali originali.
+
+Il risultato resta stimato finché ci sono fatture non controllate o mancanti.
+La lettura usa credito API; i test locali hanno usato risposte simulate.
+I dati riconosciuti devono essere verificati prima di confermare gli arrivi.
+Non vengono cambiate le giacenze attuali, le ricevute o le chiusure di cassa.
+
+VERIFICHE
+4 nuovi test superati: primo report e data persistente, consumo dalle quantità
+iniziali, fatture limitate all'intervallo, permessi/date, periodi successivi.
+Non è stato installato online né consumato credito API reale.

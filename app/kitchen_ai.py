@@ -192,7 +192,10 @@ def install(app,api):
         return user
     def csrf(request,form):
         if not request.session.get('kitchen_ai_csrf') or not secrets.compare_digest(str(form.get('csrf','')),request.session['kitchen_ai_csrf']):raise HTTPException(403,'Ricarica la pagina e riprova.')
-    def back(store,week,doc_id=0):return '/inventario/fatture-settimana?'+urlencode(dict(store=store,week=week,doc=doc_id))
+    def back(store,week,doc_id=0,report_id=None):
+        params=dict(store=store,week=week,doc=doc_id)
+        if str(report_id or '').isdigit() and int(report_id)>0:params['report_id']=int(report_id)
+        return '/inventario/fatture-settimana?'+urlencode(params)
     @app.on_event('startup')
     def startup():
         api['_ensure_kitchen_invoice_tables']()
@@ -209,8 +212,8 @@ def install(app,api):
         if doc_id<0:raise HTTPException(422,'Fattura non valida.')
         force=form.get('force')=='1' and bool(doc_id)
         await run_in_threadpool(enqueue_docs,api,store,week,doc_id,user['username'],force)
-        if request.headers.get('accept')=='application/json':return JSONResponse({'redirect':back(store,week,doc_id)})
-        return RedirectResponse(back(store,week,doc_id),303)
+        if request.headers.get('accept')=='application/json':return JSONResponse({'redirect':back(store,week,doc_id,form.get('report_id'))})
+        return RedirectResponse(back(store,week,doc_id,form.get('report_id')),303)
     @app.get('/inventario/fatture-settimana/ai/stato')
     def status(request:Request,store:str,week:str):
         auth(request,store);week=api['_kitchen_week'](week)
@@ -229,7 +232,7 @@ def install(app,api):
             transaction(conn);cur=conn.cursor()
             job=cur.execute(f'SELECT * FROM kitchen_invoice_ai_jobs WHERE doc_id={ph()} AND store={ph()}'+(' FOR UPDATE' if using_postgres() else ''),(doc_id,store)).fetchone()
             if not job:raise HTTPException(404,'Lettura non trovata.')
-            if job['state']=='applied':return RedirectResponse(back(store,job['week_start'],doc_id),303)
+            if job['state']=='applied':return RedirectResponse(back(store,job['week_start'],doc_id,form.get('report_id')),303)
             if job['state']!='ready' or job['revision']!=revision:raise HTTPException(409,'La lettura è cambiata. Ricarica la pagina.')
             try:original=source(cur,doc_id,store)
             except ValueError:raise HTTPException(409,'Fattura non più disponibile. Nessun arrivo salvato.')
@@ -260,5 +263,5 @@ def install(app,api):
             proposal.update(reviewed_lines=reviewed_lines,reviewed_by=user['username'],reviewed_at=now(),confirmed_date=invoice_date,confirmed_supplier=supplier)
             cur.execute(f"UPDATE kitchen_invoice_ai_jobs SET state='applied',week_start={ph()},payload={ph()},updated_at={ph()} WHERE doc_id={ph()}",(week,json.dumps(proposal,ensure_ascii=False),now(),doc_id))
             api['_log'](cur,store=store,username=user['username'],action='FATTURA_CUCINA_AI_CONFERMATA',category='FATTURE',name=f'Fattura #{doc_id}: arrivi verificati per il report consumi',delta=0)
-        if request.headers.get('accept')=='application/json':return JSONResponse({'redirect':back(store,week,doc_id)})
-        return RedirectResponse(back(store,week,doc_id),303)
+        if request.headers.get('accept')=='application/json':return JSONResponse({'redirect':back(store,week,doc_id,form.get('report_id'))})
+        return RedirectResponse(back(store,week,doc_id,form.get('report_id')),303)

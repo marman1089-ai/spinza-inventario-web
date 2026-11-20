@@ -47,4 +47,66 @@ class OrganizationTests(unittest.TestCase):
         self.login(uid=2)
         self.assertEqual(self.client.get('/report-chiusura?store=ALL').status_code,403)
         self.assertEqual(self.client.get('/report-chiusura').status_code,200)
+    def test_receipt_archive_accepts_postgres_date_values(self):
+        from contextlib import contextmanager
+        from datetime import date
+        from unittest.mock import patch
+        from app import cash_documents,cash_treasury,db
+        with db.connect() as conn:
+            cur=conn.cursor();cash_treasury.ensure_schema(cur);cash_documents.schema(cur)
+            cur.execute("INSERT INTO cash_company_spending VALUES('old-company','2025-02-01','Spesa aziendale',1000,0,'testadmin')")
+            cur.execute("INSERT INTO cash_expenses(store,flow_date,category,supplier,payment_method,amount,notes,created_by) VALUES('spinza','2026-01-03','Varie','Fornitore','Contanti',30,'','testadmin')")
+        class Cursor:
+            def __init__(self,raw): self.raw=raw;self.date_values=False
+            def execute(self,sql,params=()):
+                self.date_values='FROM cash_expenses WHERE' in sql
+                self.raw.execute(sql,params);return self
+            def fetchall(self):
+                rows=self.raw.fetchall()
+                if self.date_values:
+                    for row in rows: row['flow_date']=date.fromisoformat(row['flow_date'])
+                return rows
+        class Connection:
+            def __init__(self,raw):self.raw=raw
+            def cursor(self):return Cursor(self.raw.cursor())
+        @contextmanager
+        def postgres_dates():
+            with db.connect() as conn: yield Connection(conn)
+        with patch.object(cash_documents,'connect',postgres_dates):
+            response=self.client.get('/contanti-nei-negozi/ricevute')
+            self.assertEqual(response.status_code,200)
+            self.assertIn('2026-01-03',response.text)
+            self.assertIn('2025-02-01',response.text)
+    def test_fill_from_spending_preserve_manual_values_and_delete(self):
+        with fixture.db.connect() as c:
+            cur=c.cursor();cash_treasury.ensure_schema(cur)
+            cur.execute("INSERT INTO cash_company_spending VALUES('split','2025-03-02','Spesa ripartita',1500,500,'testadmin')")
+        page=self.client.get('/contanti-nei-negozi/ricevute?spending_token=split')
+        self.assertEqual(page.status_code,200)
+        csrf=re.search(r'name="csrf" value="([^"]+)"',page.text)[1]
+        self.assertIn('value="2025-03-02"',page.text)
+        self.assertIn('value="Spesa ripartita"',page.text)
+        self.assertIn('Reburger Slow Fast Food SRL · € 15,00 + S&amp;C SRLS · € 5,00',page.text)
+        def upload(**fields):
+            return self.client.post('/contanti-nei-negozi/ricevute',data=dict(csrf=csrf,spending_token='split',**fields),files={'files':('receipt.pdf',self.pdf(),'application/pdf')},follow_redirects=False)
+        self.assertEqual(upload().status_code,303)
+        row=self.sql('SELECT * FROM cash_expense_documents')[0]
+        self.assertEqual((row['receipt_date'],row['description'],row['store']),('2025-03-02','Spesa ripartita','aziende'))
+        self.assertIn('S&C SRLS',row['payer'])
+        self.assertEqual(upload(day='2024-01-01',description='Descrizione manuale',store='spinza',payer='Pagante manuale').status_code,303)
+        manual=self.sql('SELECT * FROM cash_expense_documents ORDER BY id DESC')[0]
+        self.assertEqual((manual['receipt_date'],manual['description'],manual['store'],manual['payer']),('2024-01-01','Descrizione manuale','spinza','Pagante manuale'))
+        path=f"/contanti-nei-negozi/ricevute/{row['id']}/elimina"
+        self.assertEqual(self.client.post(path,data={'csrf':'wrong'}).status_code,403)
+        self.login(uid=2)
+        self.assertEqual(self.client.post(path,data={'csrf':csrf}).status_code,403)
+        self.login()
+        page=self.client.get('/contanti-nei-negozi/ricevute')
+        csrf=re.search(r'name="csrf" value="([^"]+)"',page.text)[1]
+        self.assertEqual(self.client.post(path,data={'csrf':csrf},follow_redirects=False).status_code,303)
+        self.assertEqual(len(self.sql('SELECT * FROM cash_expense_documents')),1)
+        self.assertEqual(len(self.sql('SELECT * FROM cash_company_spending')),1)
+        self.assertEqual(self.client.get(f"/contanti-nei-negozi/ricevute/{row['id']}").status_code,404)
+        self.assertEqual(self.client.post('/contanti-nei-negozi/ricevute',data=dict(csrf=csrf,day='2023-01-01',store='spinza',description='Indipendente',payer='S&C SRLS'),files={'files':('free.pdf',self.pdf(),'application/pdf')},follow_redirects=False).status_code,303)
+        self.assertEqual(self.sql('SELECT spending_token FROM cash_expense_documents ORDER BY id DESC')[0]['spending_token'],'')
 if __name__=='__main__':unittest.main()
