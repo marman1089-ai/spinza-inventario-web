@@ -1,6 +1,8 @@
 (() => {
   const dock=document.getElementById('inventory-save-dock'); if(!dock)return;
-  const mode=document.getElementById('inventory-defer'), save=document.getElementById('inventory-save-all'), status=document.getElementById('inventory-save-status');
+  // Keep the fixed bar outside the animated inventory wrapper.
+  document.body.appendChild(dock);
+  const save=document.getElementById('inventory-save-all'), status=document.getElementById('inventory-save-status');
   const forms=[...document.querySelectorAll('.inv-set-form')], pending=new Map(); let busy=false;
   function formFor(id){return forms.find(f=>Number(f.dataset.itemId)===Number(id));}
   function refresh(){save.disabled=busy||!pending.size;status.textContent=busy?'Salvataggio in corso…':pending.size?`${pending.size} prodotti da salvare`:'Nessuna modifica da salvare';}
@@ -13,18 +15,17 @@
   }
   forms.forEach(form=>{
     form.elements.qty.min='0';form.elements.qty.step='any';
-    form.elements.qty.addEventListener('input',()=>{if(mode.checked)stage(form);});
-    form.addEventListener('submit',e=>{if(mode.checked||busy){e.preventDefault();if(!busy)stage(form);}});
+    form.elements.qty.addEventListener('input',()=>{if(!busy)stage(form);});
+    form.addEventListener('submit',e=>{e.preventDefault();if(!busy)stage(form);if(window.SpinzaUIFinishLoading)window.SpinzaUIFinishLoading();});
   });
-  window.inventoryBatchCurrent=(id,current)=>mode.checked?Number(formFor(id)?.elements.qty.value??current):Number(current);
-  window.inventoryBatchStage=(id,qty)=>{if(!mode.checked)return false;if(busy)return true;const form=formFor(id);if(!form)return false;form.elements.qty.value=String(Math.round(qty*1e8)/1e8);stage(form);return true;};
-  mode.addEventListener('change',()=>{if(pending.size&&!mode.checked){mode.checked=true;status.textContent='Salva prima le modifiche in attesa.';}else if(mode.checked){forms.forEach(stage);}else{status.textContent='Salvataggio singolo attivo: usa ✓ su ogni prodotto.';}});
+  window.inventoryBatchCurrent=(id,current)=>Number(formFor(id)?.elements.qty.value??current);
+  window.inventoryBatchStage=(id,qty)=>{if(busy)return true;const form=formFor(id);if(!form)return false;form.elements.qty.value=String(Math.round(qty*1e8)/1e8);stage(form);return true;};
   window.addEventListener('beforeunload',e=>{if(pending.size){e.preventDefault();e.returnValue='';}});
   save.addEventListener('click',async()=>{
     if(busy)return;
     if(forms.some(f=>!f.elements.qty.checkValidity())){forms.find(f=>!f.elements.qty.checkValidity()).elements.qty.reportValidity();return;}
     if(!pending.size)return;
-    busy=true;const controls=[...document.querySelectorAll('.inv-set-form input,.inv-action-cell button,#inventory-defer')];controls.forEach(c=>c.disabled=true);refresh();
+    busy=true;const controls=[...document.querySelectorAll('.inv-set-form input,.inv-action-cell button')];controls.forEach(c=>c.disabled=true);refresh();
     try{
       const response=await fetch('/inventario/salva-quantita',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csrf:dock.dataset.csrf,changes:[...pending.values()]})});
       const result=await response.json();if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:'Salvataggio non riuscito. Le modifiche restano in attesa.');
