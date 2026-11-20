@@ -376,12 +376,17 @@ def install(app, api):
             raise HTTPException(422, 'Controlla descrizione, importo e percentuale (da 0 a 100).')
         if not re.fullmatch(r'[A-Za-z0-9_-]{43}',token):
             raise HTTPException(422, 'Ricarica il modulo della spesa.')
+        files=[f for f in form.getlist('files') if getattr(f,'filename','')]
+        document=await api['_prepare_document_upload'](files,'ricevuta') if files else None
         reburger = (value*share+5000)//10000
         with connect() as conn:
-            conn.cursor().execute(f"""
+            inserted=conn.cursor().execute(f"""
                 INSERT INTO cash_company_spending(token,day,description,reburger_cents,sc_cents,recorded_by)
-                VALUES({p()},{p()},{p()},{p()},{p()},{p()}) ON CONFLICT(token) DO NOTHING
-            """, (token,day,description,reburger,value-reburger,user['username']))
+                VALUES({p()},{p()},{p()},{p()},{p()},{p()}) ON CONFLICT(token) DO NOTHING RETURNING token
+            """, (token,day,description,reburger,value-reburger,user['username'])).fetchone()
+            if inserted and document:
+                from .cash_documents import save
+                save(conn.cursor(),day,'aziende',description,token,document,user)
         return RedirectResponse(root+'/spese?'+urlencode(dict(day=day)),303)
 
     @app.post(root+'/spese/elimina')

@@ -21,7 +21,7 @@
 <style>.cash-ok{color:#22a06b}.cash-short{color:#e5484d}.cash-menu{display:flex;gap:10px;flex-wrap:wrap}</style>
 <div class="ct-page">
 <header class="card ct-hero"><h1>Contanti nei negozi</h1></header>
-<nav class="cash-menu" aria-label="Contanti nei negozi">
+<nav class="cash-menu" aria-label="Contanti nei negozi"><a class="btn2" href="/contanti-nei-negozi/ricevute">Archivio ricevute</a>
 <a class="btn2" href="{{ root }}/incassi"{% if view=='receipts' %} aria-current="page"{% endif %}>Registra incassi</a>
 <a class="btn2" href="{{ root }}/spese"{% if view=='spending' %} aria-current="page"{% endif %}>Registra spesa in cash</a>
 <a class="btn2" href="{{ root }}/bilanci"{% if view=='balances' %} aria-current="page"{% endif %}>Bilanci cash</a>
@@ -68,7 +68,7 @@
 {% elif view=='spending' %}
 <section class="card">
 <h2>Registra spesa in cash</h2>
-<form class="ct-form" method="post" action="{{ root }}/spese">
+<form class="ct-form" method="post" action="{{ root }}/spese" enctype="multipart/form-data">
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <input type="hidden" name="submission" value="{{ submission }}">
 <input type="hidden" name="day" value="{{ day }}">
@@ -76,14 +76,14 @@
 <label>Importo totale (€)<input name="amount" inputmode="decimal" pattern="[0-9]{1,9}([.,][0-9]{1,2})?" required></label>
 <label>Quota pagata con contanti Reburger (%)<input type="number" name="reburger_percent" min="0" max="100" step="0.01" required></label>
 <p>Il resto è a carico di S&amp;C (Spinza). Inserisci 50 per dividere a metà, 100 per solo Reburger o 0 per solo Spinza.</p>
-<button class="btn">Salva spesa del {{ day }}</button>
+<label>Ricevuta facoltativa (foto o PDF)<input type="file" name="files" multiple accept="image/*,application/pdf"></label><p class="muted">Puoi aggiungerla anche in seguito dall’archivio ricevute.</p><button class="btn">Salva spesa del {{ day }}</button>
 </form>
 </section>
 <section class="card ct-scroll">
 <h2>Archivio spese · {{ day[:7] }}</h2>
 {% if expenses %}
 <table><thead><tr><th>Data</th><th>Spesa</th><th>Totale</th><th>Reburger</th><th>S&amp;C</th><th>Azioni</th></tr></thead><tbody>
-{% for row in expenses %}<tr><td>{{ row.day }}</td><th scope="row">{{ row.description }}</th><td>{{ euro(row.reburger_cents+row.sc_cents) }}</td><td>{{ euro(row.reburger_cents) }}</td><td>{{ euro(row.sc_cents) }}</td><td>{{ delete_action('spese', row, 'Elimina spesa') }}</td></tr>{% endfor %}
+{% for row in expenses %}<tr><td>{{ row.day }}</td><th scope="row">{{ row.description }}</th><td>{{ euro(row.reburger_cents+row.sc_cents) }}</td><td>{{ euro(row.reburger_cents) }}</td><td>{{ euro(row.sc_cents) }}</td><td><a class="btn2" href="/contanti-nei-negozi/ricevute?spending_token={{ row.token }}">Ricevute / aggiungi</a>{{ delete_action('spese', row, 'Elimina spesa') }}</td></tr>{% endfor %}
 </tbody></table>
 {% else %}<p>Nessuna spesa registrata per questo mese.</p>{% endif %}
 </section>

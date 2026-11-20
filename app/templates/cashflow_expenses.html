@@ -43,7 +43,7 @@
       <form method="post" action="/gestionale/uscite/ricategorizza" style="margin:0;">
         <button class="btn2" type="submit">Ricalcola categorie già inserite</button>
       </form>
-      <a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Home gestionale</a>
+      {% if user.role=='admin' %}<a href="/contanti-nei-negozi/ricevute" class="btn2">Ricevute contanti</a>{% endif %}<a href="/gestionale" class="btn2" style="text-decoration:none;display:inline-block;">Home gestionale</a>
       <a href="/gestionale/incassi" class="btn2" style="text-decoration:none;display:inline-block;">Incassi</a>
     </div>
   </div>
@@ -202,7 +202,9 @@
     <table>
       <thead><tr><th>Data</th><th>Sede</th><th>Categoria</th><th>Fornitore</th><th>Metodo</th><th>Importo</th><th>Note</th><th>Creata da</th>{% if can_edit_management %}<th>Azione</th>{% endif %}</tr></thead>
       <tbody>
-        {% for r in rows %}
+        {% for group in rows|groupby('store') %}
+        {% if brand=='ALL' %}<tr><th colspan="9">{{ stores.get(group.grouper,group.grouper) }} · {{ group.list|length }} uscite</th></tr>{% endif %}
+        {% for r in group.list %}
         <tr>
           <td>{{ r.flow_date }}</td>
           <td>{{ stores[r.store] if r.store in stores else r.store }}</td>
@@ -210,7 +212,7 @@
           <td>{{ r.supplier or '-' }}</td>
           <td>{{ r.payment_method or '-' }}</td>
           <td><strong>€ {{ '%.2f'|format(r.amount or 0) }}</strong></td>
-          <td>{{ r.notes or '-' }}</td>
+          <td>{{ r.notes or '-' }}{% if user.role=='admin' and (r.payment_method or '')|lower in ['contanti','cash','contante'] %}<br><a href="/contanti-nei-negozi/ricevute?spending_token=expense:{{ r.id }}">Ricevute / aggiungi</a>{% endif %}</td>
           <td>{{ r.created_by }}</td>
           {% if can_edit_management %}
           <td>
@@ -220,6 +222,7 @@
           </td>
           {% endif %}
         </tr>
+        {% endfor %}
         {% else %}
         <tr><td colspan="9" class="muted">Ancora nessuna uscita registrata.</td></tr>
         {% endfor %}

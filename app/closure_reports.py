@@ -161,8 +161,9 @@ def install(app, api):
     @app.get('/report-chiusura')
     def index(request:Request, store:str='', start:str='', end:str='', saved:bool=False, month:str='', day:str='', deleted:bool=False):
         user,scope=auth(request)
-        selected=store or (scope if scope!='ALL' else next(s for s in stores if s!='ALL'))
-        allowed(scope,selected)
+        selected=store or scope
+        if selected != 'ALL': allowed(scope,selected)
+        elif scope != 'ALL': raise HTTPException(403, 'Negozio non consentito.')
         today=datetime.now(ZoneInfo('Europe/Rome')).date()
         try:
             selected_day=date.fromisoformat(day) if day else None
@@ -175,6 +176,24 @@ def install(app, api):
                 try: date.fromisoformat(d)
                 except ValueError: raise HTTPException(422,'Data non valida.')
         if start and end and start>end: raise HTTPException(422,'Periodo non valido.')
+        if selected == 'ALL':
+            first=anchor.isoformat(); last=anchor.replace(day=calendar.monthrange(anchor.year,anchor.month)[1]).isoformat()
+            lo=day or start or first; hi=day or end or last
+            with connect() as conn:
+                reports=conn.cursor().execute(f"SELECT r.*,v.reviewed_at, v.report_id AS review_id FROM closure_reports r LEFT JOIN closure_report_reviews v ON v.report_id=r.id WHERE closure_date>={ph()} AND closure_date<={ph()} ORDER BY closure_date DESC,id DESC",(lo,hi)).fetchall()
+            sections=[]
+            for key,label in stores.items():
+                if key=='ALL': continue
+                items=[dict(r) for r in reports if r['store']==key]
+                for item in items: item['lines']=json.loads(item['lines_json'])
+                sections.append(dict(key=key,label=label,rows=items,total=sum(r['total_cents'] for r in items)))
+            days=[]
+            cursor=date.fromisoformat(lo)
+            while cursor<=date.fromisoformat(hi):
+                value=cursor.isoformat()
+                days.append(dict(day=value,states=[dict(store=s['key'],rows=[r for r in s['rows'] if r['closure_date']==value]) for s in sections]))
+                cursor+=timedelta(days=1)
+            return api['render']('closure_reports_all.html',user=user,brand=scope,stores=stores,sections=sections,days=list(reversed(days)),start=lo,end=hi,month=anchor.strftime('%Y-%m'))
         with connect() as conn:
             cur=conn.cursor(); names=channels(cur,selected)
             sql=f'SELECT * FROM closure_reports WHERE store={ph()}'; params=[selected]

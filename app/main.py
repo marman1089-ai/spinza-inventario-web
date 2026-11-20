@@ -41,6 +41,8 @@ templates = Environment(
 
 def render(name: str, **ctx):
     request = ctx.get('request') or _render_request.get()
+    if name == 'inventario.html' and request is not None:
+        ctx['inventory_batch_csrf'] = request.session.setdefault('inventory_batch_csrf', secrets.token_urlsafe(32))
     if request is not None and ctx.get('user'):
         selected = request.session.get('active_store') if ctx['user'].get('role') == 'admin' else ctx['user'].get('store')
         ctx.setdefault('active_store', selected or 'spinza')
@@ -5881,7 +5883,7 @@ def _archive_descendant_ids(cur, scope: str, folder_id: int) -> list[int]:
 
 
 @app.get("/file-archiviati", response_class=HTMLResponse)
-def archive_files_home(request: Request, folder_id: int = 0, q: str = "", ok: str = "", error: str = ""):
+def archive_files_home(request: Request, folder_id: int = 0, q: str = "", ok: str = "", error: str = "", page: int = 1):
     user = _archive_admin_user(request)
     if not user:
         return RedirectResponse("/gestionale", status_code=HTTP_303_SEE_OTHER)
@@ -5898,6 +5900,19 @@ def archive_files_home(request: Request, folder_id: int = 0, q: str = "", ok: st
             return RedirectResponse(_archive_back_url(error="Cartella non trovata."), status_code=HTTP_303_SEE_OTHER)
 
         ph = _ph()
+        page_size=48
+        file_filter=f"store={ph}"
+        file_params=[scope]
+        if q:
+            file_filter+=f" AND LOWER(filename) LIKE {ph}";file_params.append(f"%{q.lower()}%")
+        elif folder_id:
+            file_filter+=f" AND folder_id={ph}";file_params.append(int(folder_id))
+        else:
+            file_filter+=" AND folder_id IS NULL"
+        matched_files=int(cur.execute(f"SELECT COUNT(*) AS n FROM archive_files WHERE {file_filter}",tuple(file_params)).fetchone()['n'])
+        total_pages=max(1,(matched_files+page_size-1)//page_size)
+        page=max(1,min(page,total_pages))
+        offset=(page-1)*page_size
         if q:
             like = f"%{q.lower()}%"
             folders = [dict(r) for r in cur.execute(
@@ -5905,8 +5920,8 @@ def archive_files_home(request: Request, folder_id: int = 0, q: str = "", ok: st
                 (scope, like),
             ).fetchall()]
             files = [dict(r) for r in cur.execute(
-                f"SELECT * FROM archive_files WHERE store={ph} AND LOWER(filename) LIKE {ph} ORDER BY LOWER(filename), id",
-                (scope, like),
+                f"SELECT id, store, folder_id, filename, content_type, size_bytes, created_by, ts FROM archive_files WHERE store={ph} AND LOWER(filename) LIKE {ph} ORDER BY LOWER(filename), id LIMIT {ph} OFFSET {ph}",
+                (scope, like, page_size, offset),
             ).fetchall()]
         else:
             folder_clause, parent_params = _archive_parent_clause(folder_id or None)
@@ -5915,8 +5930,8 @@ def archive_files_home(request: Request, folder_id: int = 0, q: str = "", ok: st
                 (scope, *parent_params),
             ).fetchall()]
             files = [dict(r) for r in cur.execute(
-                f"SELECT * FROM archive_files WHERE store={ph} AND " + (f"folder_id={ph}" if folder_id else "folder_id IS NULL") + " ORDER BY LOWER(filename), id",
-                ((scope, int(folder_id)) if folder_id else (scope,)),
+                f"SELECT id, store, folder_id, filename, content_type, size_bytes, created_by, ts FROM archive_files WHERE store={ph} AND " + (f"folder_id={ph}" if folder_id else "folder_id IS NULL") + f" ORDER BY LOWER(filename), id LIMIT {ph} OFFSET {ph}",
+                ((scope, int(folder_id), page_size, offset) if folder_id else (scope, page_size, offset)),
             ).fetchall()]
 
         # Mappa delle cartelle per mostrare dove si trova un risultato di ricerca.
@@ -5980,6 +5995,9 @@ def archive_files_home(request: Request, folder_id: int = 0, q: str = "", ok: st
         breadcrumbs=breadcrumbs,
         folders=folders,
         files=files,
+        page=page, total_pages=total_pages, matched_files=matched_files,
+        prev_page_url='/file-archiviati?'+urlencode(dict(folder_id=folder_id,q=q,page=page-1)) if page>1 else '',
+        next_page_url='/file-archiviati?'+urlencode(dict(folder_id=folder_id,q=q,page=page+1)) if page<total_pages else '', 
         destinations=destinations,
         q=q,
         ok=ok,
@@ -6241,12 +6259,17 @@ async def archive_upload(request: Request):
             )
             saved += 1
 
+    def finished(url):
+        if request.headers.get('accept')=='application/json':
+            from fastapi.responses import JSONResponse
+            return JSONResponse({'redirect':url,'saved':saved})
+        return RedirectResponse(url,status_code=HTTP_303_SEE_OTHER)
     if rejected:
         detail = "; ".join(rejected[:3])
         if len(rejected) > 3:
             detail += f"; +{len(rejected)-3} altri"
-        return RedirectResponse(_archive_back_url(folder_id, ok=f"Caricati {saved} file.", error=detail), status_code=HTTP_303_SEE_OTHER)
-    return RedirectResponse(_archive_back_url(folder_id, ok=f"Caricati {saved} file."), status_code=HTTP_303_SEE_OTHER)
+        return finished(_archive_back_url(folder_id, ok=f"Caricati {saved} file.", error=detail))
+    return finished(_archive_back_url(folder_id, ok=f"Caricati {saved} file."))
 
 
 @app.post("/file-archiviati/testo")
@@ -10085,3 +10108,48 @@ install_admin_dashboard(app, globals())
 
 from .cash_treasury import install as install_cash_treasury
 install_cash_treasury(app, globals())
+
+from .cash_documents import install as install_cash_documents
+install_cash_documents(app, globals())
+
+
+@app.post('/inventario/salva-quantita')
+async def inventory_save_quantities(request: Request):
+    import math
+    user=require_login(request)
+    if not user: raise HTTPException(401,'Accedi al gestionale.')
+    payload=await request.json()
+    if not isinstance(payload,dict) or not secrets.compare_digest(str(payload.get('csrf','')),str(request.session.get('inventory_batch_csrf') or secrets.token_urlsafe(32))):
+        raise HTTPException(403,'Sessione scaduta: ricarica la pagina dopo aver annotato le modifiche.')
+    changes=payload.get('changes')
+    if not isinstance(changes,list) or not changes or len(changes)>2000: raise HTTPException(422,'Seleziona da 1 a 2000 prodotti.')
+    scope=request.session.get('active_store') if is_admin(request) else user.get('store')
+    parsed=[];seen=set()
+    for item in changes:
+        try:
+            item_id=int(item['id']); qty=float(item['qty']); original=float(item['original']); store=str(item['store'])
+            if not math.isfinite(qty) or not math.isfinite(original) or qty<0 or item_id in seen: raise ValueError()
+        except (ValueError,TypeError,KeyError): raise HTTPException(422,'Controlla le quantità inserite.')
+        if store not in STORES or store=='ALL' or (scope!='ALL' and store!=scope): raise HTTPException(403,'Negozio non consentito.')
+        seen.add(item_id);parsed.append((item_id,store,qty,original))
+    ph=_ph()
+    def persist():
+        with connect() as conn:
+            cur=conn.cursor()
+            if not using_postgres(): cur.execute('BEGIN IMMEDIATE')
+            validated=[]
+            for item_id,store,qty,original in sorted(parsed):
+                row=cur.execute(f'SELECT * FROM products WHERE id={ph} AND store={ph}'+(' FOR UPDATE' if using_postgres() else ''),(item_id,store)).fetchone()
+                if not row: raise HTTPException(409,'Un prodotto è stato eliminato. Nessuna modifica salvata.')
+                if not math.isclose(float(row.get('qty') or 0),original,rel_tol=0,abs_tol=1e-8):
+                    raise HTTPException(409,f"{row['name']}: quantità modificata da un altro utente. Nessuna modifica salvata; annota i valori e ricarica.")
+                validated.append((row,store,qty,original))
+            for row,store,qty,original in validated:
+                info=_collapse_product_rows_for_single_position(cur,row=row,effective_store=store,new_qty=qty)
+                delta=qty-original
+                _log(cur,store=store,username=user['username'],action='CARICO' if delta>0 else 'SCARICO' if delta<0 else 'INVARIATO',category=info['category'],name=f"{info['name']} | modifica manuale {original:g} → {qty:g}",delta=delta,area=row.get('area') or 'prodotti')
+        return {'saved':len(parsed)}
+    return await run_in_threadpool(persist)
+
+from .archive_media import install as install_archive_media
+install_archive_media(app, globals())

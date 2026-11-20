@@ -155,7 +155,7 @@
           <div class="inv-action-cell">
             <button class="mini inv-icon-btn" type="button" title="Calcolatrice" onclick="openCalc({{ p.id }}, {{ g.total }}, '{{ jsq(g.unit or '') }}', '{{ p.store }}')">🧮</button>
 
-            <form method="post" action="/items/{{ p.id }}/set" class="inv-set-form">
+            <form method="post" action="/items/{{ p.id }}/set" class="inv-set-form" data-original="{{ p.qty }}" data-item-id="{{ p.id }}">
               <input type="hidden" name="next_url" value="" />
               <input type="hidden" name="store" value="{{ p.store }}" />
               <input name="qty" type="number" step="0.1" value="{{ fmt_input(g.total) }}" inputmode="decimal" aria-label="Quantità" />
@@ -298,7 +298,7 @@
 
     function openCalc(id, currentQty, unitStr, storeCode) {
       _calcItemId = id;
-      _calcCurrent = Number(currentQty) || 0;
+      _calcCurrent = window.inventoryBatchCurrent ? window.inventoryBatchCurrent(id, currentQty) : (Number(currentQty) || 0);
       _calcSign = -1;
       _calcUnit = (unitStr || '');
       _calcStore = (storeCode || '');
@@ -374,6 +374,7 @@
         document.getElementById('calcResult').textContent = 'Scrivi una quantità maggiore di 0.';
         return;
       }
+      if (window.inventoryBatchStage && window.inventoryBatchStage(_calcItemId, Math.max(0, _calcCurrent + _calcSign * n))) { closeCalc(); return; }
       _calcSubmitting = true;
       const delta = _calcSign * n;
       const f = document.getElementById('calcForm');
@@ -763,5 +764,15 @@
     .inv-total-cell{min-width:0;max-width:83px;}
   }
 </style>
+
+
+{% if can_edit %}
+<style>
+body{padding-bottom:130px!important}.inv-save-dock{position:fixed;bottom:calc(12px + env(safe-area-inset-bottom));right:16px;left:16px;z-index:5400;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--panel,#192131);color:var(--text,#fff);border:2px solid var(--line-soft,#64748b);border-radius:16px;padding:12px 16px;box-shadow:0 8px 35px #0008}.inv-save-dock label{display:flex;align-items:center;gap:8px}.inv-save-dock input{width:auto!important}.inv-pending{outline:2px solid #eab308}.inv-save-dock button{min-height:44px}.inv-save-dock p{margin:0;overflow-wrap:anywhere}.inv-save-dock>div{min-width:0;flex:1 1 260px}.inv-save-dock button{flex:0 0 auto}@media(max-width:600px){body{padding-bottom:200px!important}.inv-save-dock{left:8px;right:8px;padding:10px;gap:8px;bottom:calc(8px + env(safe-area-inset-bottom))}.inv-save-dock button{width:100%}.inv-save-dock small{font-size:12px}}.inv-save-dock small{display:block}
+</style>
+<aside class="inv-save-dock" id="inventory-save-dock" data-csrf="{{ inventory_batch_csrf }}" aria-label="Salvataggio inventario">
+<div><label><input type="checkbox" id="inventory-defer" checked> Salva tutto alla fine</label><small>Quantità e calcolatrice: modifica i prodotti, poi salva una sola volta.</small><p id="inventory-save-status" role="status" aria-live="polite">Nessuna modifica da salvare</p></div><button type="button" class="btn" id="inventory-save-all" disabled>Salva tutte le modifiche</button>
+</aside><script src="/static/js/inventory-batch.js?v=1" defer></script>
+{% endif %}
 
 {% endblock %}

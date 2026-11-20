@@ -130,11 +130,11 @@
 
   <div class="card archive-drop">
     <h3 style="margin-top:0">⬆️ Carica file</h3>
-    <form method="post" action="/file-archiviati/upload" enctype="multipart/form-data">
+    <form method="post" action="/file-archiviati/upload" enctype="multipart/form-data" id="archive-upload-form">
       <input type="hidden" name="folder_id" value="{{ current_folder.id if current_folder else '' }}">
       <input type="file" name="files" multiple required>
       <div class="muted" style="margin-top:7px">Puoi selezionare più file insieme.</div>
-      <button class="btn" type="submit" style="margin-top:9px;width:100%">Carica nell'archivio</button>
+      <button class="btn" type="submit" style="margin-top:9px;width:100%">Carica nell'archivio</button><progress id="archive-upload-progress" max="100" value="0" hidden style="width:100%;margin-top:10px" aria-label="Avanzamento caricamento"></progress><p id="archive-upload-status" role="status" aria-live="polite"></p>
     </form>
   </div>
 
@@ -155,7 +155,7 @@
       <h2 style="margin:0 0 5px">{% if q %}Risultati ricerca{% elif current_folder %}📁 {{ current_folder.name }}{% else %}🏠 Archivio principale{% endif %}</h2>
       <div class="muted">{% if q %}La ricerca controlla tutto lo spazio “{{ scope_label }}”.{% else %}Apri una cartella per vedere il suo contenuto. Foto e PDF si visualizzano direttamente qui nel gestionale.{% endif %}</div>
     </div>
-    <div class="pill">{{ folders|length }} cartelle · {{ files|length }} file</div>
+    <div class="pill">{{ folders|length }} cartelle · {{ matched_files }} file</div>
   </div>
 </div>
 
@@ -199,7 +199,7 @@
          data-open-url="/file-archiviati/file/{{ file.id }}/apri"
          data-download-url="/file-archiviati/file/{{ file.id }}/download">
       {% if file.is_image %}
-        <img class="archive-thumb js-preview-trigger" src="/file-archiviati/file/{{ file.id }}/apri" alt="{{ file.filename|e }}" loading="lazy">
+        <img class="archive-thumb js-preview-trigger" src="/file-archiviati/file/{{ file.id }}/anteprima" decoding="async" alt="{{ file.filename|e }}" loading="lazy">
       {% else %}
         <div class="archive-icon">{{ file.icon }}</div>
       {% endif %}
@@ -246,6 +246,7 @@
   </div>
 {% endif %}
 
+{% if total_pages>1 %}<nav class="card" aria-label="Pagine archivio" style="display:flex;gap:12px;align-items:center;justify-content:space-between;margin-top:16px;flex-wrap:wrap">{% if prev_page_url %}<a class="btn2" href="{{ prev_page_url }}">← Precedente</a>{% endif %}<span>Pagina {{ page }} di {{ total_pages }} · {{ matched_files }} file</span>{% if next_page_url %}<a class="btn2" href="{{ next_page_url }}">Successiva →</a>{% endif %}</nav>{% endif %}
 <!-- Visualizzatore: resta dentro la pagina del gestionale -->
 <div id="archiveViewer" class="archive-viewer" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Visualizzatore file">
   <div class="viewer-shell">
@@ -328,7 +329,7 @@
       btn.title = item.name;
       if (index === imageIndex) btn.classList.add('active');
       const thumb = document.createElement('img');
-      thumb.src = item.openUrl;
+      thumb.src = '/file-archiviati/file/' + item.id + '/anteprima';
       thumb.alt = item.name;
       thumb.loading = 'lazy';
       btn.appendChild(thumb);
@@ -441,4 +442,5 @@
   }, {passive:true});
 })();
 </script>
+<script src="/static/js/archive-upload-progress.js?v=1" defer></script>
 {% endblock %}

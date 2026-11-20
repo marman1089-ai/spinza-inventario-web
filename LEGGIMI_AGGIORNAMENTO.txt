@@ -1,0 +1,71 @@
+GESTIONALE AGGIORNATO — RICEVUTE E ORGANIZZAZIONE
+
+NOVITÀ INVENTARIO E PRESTAZIONI
+- Inventario: modalità Salva tutto alla fine, attiva per quantità e calcolatrice.
+- Pulsante fisso in basso, adattato a PC e telefono, con numero di prodotti da salvare.
+- Disattivando la modalità puoi continuare con i salvataggi singoli precedenti.
+- Un solo invio finale per tutte le modifiche; salvataggio atomico.
+- I conflitti con modifiche di altri utenti vengono segnalati senza sovrascriverli.
+- In caso di errore, le modifiche restano nella pagina per riprovare.
+- Se lasci la pagina con modifiche non salvate, il browser chiede conferma.
+- La modalità riguarda le quantità; creazione, anagrafica, ordini e altre operazioni
+  mantengono i propri comandi. Salva le quantità prima di cambiare pagina o filtri.
+- Archivio: gli elenchi e le ricerche leggono solo i metadati, non i file completi.
+- Archivio: 48 file per pagina, con ricerca su tutto l'archivio e navigazione pagine.
+- Archivio: anteprime ridotte con cache limitata in memoria; originali conservati.
+- Archivio: avanzamento invio file e conferma salvataggio, con blocco dei doppi clic.
+- Non sono richiesti servizi aggiuntivi: resta la configurazione hosting esistente.
+- La velocità effettiva dipende anche dalla connessione e dal server utilizzato.
+
+NOVITÀ RICEVUTE E REPORT
+- Menu admin: Ricevute contanti, con data documento e archivio diviso per negozio.
+- In Registra spesa in cash: foto/PDF facoltativi al momento del salvataggio.
+- Puoi caricare ricevute vecchie senza registrare nuovamente la spesa.
+- Puoi collegare ricevute a vecchie spese in cash e alle uscite con metodo Contanti/Cash.
+- Il collegamento si sceglie al caricamento o successivamente con Collega / cambia spesa.
+- Nello storico cash e nelle uscite in contanti: Ricevute / aggiungi.
+- Report chiusura: Tutti i negozi mostra i negozi separati nella stessa pagina,
+  con tabella giornaliera dei report presenti, assenti e da confermare.
+- Nello storico uscite, la vista Tutti separa le righe per negozio.
+- Archivio Spese secondarie e funzioni esistenti conservati.
+
+AGGIORNAMENTO
+Fai una copia della tua installazione e del database corrente.
+Se hai un'installazione già in uso, aggiorna i file app indicati sotto,
+conservando il tuo database e le configurazioni esistenti.
+Non sostituire il database corrente con quelli inclusi nello ZIP originale.
+Per un avvio locale da cartella estratta: AVVIA_SITO_WINDOWS.bat (Python 3.11).
+Su hosting usa lo stesso comando di avvio e le variabili già configurate.
+La nuova tabella delle ricevute viene creata automaticamente all'avvio.
+Nessuna ricevuta caricata genera un movimento contabile aggiuntivo.
+Le ricevute sono riservate agli admin e restano archiviate se una spesa viene eliminata.
+
+FILE APP AGGIORNATI O NUOVI
+app/main.py
+app/cash_treasury.py
+app/closure_reports.py
+app/templates/base.html
+app/templates/cash_daily_counts.html
+app/templates/cashflow_expenses.html
+app/templates/closure_reports.html
+app/templates/inventario.html
+app/templates/file_archiviati.html
+app/cash_documents.py
+app/templates/cash_documents.html
+app/templates/closure_reports_all.html
+app/archive_media.py
+app/static/js/inventory-batch.js
+app/static/js/archive-upload-progress.js
+
+VERIFICHE
+- Test integrazione: upload facoltativo, data passata, collegamento successivo,
+  vecchie uscite in contanti, download admin, accesso negato ai dipendenti,
+  vista tutti i negozi e isolamento dei dipendenti: superati.
+- Test esistente test_closure_reports.py: superato.
+- Inventario: salvataggio multiplo, conflitti atomici, quantità e permessi: superati.
+- Archivio: ricerca senza contenuti binari, paginazione, upload, anteprime,
+  originali e isolamento dei negozi: superati.
+- Client inventario: modifiche in attesa, calcolatrice, salvataggio e ritentativo: superati.
+- Compilazione dei template modificati: superata.
+Verifiche eseguite con database SQLite di prova isolati.
+Non è stata eseguita una verifica visuale in browser né una prova su PostgreSQL.
