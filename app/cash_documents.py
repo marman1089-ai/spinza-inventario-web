@@ -24,8 +24,8 @@ def install(app,api):
         return user
     def csrf(request): return request.session.setdefault('cash_documents_csrf',secrets.token_urlsafe(32))
     def spending_options(cur):
-        options=[dict(token=r['token'],day=r['day'],description=r['description'],amount=(r['reburger_cents']+r['sc_cents'])/100) for r in cur.execute('SELECT * FROM cash_company_spending ORDER BY day DESC').fetchall()]
-        options += [dict(token='expense:'+str(r['id']),day=r['flow_date'],description=(r['supplier'] or r['category'] or r['notes'] or 'Uscita')+' · '+api['STORES'].get(r['store'],r['store']),amount=r['amount']) for r in cur.execute("SELECT * FROM cash_expenses WHERE lower(trim(payment_method)) IN ('cash','contanti','contante') ORDER BY flow_date DESC,id DESC").fetchall()]
+        options=[dict(token=r['token'],day=str(r['day']),description=r['description'],amount=(r['reburger_cents']+r['sc_cents'])/100) for r in cur.execute('SELECT * FROM cash_company_spending ORDER BY day DESC').fetchall()]
+        options += [dict(token='expense:'+str(r['id']),day=str(r['flow_date']),description=(r['supplier'] or r['category'] or r['notes'] or 'Uscita')+' · '+api['STORES'].get(r['store'],r['store']),amount=r['amount']) for r in cur.execute("SELECT * FROM cash_expenses WHERE lower(trim(payment_method)) IN ('cash','contanti','contante') ORDER BY flow_date DESC,id DESC").fetchall()]
         return sorted(options,key=lambda r:r['day'],reverse=True)
     @app.on_event('startup')
     def init():
