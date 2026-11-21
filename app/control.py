@@ -182,7 +182,8 @@ def install(app, api):
         from .startup_guard import needs_schema_sync
         if needs_schema_sync():
             init_control_db()
-        from .document_jobs import enqueue_history, start_worker
+        from .document_jobs import finalize_ready_uploads, start_worker
+        finalize_ready_uploads()
         start_worker()
 
     @app.on_event('shutdown')

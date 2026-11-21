@@ -66,12 +66,12 @@ def install(app,api):
             cur=conn.cursor();schema(cur)
             if using_postgres():cur.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',('kitchen-digital-link:'+store,))
             first,last,initial=period_bounds(cur,report_id,store)
-            docs=cur.execute(f"SELECT d.id,d.doc_date,x.state,x.lines_json FROM invoices_docs d JOIN digital_documents x ON x.kind='fatture' AND x.doc_id=d.id AND x.store=d.store WHERE d.store={ph()} AND d.doc_date {'>=' if initial else '>'} {ph()} AND d.doc_date<={ph()} AND {available_document('fatture','d.id')}",(store,first,last)).fetchall()
+            docs=cur.execute(f"SELECT d.id,d.doc_date,x.state,x.lines_json,CASE WHEN EXISTS(SELECT 1 FROM document_submissions s WHERE s.kind='fatture' AND s.doc_id=d.id AND s.state='confirmed') THEN 1 ELSE 0 END AS automatic FROM invoices_docs d JOIN digital_documents x ON x.kind='fatture' AND x.doc_id=d.id AND x.store=d.store WHERE d.store={ph()} AND d.doc_date {'>=' if initial else '>'} {ph()} AND d.doc_date<={ph()} AND {available_document('fatture','d.id')}",(store,first,last)).fetchall()
             linked=0
             for doc in docs:
                 done=cur.execute(f"SELECT id FROM kitchen_invoice_reviews WHERE doc_id={ph()} AND store={ph()} AND status='done'",(doc['id'],store)).fetchone()
                 if done:continue
-                if doc['state']!='verificato':continue
+                if doc['state']!='verificato' and not doc['automatic']:continue
                 quantities=defaultdict(float);units={}
                 for line in json.loads(doc['lines_json']):
                     if line.get('ignore'):continue

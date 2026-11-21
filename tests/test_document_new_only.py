@@ -36,3 +36,33 @@ class NewOnlyTests(unittest.TestCase):
         self.assertEqual(page.status_code,200)
         self.assertIn(f'/fatture/{did}',page.text)
         self.assertNotIn(f'/schede/fatture/{did}',page.text)
+
+    def test_fast_status_preserves_pending_owner_and_store_permissions(self):
+        did=self.doc()
+        with patch('app.document_workflow.start_worker'):submitted('fatture',did,'spinza','teststaff')
+        self.login(2)
+        response=self.client.get(f'/schede/fatture/{did}/stato')
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(set(response.json()),{'state','error','revision','submission'})
+        self.assertEqual(response.headers['cache-control'],'no-store')
+        self.login(3)
+        self.assertEqual(self.client.get(f'/schede/fatture/{did}/stato').status_code,404)
+        self.sql("UPDATE document_submissions SET username='someoneelse' WHERE doc_id=?",(did,))
+        self.login(2)
+        self.assertEqual(self.client.get(f'/schede/fatture/{did}/stato').status_code,403)
+
+    def test_successful_new_upload_is_archived_without_confirmation(self):
+        did=self.doc()
+        with patch('app.document_workflow.start_worker'):submitted('fatture',did,'spinza','teststaff')
+        result=dict(date='2026-11-20',supplier='Letto dalla foto',amount=12,currency='EUR',text='Dati estratti',description='',lines=[],warnings=[],readable=False)
+        with patch.dict(jobs.os.environ,{'OPENAI_API_KEY':'test-only'}),patch.object(jobs,'extract_document',return_value=result):
+            self.assertTrue(jobs.process_one())
+        self.assertEqual(self.sql('SELECT state FROM document_submissions')[0]['state'],'confirmed')
+        self.assertEqual(self.sql('SELECT supplier FROM invoices_docs')[0]['supplier'],'Letto dalla foto')
+        self.login(2)
+        page=self.client.get(f'/schede/fatture/{did}')
+        self.assertEqual(page.status_code,200)
+        self.assertIn('Digitalizzato',page.text)
+        self.assertNotIn('name="decision"',page.text)
+        self.assertNotIn('Da confermare',page.text)
+        self.assertEqual(self.client.get(f'/schede/fatture/{did}/anteprima').status_code,403)

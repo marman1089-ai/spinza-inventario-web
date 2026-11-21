@@ -17,7 +17,7 @@ class CompactExtractionTests(unittest.TestCase):
     def test_closure_does_not_request_transcript_or_duplicate_payment_lines(self):
         result,payload=self.read('Chiusure')
         properties=payload['text']['format']['schema']['properties']
-        for key in ('text','description','lines','due_date'):self.assertNotIn(key,properties)
+        for key in ('text','description','lines','due_date','readable','essential_fields_readable','quality_reason'):self.assertNotIn(key,properties)
         self.assertIn('cash',properties);self.assertIn('card',properties)
         self.assertEqual(result['lines'],[]);self.assertTrue(result['text'])
     def test_invoice_keeps_every_product_without_requesting_narrative(self):

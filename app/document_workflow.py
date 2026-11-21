@@ -10,8 +10,8 @@ from .document_jobs import KINDS, p, enqueue, start_worker
 
 def submitted(kind, doc_id, store, username):
     with connect() as conn:
-        conn.cursor().execute(f'INSERT INTO document_submissions(kind,doc_id,username,updated_at) VALUES({p()},{p()},{p()},{p()})',
-                              (kind,doc_id,username,datetime.now(timezone.utc).isoformat()))
+        conn.cursor().execute(f'INSERT INTO document_submissions(kind,doc_id,username,state,updated_at) VALUES({p()},{p()},{p()},{p()},{p()})',
+                              (kind,doc_id,username,'automatic',datetime.now(timezone.utc).isoformat()))
     enqueue(kind,doc_id,store,username)
     start_worker()
 
@@ -26,17 +26,30 @@ def install(app, api):
         table, datecol, _=KINDS[kind]
         store=api['_effective_store'](request,user)
         with connect() as conn:
-            cur=conn.cursor()
-            row=cur.execute(f'SELECT id,store,{datecol} AS source_date,uploaded_by FROM {table} WHERE id={p()}',(doc_id,)).fetchone()
-            submission=cur.execute(f'SELECT * FROM document_submissions WHERE kind={p()} AND doc_id={p()}',(kind,doc_id)).fetchone()
-            doc=cur.execute(f'SELECT * FROM digital_documents WHERE kind={p()} AND doc_id={p()}',(kind,doc_id)).fetchone()
-            job=cur.execute(f'SELECT state,error FROM document_ai_jobs WHERE kind={p()} AND doc_id={p()}',(kind,doc_id)).fetchone()
-            detail=cur.execute(f'SELECT details_json FROM document_details WHERE kind={p()} AND doc_id={p()}',(kind,doc_id)).fetchone()
+            row=conn.cursor().execute(f"""SELECT d.id,d.store,d.{datecol} AS source_date,d.uploaded_by,
+                s.username AS submission_user,s.state AS submission_state,
+                x.doc_id AS digital_id,x.doc_date,x.supplier,x.amount,x.currency,x.description,
+                x.raw_text,x.lines_json,x.warnings,x.state AS digital_state,x.revision,x.updated_by,x.updated_at,
+                j.state AS job_state,j.error AS job_error,t.details_json
+                FROM {table} d
+                LEFT JOIN document_submissions s ON s.kind={p()} AND s.doc_id=d.id
+                LEFT JOIN digital_documents x ON x.kind={p()} AND x.doc_id=d.id
+                LEFT JOIN document_ai_jobs j ON j.kind={p()} AND j.doc_id=d.id
+                LEFT JOIN document_details t ON t.kind={p()} AND t.doc_id=d.id
+                WHERE d.id={p()}""",(kind,kind,kind,kind,doc_id)).fetchone()
+        submission=dict(username=row['submission_user'],state=row['submission_state']) if row and row['submission_user'] is not None else None
+        doc=None;job=None;details={}
+        if row:
+            if row['digital_id'] is not None:
+                doc={key:row[key] for key in ('doc_date','supplier','amount','currency','description','raw_text','lines_json','warnings','revision','updated_by','updated_at')}
+                doc.update(kind=kind,doc_id=doc_id,store=row['store'],state=row['digital_state'])
+            if row['job_state'] is not None:job=dict(state=row['job_state'],error=row['job_error'])
+            details=json.loads(row['details_json']) if row['details_json'] else {}
         if not row or (store!='ALL' and row['store']!=store):
             raise HTTPException(404,'Documento non trovato.')
         if user['role']!='admin' and submission and submission['state']!='confirmed' and submission['username']!=user['username']:
             raise HTTPException(403,'Invio non ancora confermato.')
-        return user,row,submission,doc,job,json.loads(detail['details_json']) if detail else {}
+        return user,row,submission,doc,job,details
 
     def csrf(request):
         return request.session.setdefault('document_workflow_csrf',secrets.token_urlsafe(32))
@@ -55,9 +68,22 @@ def install(app, api):
 
     @app.get('/schede/{kind}/{doc_id}/stato')
     def status(request:Request,kind:str,doc_id:int):
-        _,_,sub,doc,job,_=access(request,kind,doc_id)
-        return JSONResponse(dict(state=job['state'] if job else 'none',error=job['error'] if job else '',
-                                 revision=doc['revision'] if doc else 0,submission=sub['state'] if sub else 'legacy'))
+        user=api['require_login'](request)
+        if not user:raise HTTPException(401,'Accedi al gestionale.')
+        if kind not in KINDS:raise HTTPException(404,'Tipo documento non trovato.')
+        scope=api['_effective_store'](request,user);table=KINDS[kind][0]
+        with connect() as conn:
+            row=conn.cursor().execute(f"""SELECT d.store,s.username,s.state AS submission,
+                COALESCE(j.state,'none') AS state,COALESCE(j.error,'') AS error,COALESCE(x.revision,0) AS revision
+                FROM {table} d
+                LEFT JOIN document_submissions s ON s.kind={p()} AND s.doc_id=d.id
+                LEFT JOIN document_ai_jobs j ON j.kind={p()} AND j.doc_id=d.id
+                LEFT JOIN digital_documents x ON x.kind={p()} AND x.doc_id=d.id
+                WHERE d.id={p()}""",(kind,kind,kind,doc_id)).fetchone()
+        if not row or (scope!='ALL' and scope!=row['store']):raise HTTPException(404,'Documento non trovato.')
+        if user['role']!='admin' and row['submission'] and row['submission']!='confirmed' and row['username']!=user['username']:
+            raise HTTPException(403,'Invio non ancora confermato.')
+        return JSONResponse({key:row[key] for key in ('state','error','revision')}|{'submission':row['submission'] or 'legacy'},headers={'Cache-Control':'no-store'})
 
     @app.get('/schede/{kind}/{doc_id}/anteprima')
     def preview(request:Request,kind:str,doc_id:int):

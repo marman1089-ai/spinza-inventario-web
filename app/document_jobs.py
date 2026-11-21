@@ -125,7 +125,7 @@ def run_document(kind,doc_id,username='system'):
         if not src.get('data'):
             raise ValueError('Registrazione scritta: nessuna foto da leggere.')
         submission=cur.execute(f"SELECT state FROM document_submissions WHERE kind={p()} AND doc_id={p()} AND updated_at>={p()}",(kind,doc_id,NEW_UPLOADS_SINCE)).fetchone()
-        if not submission or submission['state']!='pending':
+        if not submission or submission['state'] not in ('pending','automatic'):
             raise ValueError('Storico sospeso: vengono letti soltanto i nuovi caricamenti.')
         old=cur.execute(f'SELECT * FROM digital_documents WHERE kind={p()} AND doc_id={p()}',(kind,doc_id)).fetchone()
         old_revision=old['revision'] if old else 0
@@ -141,8 +141,6 @@ def run_document(kind,doc_id,username='system'):
     result=extract_document(data,label,inventory=catalog,new_upload=True)
     if not str(result.get('text') or '').strip():
         raise ValueError('Nessun testo leggibile nella foto: originale conservato, lettura da riprovare.')
-    if result.get('readable') is False:
-        raise ValueError('Foto non leggibile: '+str(result.get('quality_reason') or 'Scatta una nuova foto nitida con tutto il documento.'))
     warnings=list(result.get('warnings') or [])
     dt=result.get('date')
     try:
@@ -196,6 +194,13 @@ def run_document(kind,doc_id,username='system'):
             merge_missing_fields(cur,kind,doc_id,current,extracted)
             note='Controllo AI dell’archivio completato; dati già corretti conservati. Confronto disponibile all’amministratore.'
             cur.execute(f'UPDATE digital_documents SET warnings=warnings||{p()},revision=revision+1 WHERE kind={p()} AND doc_id={p()}',('\n'+note,kind,doc_id))
+        # A successful new upload is archived automatically, without human confirmation.
+        cur.execute(f"UPDATE document_submissions SET state='confirmed',updated_at={p()} WHERE kind={p()} AND doc_id={p()} AND state IN ('pending','automatic')",(stamp(),kind,doc_id))
+        cur.execute(f'UPDATE admin_document_reviews SET reviewed_at={p()},reviewed_by={p()} WHERE kind={p()} AND doc_id={p()}',(stamp(),'AI',kind,doc_id))
+        if kind=='fatture':
+            cur.execute(f'UPDATE {table} SET {datecol}={p()},supplier={p()} WHERE id={p()}',(dt,supplier,doc_id))
+        else:
+            cur.execute(f'UPDATE {table} SET {datecol}={p()} WHERE id={p()}',(dt,doc_id))
         cur.execute(f'''UPDATE document_ai_jobs SET state='done',error='',extracted_json={p()},updated_at={p()}
             WHERE kind={p()} AND doc_id={p()}''',(json.dumps(extracted,ensure_ascii=False),stamp(),kind,doc_id))
         cur.execute(f'INSERT INTO logs(store,username,action,category,name,delta) VALUES({",".join([p()]*6)})',
@@ -210,7 +215,7 @@ def process_one():
         return False
     with connect() as conn:
         begin(conn);cur=conn.cursor()
-        eligible=f"EXISTS(SELECT 1 FROM document_submissions s WHERE s.kind=document_ai_jobs.kind AND s.doc_id=document_ai_jobs.doc_id AND s.state='pending' AND s.updated_at>={p()})"
+        eligible=f"EXISTS(SELECT 1 FROM document_submissions s WHERE s.kind=document_ai_jobs.kind AND s.doc_id=document_ai_jobs.doc_id AND s.state IN ('pending','automatic') AND s.updated_at>={p()})"
         stale=(datetime.now(timezone.utc)-timedelta(minutes=10)).isoformat()
         cur.execute(f"UPDATE document_ai_jobs SET state='pending' WHERE state='working' AND updated_at<{p()} AND {eligible}",(stale,NEW_UPLOADS_SINCE))
         row=cur.execute("SELECT * FROM document_ai_jobs WHERE state='pending' AND "+eligible+" ORDER BY updated_at,kind,doc_id LIMIT 1"+
@@ -230,6 +235,22 @@ def process_one():
     return True
 
 
+def finalize_ready_uploads():
+    """Finish already-read fresh uploads without spending another API call."""
+    with connect() as conn:
+        cur=conn.cursor()
+        for kind,(table,datecol,_) in KINDS.items():
+            rows=cur.execute(f"""SELECT s.doc_id,x.doc_date,x.supplier FROM document_submissions s
+                JOIN document_ai_jobs j ON j.kind=s.kind AND j.doc_id=s.doc_id
+                JOIN digital_documents x ON x.kind=s.kind AND x.doc_id=s.doc_id
+                WHERE s.kind={p()} AND s.state IN ('pending','automatic') AND s.updated_at>={p()} AND j.state='done'""",(kind,NEW_UPLOADS_SINCE)).fetchall()
+            for row in rows:
+                cur.execute(f"UPDATE document_submissions SET state='confirmed',updated_at={p()} WHERE kind={p()} AND doc_id={p()}",(stamp(),kind,row['doc_id']))
+                cur.execute(f'UPDATE admin_document_reviews SET reviewed_at={p()},reviewed_by={p()} WHERE kind={p()} AND doc_id={p()}',(stamp(),'AI',kind,row['doc_id']))
+                if kind=='fatture':cur.execute(f'UPDATE {table} SET {datecol}={p()},supplier={p()} WHERE id={p()}',(row['doc_date'],row['supplier'],row['doc_id']))
+                else:cur.execute(f'UPDATE {table} SET {datecol}={p()} WHERE id={p()}',(row['doc_date'],row['doc_id']))
+
+
 def start_worker():
     if os.getenv('DOCUMENT_AI_ENABLED', 'new') == '0':
         return
@@ -241,7 +262,7 @@ def start_worker():
     _stop.clear()
     with connect() as conn:
         stale=(datetime.now(timezone.utc)-timedelta(minutes=10)).isoformat()
-        conn.cursor().execute(f"UPDATE document_ai_jobs SET state='paused' WHERE state IN ('pending','working') AND NOT EXISTS(SELECT 1 FROM document_submissions s WHERE s.kind=document_ai_jobs.kind AND s.doc_id=document_ai_jobs.doc_id AND s.state='pending' AND s.updated_at>={p()})",(NEW_UPLOADS_SINCE,))
+        conn.cursor().execute(f"UPDATE document_ai_jobs SET state='paused' WHERE state IN ('pending','working') AND NOT EXISTS(SELECT 1 FROM document_submissions s WHERE s.kind=document_ai_jobs.kind AND s.doc_id=document_ai_jobs.doc_id AND s.state IN ('pending','automatic') AND s.updated_at>={p()})",(NEW_UPLOADS_SINCE,))
         conn.cursor().execute(f"UPDATE document_ai_jobs SET state='pending' WHERE state='working' AND updated_at<{p()}",(stale,))
 
     def loop():

@@ -82,11 +82,11 @@ def extract_document(data, kind, inventory=None, *, new_upload=False):
     import copy
     schema=copy.deepcopy(SCHEMA)
     # Return business fields once. Narrative and duplicate transcripts cost tokens.
-    for field in ('text','description'):
+    for field in ('text','description','readable','essential_fields_readable','quality_reason'):
         schema['properties'].pop(field,None)
     closing='chius' in kind.casefold()
     expense='spes' in kind.casefold()
-    common={'date','supplier','amount','currency','warnings','readable','essential_fields_readable','quality_reason'}
+    common={'date','supplier','amount','currency','warnings'}
     fields=(common|{'printed_date','printed_time','cash','card','tickets','uncollected','taxable_amount','vat_amount'} if closing else
             common|{'lines','taxable_amount','vat_amount','cash','card','cash_tendered','change'} if expense else
             common|{'lines','invoice_number','due_date','received_date','taxable_amount','vat_amount','deposit_amount'})
@@ -99,9 +99,6 @@ def extract_document(data, kind, inventory=None, *, new_upload=False):
         'date in formato ISO; supplier è emittente, non destinatario; amount è totale finale, non imponibile o resto. '
         'Usa null per dati assenti/incerti, senza inventare. Mantieni sconti e resi con segno. '
         'warnings: solo brevi problemi dei dati necessari, per esempio "Totale non leggibile" o "Somma pagamenti incoerente"; altrimenti []. '
-        'readable=false solo se non si leggono dati essenziali. Valuta tutte le pagine insieme: tagli o coperture di parti secondarie non bloccano. '
-        'essential_fields_readable: emittente, data, totale, dettagli prodotti/pagamenti. Campi facoltativi non stampati non bloccano. '
-        'quality_reason: solo nomi dei dati essenziali mancanti, altrimenti stringa vuota. '
     )
     if closing:
         prompt+='Estrai data/ora stampate e incasso del giorno. Non usare gran totale cumulativo e non sommare copie dello stesso rapporto. POS e carte sono una sola voce card; ticket e non riscosso separati, null se assenti. Non produrre righe prodotto. '
@@ -152,6 +149,8 @@ def extract_document(data, kind, inventory=None, *, new_upload=False):
         parsed['description']=''
         # Compatibility for existing storage, generated locally without API output tokens.
         parsed['text']=' · '.join(str(parsed[key]) for key in ('supplier','date','amount') if parsed.get(key) is not None)
-        return assess_readability(parsed)
+        if not parsed['text'] and parsed['lines']:
+            parsed['text']=' · '.join(str(line.get('description') or '') for line in parsed['lines'])
+        return parsed
     except (ValueError, TypeError):
         raise ValueError('Risposta AI non valida. Compila a mano o riprova.') from None
