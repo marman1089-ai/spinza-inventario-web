@@ -7,7 +7,7 @@ class ReadabilityTests(unittest.TestCase):
                     warnings=[],essential_fields_readable=dict(issuer=True,date=True,total=True,items_or_payments=True))
     def test_clipped_secondary_text_does_not_require_another_photo(self):
         result=assess_readability(self.result())
-        self.assertTrue(result['readable']);self.assertEqual(result['quality_reason'],'');self.assertTrue(result['warnings'])
+        self.assertTrue(result['readable']);self.assertEqual(result['quality_reason'],'');self.assertEqual(result['warnings'],[])
     def test_unreadable_product_details_still_require_a_new_photo(self):
         result=self.result();result['readable']=True;result['essential_fields_readable']['items_or_payments']=False
         self.assertFalse(assess_readability(result)['readable'])
