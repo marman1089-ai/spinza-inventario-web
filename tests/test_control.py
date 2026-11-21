@@ -213,11 +213,11 @@ class ControlTests(unittest.TestCase):
         self.assertIn('Esclusi dai totali',r.text)
         self.assertEqual(self.client.get('/report-documenti?download=csv').status_code,200)
 
-    def test_document_upload_returns_to_original_archive(self):
+    def test_document_upload_returns_to_digital_review(self):
         for kind,form in [('fatture',{'supplier':'Fornitore','doc_date':self.dt}),('chiusure',{'closure_date':self.dt}),('spese-secondarie',{'expense_date':self.dt})]:
             r=self.client.post(f'/{kind}/upload',data=form,files=[('files',('test.pdf',self.pdf(),'application/pdf'))],follow_redirects=False)
             self.assertEqual(r.status_code,303,r.text)
-            self.assertEqual(r.headers['location'],f'/{kind}')
+            self.assertTrue(r.headers['location'].startswith(f'/schede/{kind}/'))
             table=control.KINDS[kind][0]
             stored=self.sql(f'SELECT data FROM {table}')
             self.assertEqual(len(stored),1)
@@ -273,20 +273,20 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(self.client.post('/ordinati/arrivato',data={'order_id':oid,f'received_{line["id"]}':'3'},follow_redirects=False).status_code,303)
         self.assertEqual((self.qty(self.pid),self.qty(self.sala)),(20,2))
 
-    def test_staff_original_archives_and_same_day_delete(self):
+    def test_staff_private_preview_and_same_day_delete(self):
         self.login(2)
         for kind in ['fatture','chiusure','spese-secondarie']:
             r=self.client.post(f'/{kind}/upload',files=[('files',('photo.pdf',self.pdf(),'application/pdf'))],follow_redirects=False)
             self.assertEqual(r.status_code,303,r.text)
-            self.assertEqual(r.headers['location'],f'/{kind}')
+            self.assertTrue(r.headers['location'].startswith(f'/schede/{kind}/'))
             table=control.KINDS[kind][0]
             did=self.sql(f'SELECT id FROM {table}')[0]['id']
             self.assertEqual(self.client.get(r.headers['location']).status_code,200)
             original=self.client.get(f'/{kind}/{did}')
-            self.assertEqual(original.status_code,200)
-            self.assertTrue(original.content.startswith(b'%PDF'))
+            self.assertEqual(original.status_code,403)
+            self.assertEqual(self.client.get(f'/schede/{kind}/{did}/anteprima').status_code,200)
             self.login(3)
-            self.assertEqual(self.client.get(f'/{kind}/{did}').status_code,404)
+            self.assertEqual(self.client.get(f'/{kind}/{did}').status_code,403)
             self.login(2)
             self.assertEqual(self.client.get(f'/registrazione-digitale/{kind}').status_code,410)
             self.assertEqual(self.save(did,kind).status_code,403)
@@ -295,7 +295,7 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(self.client.get('/fatture/importa-prodotti').status_code,403)
         self.assertEqual(self.client.get('/fatture/importa-prodotti/draft/1/image').status_code,403)
 
-    def test_automatic_history_processing_and_staff_corrections(self):
+    def test_automatic_history_processing_staff_cannot_bypass_confirmation(self):
         from app import document_jobs
         did=self.doc()
         self.assertEqual(document_jobs.enqueue_history(),1)
@@ -309,8 +309,8 @@ class ControlTests(unittest.TestCase):
         page=self.client.get(f'/documenti/fatture/{did}')
         self.assertIn('Trascrizione AI',page.text)
         self.assertNotIn('Foto / PDF originale',page.text)
-        self.assertEqual(self.save(did,revision=1).status_code,303)
-        self.assertEqual(len(self.sql('SELECT id FROM digital_document_versions')),1)
+        self.assertEqual(self.save(did,revision=1).status_code,403)
+        self.assertEqual(len(self.sql('SELECT id FROM digital_document_versions')),0)
 
     def test_retired_manual_digitization_cannot_create_records(self):
         r=self.client.post('/registrazione-digitale/spese-secondarie',data={'doc_date':self.dt,'supplier':'Supermercato','amount':'25.00','description':'Detersivo'},follow_redirects=False)
@@ -345,7 +345,7 @@ class ControlTests(unittest.TestCase):
         self.login(2)
         for url in ['/admin/cassa','/admin/cassa/report']:
             self.assertEqual(self.client.get(url).status_code,403)
-        self.assertEqual(self.client.get('/admin/digitalizzazione').status_code,410)
+        self.assertEqual(self.client.get('/admin/digitalizzazione').status_code,403)
 
     def test_product_period_crossing_month_not_split(self):
         raw=b',,,Excl. ,Incl. discount,Incl. discount\nName,ID,Total,Incl. VAT,Excl. VAT,Incl. VAT\nOG SMASH,1,10,100,90,99\nTotal,,10,100,90,99\n'

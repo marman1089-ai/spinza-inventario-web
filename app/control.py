@@ -145,8 +145,7 @@ def install(app, api):
         if not row:
             raise HTTPException(404, 'Documento non trovato in questo negozio.')
         pending=cur.execute(f'SELECT 1 FROM admin_document_reviews WHERE kind={ph()} AND doc_id={ph()} AND reviewed_at IS NULL',(kind,doc_id)).fetchone()
-        if pending:
-            raise HTTPException(403, 'Documento in attesa di conferma in File da verificare.')
+        # The uniform employee card enforces pending ownership separately.
         return dict(row)
 
     def digital(cur, kind, row):
@@ -183,13 +182,9 @@ def install(app, api):
         from .startup_guard import needs_schema_sync
         if needs_schema_sync():
             init_control_db()
-        # Il vecchio OCR automatico non viene piu utilizzato: la scansione
-        # storica delle fatture impiegava molte query per ogni avvio Render.
-        # Riattivabile esplicitamente solo se necessario per manutenzione.
-        if os.getenv('ENABLE_LEGACY_DOCUMENT_OCR') == '1':
-            from .document_jobs import enqueue_history, start_worker
-            enqueue_history()
-            start_worker()
+        from .document_jobs import enqueue_history, start_worker
+        enqueue_history()
+        start_worker()
 
     @app.on_event('shutdown')
     def shutdown_control():
@@ -218,7 +213,9 @@ def install(app, api):
     def queue_history(request:Request):
         user,store=auth(request,admin=True)
         from .document_jobs import enqueue_history
-        enqueue_history()
+        enqueue_history(store)
+        from .document_jobs import start_worker
+        start_worker()
         return RedirectResponse('/admin/digitalizzazione',status_code=303)
 
     @app.get('/report-documenti')
@@ -263,6 +260,8 @@ def install(app, api):
     @app.get('/documenti/{kind}/{doc_id}')
     def document_page(request: Request, kind: str, doc_id: int, message: str = ''):
         user,store = auth(request)
+        if user['role']!='admin':
+            return RedirectResponse(f'/schede/{kind}/{doc_id}',303)
         with connect() as conn:
             cur = conn.cursor()
             src = source(cur,kind,doc_id,store)
@@ -379,7 +378,7 @@ def install(app, api):
 
     @app.post('/documenti/{kind}/{doc_id}/salva')
     async def save_document(request: Request, kind: str, doc_id: int):
-        user,store = auth(request)
+        user,store = auth(request,admin=True)
         form = await request.form()
         dt,supplier = iso(form.get('doc_date')),str(form.get('supplier') or '').strip()
         amount = number(form.get('amount'),optional=True)

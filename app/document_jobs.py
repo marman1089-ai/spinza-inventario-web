@@ -14,6 +14,8 @@ KINDS={'fatture':('invoices_docs','doc_date','Fatture'),'chiusure':('closures','
 _wakeup=threading.Event()
 _stop=threading.Event()
 _thread=None
+HISTORY_START='2026-11-01'
+HISTORY_END='2026-12-01'
 
 
 def p():
@@ -37,6 +39,13 @@ def init_jobs():
             kind TEXT NOT NULL,doc_id INTEGER NOT NULL,store TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'pending',
             error TEXT NOT NULL DEFAULT '',requested_by TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,
             extracted_json TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL,PRIMARY KEY(kind,doc_id))''')
+        cur.execute("""CREATE TABLE IF NOT EXISTS document_details (
+            kind TEXT NOT NULL, doc_id INTEGER NOT NULL, details_json TEXT NOT NULL,
+            PRIMARY KEY(kind,doc_id))""")
+        cur.execute("""CREATE TABLE IF NOT EXISTS document_submissions (
+            kind TEXT NOT NULL, doc_id INTEGER NOT NULL, username TEXT NOT NULL,
+            state TEXT NOT NULL DEFAULT 'pending', updated_at TEXT NOT NULL,
+            PRIMARY KEY(kind,doc_id))""")
         cur.execute(f'''CREATE TABLE IF NOT EXISTS digital_document_versions (
             id {ident},kind TEXT NOT NULL,doc_id INTEGER NOT NULL,store TEXT NOT NULL,
             changed_by TEXT NOT NULL,changed_at TEXT NOT NULL,before_json TEXT NOT NULL,after_json TEXT NOT NULL)''')
@@ -86,9 +95,9 @@ def enqueue_history(store=None,kind=None):
     selected={kind:KINDS[kind]} if kind in KINDS else KINDS
     with connect() as conn:
         cur=conn.cursor()
-        for key,(table,_,_) in selected.items():
-            sql=f"SELECT id,store FROM {table} WHERE data IS NOT NULL AND COALESCE(filename,'')<>'registrazione-digitale' AND {available_document(key)}"
-            args=[]
+        for key,(table,datecol,_) in selected.items():
+            sql=f"SELECT id,store FROM {table} WHERE data IS NOT NULL AND COALESCE(filename,'')<>'registrazione-digitale' AND CAST({datecol} AS TEXT)>={p()} AND CAST({datecol} AS TEXT)<{p()}"
+            args=[HISTORY_START,HISTORY_END]
             if store and store!='ALL':
                 sql+=f' AND store={p()}';args.append(store)
             rows=cur.execute(sql,tuple(args)).fetchall()
@@ -150,9 +159,15 @@ def run_document(kind,doc_id,username='system'):
     if not data.startswith(b'%PDF'):
         from .pdf_tools import ensure_pdf
         data,_,_=ensure_pdf(data,src.get('filename') or 'foto',src.get('content_type') or 'application/octet-stream')
-    result=extract_document(data,label)
+    catalog=None
+    if kind=='fatture':
+        with connect() as conn:
+            catalog=[dict(r) for r in conn.cursor().execute(f'SELECT id,name,unit,area,location FROM products WHERE store={p()} ORDER BY id',(src['store'],)).fetchall()]
+    result=extract_document(data,label,inventory=catalog)
     if not str(result.get('text') or '').strip():
         raise ValueError('Nessun testo leggibile nella foto: originale conservato, lettura da riprovare.')
+    if result.get('readable') is False:
+        raise ValueError('Foto non leggibile: '+str(result.get('quality_reason') or 'Scatta una nuova foto nitida con tutto il documento.'))
     warnings=list(result.get('warnings') or [])
     dt=result.get('date')
     try:
@@ -161,6 +176,15 @@ def run_document(kind,doc_id,username='system'):
         dt=iso(dt)
     except HTTPException:
         dt=str(src[datecol]);warnings.append('Data non leggibile: controllare la data proposta.')
+    # Closing printouts at/before 06:59 belong to the previous shift.
+    if kind=='chiusure' and result.get('printed_time') and result.get('printed_date'):
+        try:
+            from datetime import date
+            hour=int(result['printed_time'].split(':')[0])
+            if 0 <= hour <= 6:
+                dt=(date.fromisoformat(result['printed_date'])-timedelta(days=1)).isoformat()
+        except (ValueError,TypeError):
+            warnings.append('Ora/data stampa da confermare per il turno.')
     supplier=result.get('supplier') or (src.get('supplier') or '')
     amount=number(result.get('amount'),optional=True)
     if not supplier:
@@ -171,11 +195,17 @@ def run_document(kind,doc_id,username='system'):
     if len(currency)!=3 or not currency.isalpha():
         currency='EUR';warnings.append('Valuta non riconosciuta: verificare.')
     lines=[dict(description=str(l.get('description') or ''),qty=number(l.get('qty'),optional=True),
-        unit=str(l.get('unit') or ''),amount=number(l.get('amount'),optional=True)) for l in result.get('lines',[])]
+        unit=str(l.get('unit') or ''),amount=number(l.get('amount'),optional=True),
+        product_id=l.get('product_id') if any(r['id']==l.get('product_id') for r in (catalog or [])) else None,
+        stock_qty=number(l.get('stock_qty'),optional=True),matching_note=str(l.get('matching_note') or ''),
+        needs_review=bool(l.get('needs_review',True))) for l in result.get('lines',[])]
     extracted=dict(doc_date=dt,supplier=supplier,amount=amount,currency=currency,description=result.get('description') or '',
                    raw_text=result.get('text') or '',lines=lines,warnings='\n'.join(warnings))
     with connect() as conn:
         begin(conn);cur=conn.cursor()
+        details={k:v for k,v in result.items() if k not in ('text','lines','description','warnings')}
+        cur.execute(f'INSERT INTO document_details(kind,doc_id,details_json) VALUES({p()},{p()},{p()}) ON CONFLICT(kind,doc_id) DO UPDATE SET details_json=excluded.details_json',
+                    (kind,doc_id,json.dumps(details,ensure_ascii=False)))
         current=cur.execute(f'SELECT * FROM digital_documents WHERE kind={p()} AND doc_id={p()}'+(' FOR UPDATE' if using_postgres() else ''),(kind,doc_id)).fetchone()
         # Keep corrections and verified documents. AI extraction is retained separately for admin comparison.
         preserve=bool(current and (current['revision']!=old_revision or current['state']=='verificato' or current.get('updated_by')!='AI'))
@@ -204,10 +234,11 @@ def process_one():
     with connect() as conn:
         begin(conn);cur=conn.cursor()
         retry_before=(datetime.now(timezone.utc)-timedelta(minutes=15)).isoformat()
-        cur.execute(f"UPDATE document_ai_jobs SET state='pending',error='' WHERE state='error' AND attempts<3 AND updated_at<{p()}",(retry_before,))
+        cur.execute(f"UPDATE document_ai_jobs SET state='pending',error='' WHERE state='error' AND error NOT LIKE 'Foto non leggibile:%' AND attempts<3 AND updated_at<{p()}",(retry_before,))
         stale=(datetime.now(timezone.utc)-timedelta(minutes=10)).isoformat()
         cur.execute(f"UPDATE document_ai_jobs SET state='pending' WHERE state='working' AND updated_at<{p()}",(stale,))
-        row=cur.execute("SELECT * FROM document_ai_jobs WHERE state='pending' ORDER BY updated_at,kind,doc_id LIMIT 1"+
+        eligible=' OR '.join(f"(kind='{k}' AND doc_id IN (SELECT id FROM {t} WHERE CAST({d} AS TEXT)>='{HISTORY_START}' AND CAST({d} AS TEXT)<'{HISTORY_END}'))" for k,(t,d,_) in KINDS.items())
+        row=cur.execute("SELECT * FROM document_ai_jobs WHERE state='pending' AND (EXISTS(SELECT 1 FROM document_submissions s WHERE s.kind=document_ai_jobs.kind AND s.doc_id=document_ai_jobs.doc_id AND s.state='pending') OR ("+eligible+")) ORDER BY CASE WHEN requested_by='archivio' THEN 1 ELSE 0 END,updated_at,kind,doc_id LIMIT 1"+
             (' FOR UPDATE SKIP LOCKED' if using_postgres() else '')).fetchone()
         if not row:
             return False

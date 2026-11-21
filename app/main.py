@@ -5671,7 +5671,7 @@ def _store_switch_url(next_url: str, store: str) -> str:
         '/admin/controllo','/admin/digitalizzazione','/report-documenti',
         '/logs','/logs/inventario','/logs/ordini','/logs/documenti',
         '/gestionale','/gestionale/dashboard','/gestionale/incassi','/gestionale/uscite',
-        '/gestionale/storico-mensile','/gestionale/report-vendite',
+        '/gestionale/storico-mensile','/gestionale/report-vendite','/gestionale/consumi',
         '/gestionale/archiviati','/gestionale/panoramica-totale',
         '/fatture','/fatture/importa-prodotti','/chiusure','/report-chiusura',
         '/spese-secondarie','/ordini','/ordini/preparazione','/ordinati',
@@ -7697,9 +7697,9 @@ async def closures_upload(request: Request, closure_date: str = Form(""), files:
             delta=0.0,
         )
 
-    # OCR gratuito avviato nel browser dalla pagina documento.
-    request.session["upload_notice"] = "chiusure"
-    return RedirectResponse("/chiusure", status_code=HTTP_303_SEE_OTHER)
+    from .document_workflow import submitted
+    submitted('chiusure', new_doc_id, store, user['username'])
+    return RedirectResponse('/schede/chiusure/'+str(new_doc_id), status_code=303)
 
 
 @app.get("/chiusure/{doc_id}")
@@ -7707,6 +7707,9 @@ def closures_download(request: Request, doc_id: int):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    if not is_admin(request):
+        raise HTTPException(403, 'Originali riservati all’amministratore. Apri la scheda digitale.')
 
     store = _effective_store(request, user)
     ph = _ph()
@@ -7868,8 +7871,9 @@ async def secondary_expenses_upload(request: Request, expense_date: str = Form("
             delta=0.0,
         )
 
-    # OCR gratuito avviato nel browser dalla pagina documento.
-    return RedirectResponse("/spese-secondarie", status_code=HTTP_303_SEE_OTHER)
+    from .document_workflow import submitted
+    submitted('spese-secondarie', new_doc_id, store, user['username'])
+    return RedirectResponse('/schede/spese-secondarie/'+str(new_doc_id), status_code=303)
 
 
 @app.get("/spese-secondarie/{doc_id}")
@@ -7877,6 +7881,9 @@ def secondary_expenses_download(request: Request, doc_id: int):
     user = require_login(request)
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
+
+    if not is_admin(request):
+        raise HTTPException(403, 'Originali riservati all’amministratore. Apri la scheda digitale.')
 
     store = _effective_store(request, user)
     ph = _ph()
@@ -8897,9 +8904,9 @@ async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: 
             delta=0.0,
         )
 
-    # OCR gratuito avviato nel browser dalla pagina documento.
-    request.session["upload_notice"] = "fatture"
-    return RedirectResponse("/fatture", status_code=HTTP_303_SEE_OTHER)
+    from .document_workflow import submitted
+    submitted('fatture', new_doc_id, store, user['username'])
+    return RedirectResponse('/schede/fatture/'+str(new_doc_id), status_code=303)
 
 
 @app.get("/fatture/importa-prodotti", response_class=HTMLResponse)
@@ -9257,6 +9264,9 @@ def invoices_download(request: Request, doc_id: int):
     if not user:
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
+    if not is_admin(request):
+        raise HTTPException(403, 'Originali riservati all’amministratore. Apri la scheda digitale.')
+
     store = _effective_store(request, user)
     ph = _ph()
 
@@ -9598,7 +9608,7 @@ def document_digital_csv(request: Request,kind:str,document_id:int):
 async def disable_legacy_digitizer(request: Request, call_next):
     url = request.url.path
     if (url.startswith('/digitalizza/') or url.startswith('/registrazione-digitale/')
-        or url.startswith('/archivio-digitale/') or url.startswith('/admin/digitalizzazione')):
+        or url.startswith('/archivio-digitale/')):
         return PlainTextResponse('Funzione di digitalizzazione disattivata. I documenti originali restano in archivio.', status_code=410)
     return await call_next(request)
 
@@ -9896,6 +9906,8 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
         from .kitchen_periods import schema as initial_schema
         initial_schema(cur)
         initial_dates={r['count_id']:r['start_date'] for r in cur.execute(f'SELECT count_id,start_date FROM inventory_initial_baselines WHERE store={ph}',(store,)).fetchall()}
+        from .consumption import timeline
+        kitchen_timeline=timeline(cur,store,area)
         selected=None
         selected_lines=[]
         if id:
@@ -9959,19 +9971,22 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
                     initial=converted
                 if initial is not None:
                     received=0
+                    valid_units=True
                     for quantity,unit in arrivals.get(pid,[]):
                         if not unit:
                             unit_notes.append(f"{line['name']}: arrivo storico senza unità registrata, da verificare.")
+                            valid_units=False
                             received+=quantity
                         else:
                             converted=convert_quantity(quantity,unit,line['unit'])
                             if converted is None:
+                                valid_units=False
                                 unit_notes.append(f"{line['name']}: unità di un acquisto incompatibile con il conteggio; acquisto da verificare.")
                             else:received+=converted
                     if initial+received-line['observed']<0:
                         unit_notes.append(f"{line['name']}: differenza negativa, verifica acquisti mancanti, unità e conteggi.")
                     detail.append(dict(name=line['name'],unit=line['unit'],start=initial,received=received,
-                                       end=line['observed'],used=initial+received-line['observed']))
+                                       end=line['observed'],used=initial+received-line['observed'] if valid_units else None))
             weeks=sorted({_kitchen_week(str(doc['doc_date'])[:10]) for doc in docs} | {_kitchen_week(last)})
             kitchen_periods.append(dict(first=first,last=last,details=detail,weeks=weeks,initial=before is None,
                                         completed=completed,total=len(docs),warnings=list(dict.fromkeys(unit_notes)),report_id=after['id'],initial_known=bool(before or after['id'] in initial_dates),days=(date.fromisoformat(last)-date.fromisoformat(first)).days+(1 if before is None else 0)))
@@ -9998,7 +10013,7 @@ def stock_report(request:Request,area:str='prodotti',store:str='',start:str='',e
         known=cur.execute(f"SELECT counted_at FROM inventory_period_count_headers WHERE store={ph} AND area={ph} ORDER BY counted_at DESC LIMIT 1",(store,area)).fetchone()
     return render('stock_report.html',user=user,area=area,store=store,stores=STORES,
         start=start_day.isoformat(),end=end_day.isoformat(),periods=periods,totals=summaries,
-        known=known,kitchen_periods=kitchen_periods,generated=id>0,id=id,selected=selected,selected_lines=selected_lines,archive=archive,invoices=invoices,request=request,delete_token=request.session.setdefault('inventory_report_csrf',secrets.token_urlsafe(32)))
+        known=known,kitchen_timeline=kitchen_timeline,kitchen_periods=kitchen_periods,generated=id>0,id=id,selected=selected,selected_lines=selected_lines,archive=archive,invoices=invoices,request=request,delete_token=request.session.setdefault('inventory_report_csrf',secrets.token_urlsafe(32)))
 
 
 @app.post('/inventario/bozza')
@@ -10072,6 +10087,7 @@ register_inventory_activity(app, globals())
 def inventory_period_invoice(request: Request, doc_id: int, store: str = ''):
     user, _, fallback = _stock_context(request)
     if not user: return RedirectResponse('/',status_code=303)
+    if not is_admin(request): return PlainTextResponse('Originali riservati all’amministratore',status_code=403)
     store = store or fallback
     if store not in STORES or (not is_admin(request) and store != user.get('store')):
         return PlainTextResponse('Accesso negato',status_code=403)
@@ -10187,3 +10203,10 @@ install_kitchen_ai(app, globals())
 
 from .kitchen_periods import install as install_kitchen_periods
 install_kitchen_periods(app, globals())
+
+
+from .document_workflow import install as install_document_workflow
+install_document_workflow(app, globals())
+
+from .consumption import install as install_consumption
+install_consumption(app, globals())
