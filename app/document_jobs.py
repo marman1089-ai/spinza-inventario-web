@@ -229,6 +229,8 @@ def run_document(kind,doc_id,username='system'):
 
 
 def process_one():
+    if os.getenv('DOCUMENT_AI_ENABLED', '0') != '1':
+        return False
     if not os.environ.get('OPENAI_API_KEY','').strip():
         return False
     with connect() as conn:
@@ -256,6 +258,8 @@ def process_one():
 
 
 def start_worker():
+    if os.getenv('DOCUMENT_AI_ENABLED', '0') != '1':
+        return
     global _thread
     if not os.environ.get('OPENAI_API_KEY','').strip():
         return

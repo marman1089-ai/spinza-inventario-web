@@ -73,6 +73,8 @@ def assess_readability(result):
 
 
 def extract_document(data, kind, inventory=None):
+    if os.getenv('DOCUMENT_AI_ENABLED', '0') != '1':
+        raise ValueError('Letture AI sospese dall’amministratore. Nessuna chiamata API eseguita.')
     key = os.environ.get('OPENAI_API_KEY', '').strip()
     if not key:
         raise ValueError('Lettura AI non attiva: configura OPENAI_API_KEY sul server. Puoi compilare a mano.')

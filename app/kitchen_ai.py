@@ -129,6 +129,8 @@ def enqueue_docs(api,store,week,doc_id,username,force=False):
     return count
 
 def process_one():
+    if os.getenv('DOCUMENT_AI_ENABLED', '0') != '1':
+        return False
     if not configured():return False
     with connect() as conn:
         transaction(conn);cur=conn.cursor()
@@ -159,6 +161,8 @@ def process_one():
     return True
 
 def start_worker():
+    if os.getenv('DOCUMENT_AI_ENABLED', '0') != '1':
+        return
     global _thread
     if not configured():return
     with _lock:
