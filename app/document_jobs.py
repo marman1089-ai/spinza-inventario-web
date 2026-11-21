@@ -60,7 +60,7 @@ def enqueue(kind,doc_id,store,username='system',retry=False):
         cur.execute(f'''INSERT INTO document_ai_jobs(kind,doc_id,store,requested_by,updated_at)
             VALUES({','.join([p()]*5)}) ON CONFLICT(kind,doc_id) DO NOTHING''',(kind,doc_id,store,username,stamp()))
         if retry:
-            cur.execute(f"UPDATE document_ai_jobs SET state='pending',error='',requested_by={p()},updated_at={p()} WHERE kind={p()} AND doc_id={p()} AND state='error'",(username,stamp(),kind,doc_id))
+            cur.execute(f"UPDATE document_ai_jobs SET state='pending',error='',attempts=0,requested_by={p()},updated_at={p()} WHERE kind={p()} AND doc_id={p()} AND state='error'",(username,stamp(),kind,doc_id))
     _wakeup.set()
 
 
@@ -216,9 +216,7 @@ def process_one():
     with connect() as conn:
         begin(conn);cur=conn.cursor()
         eligible=f"EXISTS(SELECT 1 FROM document_submissions s WHERE s.kind=document_ai_jobs.kind AND s.doc_id=document_ai_jobs.doc_id AND s.state IN ('pending','automatic') AND s.updated_at>={p()})"
-        stale=(datetime.now(timezone.utc)-timedelta(minutes=10)).isoformat()
-        cur.execute(f"UPDATE document_ai_jobs SET state='pending' WHERE state='working' AND updated_at<{p()} AND {eligible}",(stale,NEW_UPLOADS_SINCE))
-        row=cur.execute("SELECT * FROM document_ai_jobs WHERE state='pending' AND "+eligible+" ORDER BY updated_at,kind,doc_id LIMIT 1"+
+        row=cur.execute("SELECT * FROM document_ai_jobs WHERE state='pending' AND attempts=0 AND "+eligible+" ORDER BY updated_at,kind,doc_id LIMIT 1"+
             (' FOR UPDATE SKIP LOCKED' if using_postgres() else ''),(NEW_UPLOADS_SINCE,)).fetchone()
         if not row:
             return False
@@ -263,7 +261,7 @@ def start_worker():
     with connect() as conn:
         stale=(datetime.now(timezone.utc)-timedelta(minutes=10)).isoformat()
         conn.cursor().execute(f"UPDATE document_ai_jobs SET state='paused' WHERE state IN ('pending','working') AND NOT EXISTS(SELECT 1 FROM document_submissions s WHERE s.kind=document_ai_jobs.kind AND s.doc_id=document_ai_jobs.doc_id AND s.state IN ('pending','automatic') AND s.updated_at>={p()})",(NEW_UPLOADS_SINCE,))
-        conn.cursor().execute(f"UPDATE document_ai_jobs SET state='pending' WHERE state='working' AND updated_at<{p()}",(stale,))
+        conn.cursor().execute("UPDATE document_ai_jobs SET state='error',error='Lettura interrotta. Originale conservato; nessuna rilettura automatica.' WHERE state='working'")
 
     def loop():
         while not _stop.is_set():

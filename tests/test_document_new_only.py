@@ -66,3 +66,10 @@ class NewOnlyTests(unittest.TestCase):
         self.assertNotIn('name="decision"',page.text)
         self.assertNotIn('Da confermare',page.text)
         self.assertEqual(self.client.get(f'/schede/fatture/{did}/anteprima').status_code,403)
+
+    def test_interrupted_request_is_not_automatically_paid_again(self):
+        did=self.doc()
+        with patch('app.document_workflow.start_worker'):submitted('fatture',did,'spinza','teststaff')
+        self.sql("UPDATE document_ai_jobs SET attempts=1,state='pending' WHERE doc_id=?",(did,))
+        with patch.dict(jobs.os.environ,{'OPENAI_API_KEY':'test-only'}),patch.object(jobs,'extract_document') as ai:
+            self.assertFalse(jobs.process_one());ai.assert_not_called()
