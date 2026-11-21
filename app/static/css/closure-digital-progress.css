@@ -1,3 +1,7 @@
 .closure-digital-progress{display:inline-flex;gap:10px;align-items:center;cursor:default}
 .closure-digital-spinner{display:inline-block;width:17px;height:17px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:closure-digital-spin .8s linear infinite;flex-shrink:0}
 @keyframes closure-digital-spin{to{transform:rotate(360deg)}}
+
+/* Explicitly selected shift date takes precedence: v1. */
+
+/* Keep actual closing receipt date, including morning printouts: v2. */

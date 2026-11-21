@@ -7667,7 +7667,8 @@ async def closures_upload(request: Request, closure_date: str = Form(""), files:
     if store not in STORES:
         raise HTTPException(422, "Seleziona un singolo negozio prima di caricare documenti.")
 
-    closure_date = closure_date or _today_str()
+    selected_date=closure_date.strip() or None
+    closure_date = selected_date or _today_str()
     content, filename = await _prepare_document_upload(files, "chiusura")
     content_type = "application/pdf"
 
@@ -7698,7 +7699,7 @@ async def closures_upload(request: Request, closure_date: str = Form(""), files:
         )
 
     from .document_workflow import submitted
-    submitted('chiusure', new_doc_id, store, user['username'])
+    submitted('chiusure', new_doc_id, store, user['username'],selected_date=selected_date)
     request.session['upload_notice']='chiusure'
     return RedirectResponse('/chiusure',status_code=303)
 

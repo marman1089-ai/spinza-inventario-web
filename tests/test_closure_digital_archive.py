@@ -36,3 +36,14 @@ class ClosureArchiveTests(unittest.TestCase):
         page=self.client.get('/chiusure')
         self.assertIn('Lettura non riuscita',page.text)
         self.assertNotIn(f'data-document-status="/schede/chiusure/{did}/stato"',page.text)
+
+    def test_real_closure_date_is_preserved_even_in_the_morning(self):
+        for selected,expected in [('2026-11-21','2026-11-21'),('','2026-11-21')]:
+            with self.subTest(selected=selected),patch('app.document_workflow.start_worker'):
+                self.client.post('/chiusure/upload',data={'closure_date':selected},files={'files':('foto.pdf',self.pdf(),'application/pdf')},follow_redirects=False)
+            did=self.sql('SELECT MAX(id) AS id FROM closures')[0]['id']
+            result=dict(date='2026-11-21',printed_date='2026-11-21',printed_time='05:59',supplier='Esercente',amount=123,currency='EUR',text='Incassi 123',description='',warnings=[],lines=[])
+            with patch.dict(jobs.os.environ,{'OPENAI_API_KEY':'test-only'}),patch.object(jobs,'extract_document',return_value=result):
+                self.assertTrue(jobs.process_one())
+            self.assertEqual(str(self.sql('SELECT closure_date FROM closures WHERE id=?',(did,))[0]['closure_date']),expected)
+            self.assertEqual(self.sql("SELECT doc_date FROM digital_documents WHERE kind='chiusure' AND doc_id=?",(did,))[0]['doc_date'],expected)

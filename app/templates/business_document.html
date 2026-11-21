@@ -1,7 +1,7 @@
 {% extends 'base.html' %}{% set title='Scheda digitale' %}{% block content %}
 <link rel="stylesheet" href="/static/css/business-document.css?v=1">
 <div class="bd-page">
-<header class="bd-head"><div><span class="eyebrow">{{ stores.get(src.store,src.store) }} · {{ label }}</span><h1>{{ doc.supplier if doc and doc.supplier else 'Foto salvata' }}</h1><p>{{ 'Giornata del turno' if kind=='chiusure' else 'Data documento' }} · {{ doc.doc_date if doc else src.source_date }}</p></div><a class="btn2" href="/{{ kind }}">Archivio</a></header>
+<header class="bd-head"><div><span class="eyebrow">{{ stores.get(src.store,src.store) }} · {{ label }}</span><h1>{{ doc.supplier if doc and doc.supplier else 'Foto salvata' }}</h1><p>{{ 'Data della chiusura' if kind=='chiusure' else 'Data documento' }} · {{ doc.doc_date if doc else src.source_date }}</p></div><a class="btn2" href="/{{ kind }}">Archivio</a></header>
 
 {% if not job or job.state in ['pending','working'] %}<section class="card" role="status" id="bd-wait">{{ 'Controllo leggibilità e lettura in corso…' if job else 'Lettura non ancora avviata. L’admin può avviarla dal controllo di novembre.' }}<p>La scheda digitale apparirà automaticamente appena pronta.</p></section>{% endif %}
 {% if job and job.state=='error' %}<section class="card bd-warning" role="alert"><h2>Lettura non riuscita</h2><p>{{ job.error }}</p></section>{% endif %}
@@ -10,7 +10,7 @@
 <section class="card"><h2>01 / Riepilogo</h2><div class="bd-metrics">
 {% set metrics=[('cash','Contanti'),('card','Carte / POS'),('tickets','Ticket'),('uncollected','Non riscosso')] if kind=='chiusure' else [('taxable_amount','Imponibile'),('vat_amount','IVA'),('deposit_amount','Cauzione netta')] if kind=='fatture' else [('cash','Contanti'),('card','Carte / POS'),('cash_tendered','Consegnato'),('change','Resto')] %}
 {% for key,name in metrics %}<div><span>{{ name }}</span><strong>{{ ('%.2f'|format(details[key])|replace('.',',') ~ ' €') if details.get(key) is not none else 'Non indicato' }}</strong></div>{% endfor %}</div></section>
-<section class="card"><h2>02 / Dati del documento</h2><dl class="bd-data"><dt>Provenienza</dt><dd>{{ doc.supplier or 'Da verificare' }}</dd><dt>Data {{ 'del turno' if kind=='chiusure' else 'documento' }}</dt><dd>{{ doc.doc_date }}</dd><dt>Numero documento</dt><dd>{{ details.invoice_number or 'Non indicato' }}</dd>
+<section class="card"><h2>02 / Dati del documento</h2><dl class="bd-data"><dt>Provenienza</dt><dd>{{ doc.supplier or 'Da verificare' }}</dd><dt>Data {{ 'chiusura' if kind=='chiusure' else 'documento' }}</dt><dd>{{ doc.doc_date }}</dd><dt>Numero documento</dt><dd>{{ details.invoice_number or 'Non indicato' }}</dd>
 {% if kind=='fatture' %}<dt>Scadenza</dt><dd>{{ details.due_date or 'Non indicata · da confermare' }}</dd><dt>Arrivo</dt><dd>{{ details.received_date or 'Non attestato' }}</dd>{% endif %}
 <dt>Data e ora stampate</dt><dd>{{ details.printed_date or 'Non indicata' }} {{ details.printed_time or '' }}</dd></dl></section>
 <section class="card"><h2>03 / Dettagli e prodotti</h2><div class="bd-table"><table><thead><tr><th>Descrizione</th><th>Quantità</th><th>Unità</th><th>Importo</th></tr></thead><tbody>{% for line in doc.lines %}<tr><td>{{ line.description }}</td><td>{{ line.qty if line.qty is not none else '—' }}</td><td>{{ line.unit or '—' }}</td><td>{{ ('%.2f'|format(line.amount)|replace('.',',') ~ ' €') if line.amount is not none else '—' }}</td></tr>{% else %}<tr><td colspan="4">Nessuna riga prodotto indicata.</td></tr>{% endfor %}</tbody></table></div></section>

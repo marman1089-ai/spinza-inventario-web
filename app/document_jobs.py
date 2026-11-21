@@ -119,7 +119,7 @@ def run_document(kind,doc_id,username='system'):
     table,datecol,label=KINDS[kind]
     with connect() as conn:
         cur=conn.cursor()
-        src=cur.execute(f'SELECT * FROM {table} WHERE id={p()}',(doc_id,)).fetchone()
+        src=cur.execute(f'SELECT d.*,t.details_json AS prior_details FROM {table} d LEFT JOIN document_details t ON t.kind={p()} AND t.doc_id=d.id WHERE d.id={p()}',(kind,doc_id)).fetchone()
         if not src:
             raise ValueError('Documento originale non più disponibile.')
         if not src.get('data'):
@@ -130,6 +130,8 @@ def run_document(kind,doc_id,username='system'):
         old=cur.execute(f'SELECT * FROM digital_documents WHERE kind={p()} AND doc_id={p()}',(kind,doc_id)).fetchone()
         old_revision=old['revision'] if old else 0
         applied=cur.execute(f'SELECT id FROM invoice_imports WHERE invoice_doc_id={p()} AND store={p()}',(doc_id,src['store'])).fetchone() if kind=='fatture' else None
+    prior_details=json.loads(src.get('prior_details') or '{}')
+    selected_date=prior_details.get('selected_date') if kind=='chiusure' else None
     data=bytes(src['data'])
     if not data.startswith(b'%PDF'):
         from .pdf_tools import ensure_pdf
@@ -142,22 +144,14 @@ def run_document(kind,doc_id,username='system'):
     if not str(result.get('text') or '').strip():
         raise ValueError('Nessun testo leggibile nella foto: originale conservato, lettura da riprovare.')
     warnings=list(result.get('warnings') or [])
-    dt=result.get('date')
+    dt=selected_date or (result.get('printed_date') if kind=='chiusure' else None) or result.get('date')
     try:
         if not dt:
             raise HTTPException(422,'')
         dt=iso(dt)
     except HTTPException:
         dt=str(src[datecol]);warnings.append('Data non leggibile: controllare la data proposta.')
-    # Closing printouts at/before 06:59 belong to the previous shift.
-    if kind=='chiusure' and result.get('printed_time') and result.get('printed_date'):
-        try:
-            from datetime import date
-            hour=int(result['printed_time'].split(':')[0])
-            if 0 <= hour <= 6:
-                dt=(date.fromisoformat(result['printed_date'])-timedelta(days=1)).isoformat()
-        except (ValueError,TypeError):
-            warnings.append('Ora/data stampa da confermare per il turno.')
+    # Preserve the real document date. Cash reconciliation applies its own day offset.
     supplier=result.get('supplier') or (src.get('supplier') or '')
     amount=number(result.get('amount'),optional=True)
     if not supplier:
@@ -176,7 +170,7 @@ def run_document(kind,doc_id,username='system'):
                    raw_text=result.get('text') or '',lines=lines,warnings='\n'.join(warnings))
     with connect() as conn:
         begin(conn);cur=conn.cursor()
-        details={k:v for k,v in result.items() if k not in ('text','lines','description','warnings')}
+        details={**prior_details,**{k:v for k,v in result.items() if k not in ('text','lines','description','warnings')}}
         cur.execute(f'INSERT INTO document_details(kind,doc_id,details_json) VALUES({p()},{p()},{p()}) ON CONFLICT(kind,doc_id) DO UPDATE SET details_json=excluded.details_json',
                     (kind,doc_id,json.dumps(details,ensure_ascii=False)))
         current=cur.execute(f'SELECT * FROM digital_documents WHERE kind={p()} AND doc_id={p()}'+(' FOR UPDATE' if using_postgres() else ''),(kind,doc_id)).fetchone()

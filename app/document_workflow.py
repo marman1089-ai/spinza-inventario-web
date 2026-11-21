@@ -8,10 +8,13 @@ from .db import connect, using_postgres
 from .document_jobs import KINDS, p, enqueue, start_worker
 
 
-def submitted(kind, doc_id, store, username):
+def submitted(kind, doc_id, store, username, selected_date=None):
     with connect() as conn:
         conn.cursor().execute(f'INSERT INTO document_submissions(kind,doc_id,username,state,updated_at) VALUES({p()},{p()},{p()},{p()},{p()})',
                               (kind,doc_id,username,'automatic',datetime.now(timezone.utc).isoformat()))
+        if selected_date:
+            conn.cursor().execute(f'INSERT INTO document_details(kind,doc_id,details_json) VALUES({p()},{p()},{p()}) ON CONFLICT(kind,doc_id) DO UPDATE SET details_json=excluded.details_json',
+                                  (kind,doc_id,json.dumps({'selected_date':selected_date})))
     enqueue(kind,doc_id,store,username)
     start_worker()
 
