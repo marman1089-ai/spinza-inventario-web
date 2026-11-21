@@ -16,6 +16,7 @@ _stop=threading.Event()
 _thread=None
 HISTORY_START='2026-11-01'
 HISTORY_END='2026-12-01'
+NEW_UPLOADS_SINCE='2026-11-21T18:55:20.629613+00:00'
 
 
 def p():
@@ -90,37 +91,8 @@ def merge_missing_fields(cur,kind,doc_id,current,extracted):
 
 
 def enqueue_history(store=None,kind=None):
-    # Also rescan on archive visits, so existing uploads never require uploading again.
-    total=0
-    selected={kind:KINDS[kind]} if kind in KINDS else KINDS
-    with connect() as conn:
-        cur=conn.cursor()
-        for key,(table,datecol,_) in selected.items():
-            sql=f"SELECT id,store FROM {table} WHERE data IS NOT NULL AND COALESCE(filename,'')<>'registrazione-digitale' AND CAST({datecol} AS TEXT)>={p()} AND CAST({datecol} AS TEXT)<{p()}"
-            args=[HISTORY_START,HISTORY_END]
-            if store and store!='ALL':
-                sql+=f' AND store={p()}';args.append(store)
-            rows=cur.execute(sql,tuple(args)).fetchall()
-            for row in rows:
-                cur.execute(f"""INSERT INTO document_ai_jobs(kind,doc_id,store,requested_by,updated_at)
-                    VALUES({','.join([p()]*5)}) ON CONFLICT(kind,doc_id) DO NOTHING""",(key,row['id'],row['store'],'archivio',stamp()))
-                total+=max(cur.rowcount,0)
-                job=cur.execute(f'SELECT * FROM document_ai_jobs WHERE kind={p()} AND doc_id={p()}',(key,row['id'])).fetchone()
-                current=cur.execute(f'SELECT * FROM digital_documents WHERE kind={p()} AND doc_id={p()}',(key,row['id'])).fetchone()
-                if job['state']=='done':
-                    try:
-                        extracted=json.loads(job['extracted_json'] or '{}')
-                    except (ValueError,TypeError):
-                        extracted={}
-                    if current and extracted:
-                        merge_missing_fields(cur,key,row['id'],current,extracted)
-                    missing_text=not current or (not str(current.get('raw_text') or '').strip() and not str(extracted.get('raw_text') or extracted.get('text') or '').strip())
-                    if missing_text:
-                        # A completed marker without a usable transcript must be recovered automatically.
-                        cur.execute(f"UPDATE document_ai_jobs SET state='pending',updated_at={p()} WHERE kind={p()} AND doc_id={p()}",(stamp(),key,row['id']))
-
-    _wakeup.set()
-    return total
+    # Historical originals are never submitted to AI after the stop request.
+    return 0
 
 
 def archive_state(store,kind):
@@ -152,6 +124,9 @@ def run_document(kind,doc_id,username='system'):
             raise ValueError('Documento originale non più disponibile.')
         if not src.get('data'):
             raise ValueError('Registrazione scritta: nessuna foto da leggere.')
+        submission=cur.execute(f"SELECT state FROM document_submissions WHERE kind={p()} AND doc_id={p()} AND updated_at>={p()}",(kind,doc_id,NEW_UPLOADS_SINCE)).fetchone()
+        if not submission or submission['state']!='pending':
+            raise ValueError('Storico sospeso: vengono letti soltanto i nuovi caricamenti.')
         old=cur.execute(f'SELECT * FROM digital_documents WHERE kind={p()} AND doc_id={p()}',(kind,doc_id)).fetchone()
         old_revision=old['revision'] if old else 0
         applied=cur.execute(f'SELECT id FROM invoice_imports WHERE invoice_doc_id={p()} AND store={p()}',(doc_id,src['store'])).fetchone() if kind=='fatture' else None
@@ -163,7 +138,7 @@ def run_document(kind,doc_id,username='system'):
     if kind=='fatture':
         with connect() as conn:
             catalog=[dict(r) for r in conn.cursor().execute(f'SELECT id,name,unit,area,location FROM products WHERE store={p()} ORDER BY id',(src['store'],)).fetchall()]
-    result=extract_document(data,label,inventory=catalog)
+    result=extract_document(data,label,inventory=catalog,new_upload=True)
     if not str(result.get('text') or '').strip():
         raise ValueError('Nessun testo leggibile nella foto: originale conservato, lettura da riprovare.')
     if result.get('readable') is False:
@@ -229,19 +204,17 @@ def run_document(kind,doc_id,username='system'):
 
 
 def process_one():
-    if os.getenv('DOCUMENT_AI_ENABLED', '0') != '1':
+    if os.getenv('DOCUMENT_AI_ENABLED', 'new') == '0':
         return False
     if not os.environ.get('OPENAI_API_KEY','').strip():
         return False
     with connect() as conn:
         begin(conn);cur=conn.cursor()
-        retry_before=(datetime.now(timezone.utc)-timedelta(minutes=15)).isoformat()
-        cur.execute(f"UPDATE document_ai_jobs SET state='pending',error='' WHERE state='error' AND error NOT LIKE {p()} AND attempts<3 AND updated_at<{p()}",('Foto non leggibile:%',retry_before))
+        eligible=f"EXISTS(SELECT 1 FROM document_submissions s WHERE s.kind=document_ai_jobs.kind AND s.doc_id=document_ai_jobs.doc_id AND s.state='pending' AND s.updated_at>={p()})"
         stale=(datetime.now(timezone.utc)-timedelta(minutes=10)).isoformat()
-        cur.execute(f"UPDATE document_ai_jobs SET state='pending' WHERE state='working' AND updated_at<{p()}",(stale,))
-        eligible=' OR '.join(f"(kind='{k}' AND doc_id IN (SELECT id FROM {t} WHERE CAST({d} AS TEXT)>='{HISTORY_START}' AND CAST({d} AS TEXT)<'{HISTORY_END}'))" for k,(t,d,_) in KINDS.items())
-        row=cur.execute("SELECT * FROM document_ai_jobs WHERE state='pending' AND (EXISTS(SELECT 1 FROM document_submissions s WHERE s.kind=document_ai_jobs.kind AND s.doc_id=document_ai_jobs.doc_id AND s.state='pending') OR ("+eligible+")) ORDER BY CASE WHEN requested_by='archivio' THEN 1 ELSE 0 END,updated_at,kind,doc_id LIMIT 1"+
-            (' FOR UPDATE SKIP LOCKED' if using_postgres() else '')).fetchone()
+        cur.execute(f"UPDATE document_ai_jobs SET state='pending' WHERE state='working' AND updated_at<{p()} AND {eligible}",(stale,NEW_UPLOADS_SINCE))
+        row=cur.execute("SELECT * FROM document_ai_jobs WHERE state='pending' AND "+eligible+" ORDER BY updated_at,kind,doc_id LIMIT 1"+
+            (' FOR UPDATE SKIP LOCKED' if using_postgres() else ''),(NEW_UPLOADS_SINCE,)).fetchone()
         if not row:
             return False
         cur.execute(f"UPDATE document_ai_jobs SET state='working',attempts=attempts+1,updated_at={p()} WHERE kind={p()} AND doc_id={p()} AND state='pending'",(stamp(),row['kind'],row['doc_id']))
@@ -258,7 +231,7 @@ def process_one():
 
 
 def start_worker():
-    if os.getenv('DOCUMENT_AI_ENABLED', '0') != '1':
+    if os.getenv('DOCUMENT_AI_ENABLED', 'new') == '0':
         return
     global _thread
     if not os.environ.get('OPENAI_API_KEY','').strip():
@@ -268,7 +241,9 @@ def start_worker():
     _stop.clear()
     with connect() as conn:
         stale=(datetime.now(timezone.utc)-timedelta(minutes=10)).isoformat()
+        conn.cursor().execute(f"UPDATE document_ai_jobs SET state='paused' WHERE state IN ('pending','working') AND NOT EXISTS(SELECT 1 FROM document_submissions s WHERE s.kind=document_ai_jobs.kind AND s.doc_id=document_ai_jobs.doc_id AND s.state='pending' AND s.updated_at>={p()})",(NEW_UPLOADS_SINCE,))
         conn.cursor().execute(f"UPDATE document_ai_jobs SET state='pending' WHERE state='working' AND updated_at<{p()}",(stale,))
+
     def loop():
         while not _stop.is_set():
             try:

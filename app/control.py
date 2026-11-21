@@ -183,7 +183,6 @@ def install(app, api):
         if needs_schema_sync():
             init_control_db()
         from .document_jobs import enqueue_history, start_worker
-        enqueue_history()
         start_worker()
 
     @app.on_event('shutdown')
@@ -208,17 +207,13 @@ def install(app, api):
             cur=conn.cursor();sql='SELECT j.* FROM document_ai_jobs j WHERE ('+eligible+" OR EXISTS(SELECT 1 FROM document_submissions s WHERE s.kind=j.kind AND s.doc_id=j.doc_id))";params=[]
             if store!='ALL':sql+=f' AND j.store={ph()}';params=[store]
             rows=cur.execute(sql+' ORDER BY updated_at DESC',tuple(params)).fetchall()
-        states={state:sum(1 for r in rows if r['state']==state) for state in ['pending','working','done','error']}
+        states={state:sum(1 for r in rows if r['state']==state) for state in ['pending','working','done','error','paused']}
         return render('digital_history.html',**ctx(user,store,rows=rows,states=states,ai_ready=bool(os.getenv('OPENAI_API_KEY'))))
 
     @app.post('/admin/digitalizzazione/accoda')
     def queue_history(request:Request):
         user,store=auth(request,admin=True)
-        from .document_jobs import enqueue_history
-        enqueue_history(store)
-        from .document_jobs import start_worker
-        start_worker()
-        return RedirectResponse('/admin/digitalizzazione',status_code=303)
+        raise HTTPException(410,'Digitalizzazione dello storico disattivata: carica un nuovo documento per la lettura AI.')
 
     @app.get('/report-documenti')
     def report(request: Request, kind: str = 'tutti', days: int = 7, start: str = '', end: str = '', download: str = ''):

@@ -10210,3 +10210,11 @@ install_document_workflow(app, globals())
 
 from .consumption import install as install_consumption
 install_consumption(app, globals())
+
+
+def _new_document_ids(kind):
+    from .document_jobs import NEW_UPLOADS_SINCE
+    with connect() as conn:
+        return {r['doc_id'] for r in conn.cursor().execute(f'SELECT doc_id FROM document_submissions WHERE kind={_ph()} AND updated_at>={_ph()}',(kind,NEW_UPLOADS_SINCE)).fetchall()}
+
+templates.globals['new_document_ids'] = _new_document_ids
