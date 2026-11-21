@@ -203,8 +203,10 @@ def install(app, api):
     def history_status(request:Request):
         user,store=auth(request,admin=True)
         with connect() as conn:
-            cur=conn.cursor();sql='SELECT * FROM document_ai_jobs WHERE 1=1';params=[]
-            if store!='ALL':sql+=f' AND store={ph()}';params=[store]
+            from .document_jobs import HISTORY_START,HISTORY_END
+            eligible=' OR '.join(f"(j.kind='{k}' AND j.doc_id IN (SELECT id FROM {t} WHERE CAST({d} AS TEXT)>='{HISTORY_START}' AND CAST({d} AS TEXT)<'{HISTORY_END}'))" for k,(t,d,_) in KINDS.items())
+            cur=conn.cursor();sql='SELECT j.* FROM document_ai_jobs j WHERE ('+eligible+" OR EXISTS(SELECT 1 FROM document_submissions s WHERE s.kind=j.kind AND s.doc_id=j.doc_id))";params=[]
+            if store!='ALL':sql+=f' AND j.store={ph()}';params=[store]
             rows=cur.execute(sql+' ORDER BY updated_at DESC',tuple(params)).fetchall()
         states={state:sum(1 for r in rows if r['state']==state) for state in ['pending','working','done','error']}
         return render('digital_history.html',**ctx(user,store,rows=rows,states=states,ai_ready=bool(os.getenv('OPENAI_API_KEY'))))

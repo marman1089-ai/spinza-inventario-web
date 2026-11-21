@@ -234,7 +234,7 @@ def process_one():
     with connect() as conn:
         begin(conn);cur=conn.cursor()
         retry_before=(datetime.now(timezone.utc)-timedelta(minutes=15)).isoformat()
-        cur.execute(f"UPDATE document_ai_jobs SET state='pending',error='' WHERE state='error' AND error NOT LIKE 'Foto non leggibile:%' AND attempts<3 AND updated_at<{p()}",(retry_before,))
+        cur.execute(f"UPDATE document_ai_jobs SET state='pending',error='' WHERE state='error' AND error NOT LIKE {p()} AND attempts<3 AND updated_at<{p()}",('Foto non leggibile:%',retry_before))
         stale=(datetime.now(timezone.utc)-timedelta(minutes=10)).isoformat()
         cur.execute(f"UPDATE document_ai_jobs SET state='pending' WHERE state='working' AND updated_at<{p()}",(stale,))
         eligible=' OR '.join(f"(kind='{k}' AND doc_id IN (SELECT id FROM {t} WHERE CAST({d} AS TEXT)>='{HISTORY_START}' AND CAST({d} AS TEXT)<'{HISTORY_END}'))" for k,(t,d,_) in KINDS.items())

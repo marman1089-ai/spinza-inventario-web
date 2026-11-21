@@ -72,6 +72,29 @@ class DocumentWorkflowTests(fixture.unittest.TestCase):
         self.assertEqual(jobs.enqueue_history(),0)
         self.assertEqual(sorted((r['kind'],r['doc_id']) for r in self.sql('SELECT * FROM document_ai_jobs')),sorted(expected))
 
+    def test_worker_sql_parameters_are_valid_for_postgresql(self):
+        from psycopg._queries import PostgresQuery
+        from psycopg.adapt import Transformer
+        from contextlib import contextmanager
+        class Cursor:
+            rowcount=0
+            def execute(self,query,args=()):
+                PostgresQuery(Transformer()).convert(query,args)
+                return self
+            def fetchone(self):return None
+        class Connection:
+            def cursor(self):return Cursor()
+        @contextmanager
+        def database():yield Connection()
+        with patch.dict(jobs.os.environ,{'OPENAI_API_KEY':'test-only'}),patch.object(jobs,'using_postgres',return_value=True),patch.object(jobs,'connect',database):
+            self.assertFalse(jobs.process_one())
+
+    def test_history_dashboard_hides_jobs_from_before_november(self):
+        did=self.doc()
+        self.sql("UPDATE invoices_docs SET doc_date='2026-10-31' WHERE id=?",(did,))
+        jobs.enqueue('fatture',did,'spinza','archivio')
+        self.assertNotIn(f'/schede/fatture/{did}',self.client.get('/admin/digitalizzazione').text)
+
     def test_cross_store_and_other_uploader_cannot_preview(self):
         did=self.prepare('fatture');self.login(3)
         self.assertEqual(self.client.get(f'/schede/fatture/{did}').status_code,404)
