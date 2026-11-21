@@ -2,7 +2,7 @@
 import os
 from .db import connect, using_postgres
 
-SCHEMA_VERSION = '2026-10-29-log-area-v2'
+SCHEMA_VERSION = '2026-11-21-document-workflow-v1'
 
 def needs_schema_sync():
     if os.getenv('FORCE_SCHEMA_SYNC_ON_START') == '1' or not using_postgres():

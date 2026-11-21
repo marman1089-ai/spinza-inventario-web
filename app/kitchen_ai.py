@@ -68,6 +68,8 @@ def source_hash(row):
     return digest([str(row['doc_date']),row['supplier'],row['filename'],hashlib.sha256(bytes(row['data'] or b'')).hexdigest()])
 
 def normalize_result(result,products):
+    if isinstance(result,dict) and result.get('readable') is False:
+        raise ValueError('Foto non leggibile: '+str(result.get('quality_reason') or 'Scatta una foto nitida di tutto il documento.'))
     if not isinstance(result,dict) or not isinstance(result.get('lines'),list) or not str(result.get('text') or '').strip():
         raise ValueError('Nessuna trascrizione completa leggibile: originale conservato, riprova con una foto più chiara.')
     if len(result['lines'])>500:raise ValueError('Troppi prodotti: dividi il documento in più fatture.')
@@ -182,7 +184,7 @@ def view_context(request,store,week,doc_id):
         rows=cur.execute(f'SELECT doc_id,state,error,updated_at,revision FROM kitchen_invoice_ai_jobs WHERE store={ph()} AND week_start={ph()}',(store,week)).fetchall()
         job=cur.execute(f'SELECT * FROM kitchen_invoice_ai_jobs WHERE store={ph()} AND doc_id={ph()}',(store,doc_id)).fetchone() if doc_id else None
     proposal=json.loads(job['payload']) if job and job['payload'] else None
-    return dict(ai_status_token=status_token(rows),ai_pending=any(r['state'] in ('pending','working') for r in rows),ai_jobs={r['doc_id']:r for r in rows},ai_job=job,ai_proposal=proposal,ai_configured=configured(),ai_csrf=token,ai_model=os.getenv('OPENAI_DOCUMENT_MODEL','gpt-6.1-terra'))
+    return dict(ai_status_token=status_token(rows),ai_pending=any(r['state'] in ('pending','working') for r in rows),ai_jobs={r['doc_id']:r for r in rows},ai_job=job,ai_proposal=proposal,ai_configured=configured(),ai_csrf=token,ai_model=os.getenv('OPENAI_DOCUMENT_MODEL','gpt-4.1-mini'))
 
 def install(app,api):
     def auth(request,store):

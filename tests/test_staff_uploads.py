@@ -30,18 +30,19 @@ class UploadTests(unittest.TestCase):
             response=send('/'+kind+'/upload',data=body,files=files)
             self.assertEqual(response.status_code,303,response.text)
             own_page=self.client.get(response.headers['location'])
-            self.assertIn('Documento inviato',own_page.text)
-            self.assertIn('In attesa di verifica',own_page.text)
+            self.assertIn('Controllo leggibilità',own_page.text)
+            self.assertIn('Conferma',own_page.text)
             doc=self.sql(f'SELECT * FROM {table}')[0]
             self.assertEqual(doc['uploaded_by'],'teststaff')
             self.assertEqual(len(PdfReader(io.BytesIO(doc['data'])).pages),pages)
             documents[kind]=doc['id']
-            self.assertEqual(self.client.get(f'/{kind}/{doc["id"]}').status_code,200)
+            self.assertEqual(self.client.get(f'/{kind}/{doc["id"]}').status_code,403)
+            self.assertEqual(self.client.get(f'/schede/{kind}/{doc["id"]}/anteprima').status_code,200)
             malformed=send('/'+kind+'/upload',files={'files':('falso.pdf',b'%PDF bad','application/pdf')})
             self.assertEqual(malformed.status_code,422)
         self.login(3)
         for kind in ('chiusure','fatture'):
-            self.assertEqual(self.client.get(f'/{kind}/{documents[kind]}').status_code,404)
+            self.assertEqual(self.client.get(f'/{kind}/{documents[kind]}').status_code,403)
         self.login()
         archive=self.client.get('/chiusure')
         self.assertIn('In attesa di verifica',archive.text)

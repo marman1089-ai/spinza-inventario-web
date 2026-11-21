@@ -39,6 +39,16 @@ document.addEventListener('DOMContentLoaded', () => {
         label.textContent=files.map(f=>f.name || 'Foto scattata').join(', ');
         const remove=document.createElement('button');remove.type='button';remove.className='du-remove';remove.textContent='✕ Rimuovi';
         remove.addEventListener('click',()=>{li.remove();update();});
+        const previews=[];
+        for(const file of files){
+          if(!file.type.startsWith('image/') && file.type!=='application/pdf')continue;
+          const url=URL.createObjectURL(file);previews.push(url);
+          const preview=document.createElement(file.type==='application/pdf'?'iframe':'img');
+          preview.src=url;preview.title='Anteprima pagina';preview.style.cssText='display:block;width:100%;max-width:400px;max-height:340px;object-fit:contain;margin:12px 0';
+          if(preview.tagName==='IMG')preview.alt='Foto da controllare prima dell’invio';
+          li.appendChild(preview);
+        }
+        remove.addEventListener('click',()=>previews.forEach(url=>URL.revokeObjectURL(url)),{once:true});
         li.append(label,remove); update();
       });
       input.click();
