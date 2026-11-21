@@ -1,6 +1,6 @@
-{% extends "base.html" %}{% set title="Fatture" %}{% block content %}{% set fresh_ids=new_document_ids('fatture') %}
-{% if caricato %}<p class="card" role="status">{{ 'Documento salvato.' if user.role=='admin' else 'Documento inviato all’admin per la verifica.' }}</p>{% endif %}
-{% if user.role!='admin' %}<p class="muted">Rivedi la tua foto durante l’invio, poi conferma la scheda digitale. Dopo la conferma solo l’admin può aprire la foto.</p>{% endif %}
+{% extends "base.html" %}{% set title="Fatture" %}{% block content %}{% set fresh_jobs=new_document_jobs('fatture') %}{% set fresh_ids=fresh_jobs %}{% set document_kind='fatture' %}
+{% if caricato %}<p class="card" role="status">Foto salvata. La scheda digitale sarà disponibile appena pronta.</p>{% endif %}
+{% if user.role!='admin' %}<p class="muted">La foto viene salvata e digitalizzata automaticamente. Solo l’admin può aprire l’originale.</p>{% endif %}
 
 <link rel="stylesheet" href="/static/multi_upload.css?v=3">
 <style>
@@ -10,16 +10,16 @@
 .supplier-option:hover,.supplier-option:focus{background:#64748b44}.supplier-logo{position:absolute;right:16px;top:14px;width:66px;height:55px;object-fit:contain}
 .invoice-card{position:relative;padding-right:92px}.logo-form{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 </style>
-<div class="shine-hero"><span class="eyebrow">ARCHIVIO DOCUMENTALE</span><h1>🧾 Fatture</h1><p>Scatta la foto, controlla la scheda digitale e conferma i dati.</p></div>
+<div class="shine-hero"><span class="eyebrow">ARCHIVIO DOCUMENTALE</span><h1>🧾 Fatture</h1><p>Scatta la foto: la scheda digitale viene creata automaticamente.</p></div>
 {% if user.role=='admin' %}<div class="card shine-panel"><h2>Fatture e consumi della cucina</h2><p>Leggi le fatture con l’AI e conferma i prodotti acquistati per confrontarli con i conteggi settimanali.</p><a class="shine-button" href="/inventario/fatture-settimana?store={{ active_store if active_store in stores else 'spinza' }}">Apri lettura AI e fatture settimanali</a> <a class="shine-button secondary" href="/admin/digitalizzazione">Digitalizzazione novembre</a></div>{% endif %}<div class="card shine-panel">
 <form method="get" action="/fatture" class="shine-toolbar"><div class="supplier-picker" data-supplier-picker data-search="1"><input name="supplier" placeholder="Cerca fatture per fornitore" value="{{ supplier or '' }}" autocomplete="off" aria-label="Cerca fornitore"><select name="supplier_choice" class="supplier-native-select" aria-label="Elenco fornitori ricerca" size="1"><option value="">Tutti i fornitori</option>{% for name in suppliers %}<option value="{{ name }}">{{ name }}</option>{% endfor %}</select></div><button class="shine-button">Cerca</button></form>
 <h3>Carica nuovo documento</h3>
-<form method="post" action="/fatture/upload" enctype="multipart/form-data">
+<form method="post" action="/fatture/upload" enctype="multipart/form-data" data-closure-upload>
   <div class="supplier-picker" data-supplier-picker><label>Fornitore (facoltativo: viene letto dalla foto)</label><input name="supplier" placeholder="Cerca o seleziona fornitore" autocomplete="off" aria-label="Fornitore" aria-expanded="false" aria-controls="supplier-options"><select name="supplier_choice" class="supplier-native-select" aria-label="Elenco fornitori per nuova fattura"><option value="">▼ Seleziona un fornitore dall’elenco</option>{% for name in suppliers %}<option value="{{ name }}">{{ name }}</option>{% endfor %}<option value="__new__">+ Aggiungi fornitore</option></select></div>
   <input name="doc_date" type="date" aria-label="Data fattura">
   <div class="upload-collector" data-document-upload><label>Foto o PDF <input type="file" name="files" multiple accept="image/jpeg,image/png,image/webp,.heic,.heif,application/pdf" required></label></div>
   <div class="multi-upload-hint">📷 Seleziona più foto oppure PDF: verranno salvati in <strong>un solo documento multipagina</strong>. <span class="upload-count" aria-live="polite"></span></div>
-  <button class="shine-button">Invia e controlla leggibilità</button>
+  <button class="shine-button">Invia</button>
 </form>
 </div>
 {% if user.role == 'admin' %}
@@ -31,13 +31,13 @@
 <div class="shine-doc-grid">{% for r in rows %}<div class="card shine-panel invoice-card">
 {% if r.logo_key %}<img class="supplier-logo" src="/fatture/logo/{{ r.logo_key|urlencode }}" alt="Logo {{ r.supplier }}" loading="lazy">{% endif %}
 <span class="eyebrow">{{ stores.get(r.store,r.store) }}</span><h3>🧾 {{ r.supplier or 'Fornitore non indicato' }}</h3>
-{% if r.id in pending_ids %}<p class="pill">In attesa di verifica</p>{% endif %}<p><strong>📅 Data fattura:</strong> {{ r.doc_date or 'Non indicata' }}</p><p><strong>👤 Caricata da:</strong> {{ r.uploaded_by or 'Non indicato' }}</p>
+{% if r.id in pending_ids and r.id not in fresh_ids %}<p class="pill">In attesa di verifica</p>{% endif %}<p><strong>📅 Data fattura:</strong> {{ r.doc_date or 'Non indicata' }}</p><p><strong>👤 Caricata da:</strong> {{ r.uploaded_by or 'Non indicato' }}</p>
 <p class="muted">📄 {{ r.filename or 'Documento' }}</p>
 {% if user.role=='admin' %}<details class="invoice-editor"><summary>✏️ Modifica fattura (fornitore / orientamento)</summary>
 <form method="post" action="/fatture/{{ r.id }}/modifica">
 <div class="supplier-picker" data-supplier-picker><label>Fornitore</label><input name="supplier" value="{{ r.supplier or '' }}" placeholder="Cerca fornitore" autocomplete="off"><select name="supplier_choice" class="supplier-native-select" aria-label="Fornitore fattura">{% for name in suppliers %}<option value="{{ name }}" {% if name == r.supplier %}selected{% endif %}>{{ name }}</option>{% endfor %}<option value="__new__">+ Aggiungi fornitore</option></select></div>
 <label>Ruota documento <select name="rotation"><option value="0">Non ruotare</option><option value="90">90° in senso orario</option><option value="180">180°</option><option value="270">90° in senso antiorario</option></select></label><button class="shine-button" type="submit">Salva modifiche</button></form></details>{% endif %}
-{% if r.id in fresh_ids %}<a class="shine-button" href="/schede/fatture/{{ r.id }}">Apri scheda digitale</a>{% endif %}{% if user.role=='admin' %}<a class="shine-button secondary" href="/fatture/{{ r.id }}" target="_blank">Apri originale</a>{% endif %}{% if can_delete_uploaded_document(user, r) %}<form action="/fatture/{{ r.id }}/delete" method="post" onsubmit="return confirm('Eliminare definitivamente il documento?')"><button class="shine-button secondary">Elimina</button></form>{% endif %}
+{% include '_document_archive_action.html' %}{% if user.role=='admin' %}<a class="shine-button secondary" href="/fatture/{{ r.id }}" target="_blank">Apri originale</a>{% endif %}{% if can_delete_uploaded_document(user, r) %}<form action="/fatture/{{ r.id }}/delete" method="post" onsubmit="return confirm('Eliminare definitivamente il documento?')"><button class="shine-button secondary">Elimina</button></form>{% endif %}
 </div>{% else %}<div class="card shine-panel">Nessun documento ancora caricato.</div>{% endfor %}</div>
 <script>
 (()=>{
@@ -76,4 +76,4 @@ for(const picker of document.querySelectorAll('[data-supplier-picker]')){
 }
 })();
 </script><script src="/static/js/document_multi_upload.js?v=5" defer></script>
-{% endblock %}
+<link rel="stylesheet" href="/static/css/closure-digital-progress.css?v=2"><script src="/static/js/closure-digital-progress.js?v=1" defer></script>{% endblock %}

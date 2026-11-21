@@ -7826,7 +7826,9 @@ def secondary_expenses_page(request: Request, q: str = ""):
             sql += f" AND CAST(expense_date AS TEXT) LIKE {ph}"
             params.append(f"%{q}%")
 
-        sql += " AND " + available_document('spese-secondarie')
+        if not is_admin(request):
+            sql += " AND ("+available_document('spese-secondarie')+f" OR uploaded_by={ph})"
+            params.append(user['username'])
         sql += " ORDER BY store, expense_date DESC, id DESC" if store == "ALL" else " ORDER BY expense_date DESC, id DESC"
         rows = cur.execute(sql, tuple(params)).fetchall()
 
@@ -7875,7 +7877,7 @@ async def secondary_expenses_upload(request: Request, expense_date: str = Form("
 
     from .document_workflow import submitted
     submitted('spese-secondarie', new_doc_id, store, user['username'])
-    return RedirectResponse('/schede/spese-secondarie/'+str(new_doc_id), status_code=303)
+    return RedirectResponse('/spese-secondarie',status_code=303)
 
 
 @app.get("/spese-secondarie/{doc_id}")
@@ -8908,7 +8910,7 @@ async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: 
 
     from .document_workflow import submitted
     submitted('fatture', new_doc_id, store, user['username'])
-    return RedirectResponse('/schede/fatture/'+str(new_doc_id), status_code=303)
+    return RedirectResponse('/fatture',status_code=303)
 
 
 @app.get("/fatture/importa-prodotti", response_class=HTMLResponse)
