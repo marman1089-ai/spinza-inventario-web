@@ -8876,11 +8876,12 @@ async def invoices_upload(request: Request, supplier: str = Form(""), doc_date: 
     supplier = " ".join((supplier or (supplier_choice if supplier_choice != "__new__" else "")).split())
     if len(supplier) > 180:
         raise HTTPException(422, "Nome fornitore troppo lungo")
-    # Usa il nome già registrato per evitare duplicati con maiuscole diverse.
-    with connect() as conn:
-        existing_suppliers = conn.cursor().execute("SELECT DISTINCT supplier FROM invoices_docs WHERE supplier IS NOT NULL AND TRIM(supplier) <> ''").fetchall()
-    canonical = next((r['supplier'] for r in existing_suppliers if _supplier_key(r['supplier']) == _supplier_key(supplier)), None)
-    supplier = canonical or supplier
+    if supplier:
+        # Usa il nome già registrato per evitare duplicati con maiuscole diverse.
+        with connect() as conn:
+            existing_suppliers = conn.cursor().execute("SELECT DISTINCT supplier FROM invoices_docs WHERE supplier IS NOT NULL AND TRIM(supplier) <> ''").fetchall()
+        canonical = next((r['supplier'] for r in existing_suppliers if _supplier_key(r['supplier']) == _supplier_key(supplier)), None)
+        supplier = canonical or supplier
 
     from .control import iso
     doc_date = iso(doc_date or _today_str())
