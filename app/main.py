@@ -7699,7 +7699,8 @@ async def closures_upload(request: Request, closure_date: str = Form(""), files:
 
     from .document_workflow import submitted
     submitted('chiusure', new_doc_id, store, user['username'])
-    return RedirectResponse('/schede/chiusure/'+str(new_doc_id), status_code=303)
+    request.session['upload_notice']='chiusure'
+    return RedirectResponse('/chiusure',status_code=303)
 
 
 @app.get("/chiusure/{doc_id}")
@@ -10218,3 +10219,12 @@ def _new_document_ids(kind):
         return {r['doc_id'] for r in conn.cursor().execute(f'SELECT doc_id FROM document_submissions WHERE kind={_ph()} AND updated_at>={_ph()}',(kind,NEW_UPLOADS_SINCE)).fetchall()}
 
 templates.globals['new_document_ids'] = _new_document_ids
+
+
+def _new_document_jobs(kind):
+    from .document_jobs import NEW_UPLOADS_SINCE
+    with connect() as conn:
+        rows=conn.cursor().execute(f"SELECT s.doc_id,COALESCE(j.state,'pending') AS state FROM document_submissions s LEFT JOIN document_ai_jobs j ON j.kind=s.kind AND j.doc_id=s.doc_id WHERE s.kind={_ph()} AND s.updated_at>={_ph()}",(kind,NEW_UPLOADS_SINCE)).fetchall()
+    return {row['doc_id']:row['state'] for row in rows}
+
+templates.globals['new_document_jobs']=_new_document_jobs
