@@ -25,6 +25,7 @@ SCHEMA = obj({
 # Shared fields keep all three document cards structurally consistent.
 SCHEMA['properties'].update({
     'readable': {'type': 'boolean'},
+    'essential_fields_readable': obj({key: {'type': 'boolean'} for key in ('issuer','date','total','items_or_payments')}),
     'quality_reason': {'type': 'string'},
     'printed_date': {'type': ['string', 'null']},
     'printed_time': {'type': ['string', 'null']},
@@ -42,6 +43,33 @@ SCHEMA['properties'].update({
     'change': {'type': ['number', 'null']},
 })
 SCHEMA['required'] = list(SCHEMA['properties'])
+
+
+def assess_readability(result):
+    """Cosmetic defects must not invalidate independently legible essential fields."""
+    checks=result.get('essential_fields_readable')
+    if not isinstance(checks,dict):
+        return result  # Legacy extraction and stored results keep their original assessment.
+    keys=('issuer','date','total','items_or_payments')
+    essential=all(checks.get(key) is True for key in keys)
+    from datetime import date
+    import math
+    try:
+        date.fromisoformat(str(result.get('date') or ''))
+        amount=result.get('amount')
+        complete=bool(str(result.get('supplier') or '').strip()) and isinstance(amount,(int,float)) and not isinstance(amount,bool) and math.isfinite(amount)
+    except ValueError:
+        complete=False
+    if essential and complete:
+        if result.get('readable') is False:
+            result['warnings']=list(result.get('warnings') or [])+['Difetti secondari della foto: i dati essenziali risultano leggibili.']
+        result['readable']=True
+        result['quality_reason']=''
+    else:
+        result['readable']=False
+        if not result.get('quality_reason'):
+            result['quality_reason']='Uno o più dati essenziali non sono leggibili o non sono stati estratti: emittente, data, totale e dettagli.'
+    return result
 
 
 def extract_document(data, kind, inventory=None):
@@ -63,9 +91,16 @@ def extract_document(data, kind, inventory=None):
         'e pagamenti come prodotti. Mantieni sconti e storni con segno. In text trascrivi tutto il documento.'
     )
     prompt += (
-        ' Valuta tutte le pagine: readable=false se foto sfocata, tagliata o totale, data o righe essenziali '
-        'non sono leggibili; spiega in quality_reason come rifare la foto. Non usare false solo perché '
-        'un campo facoltativo (scadenza, ticket, ecc.) non è stampato. '
+        ' Valuta la leggibilità dei DATI ESSENZIALI su tutte le pagine insieme. '
+        'essential_fields_readable indica separatamente se emittente, data, totale e dettagli prodotti/pagamenti '
+        'sono leggibili. Un dato ripetuto chiaramente in un’altra pagina dello stesso documento è leggibile. '
+        'readable=false SOLO se sfocatura, taglio o sovrapposizione impediscono di leggere dati essenziali. '
+        'Se data, emittente, righe/prodotti e totale si leggono, readable=true anche se bordi, logo, testo '
+        'legale, pubblicità o altri dettagli secondari sono tagliati, coperti, sbiaditi o sfocati. '
+        'Questi difetti secondari vanno soltanto in warnings e NON richiedono una nuova foto. '
+        'Scadenza, arrivo, ticket e altri campi non stampati restano null e non rendono il documento illeggibile. '
+        'Per le chiusure items_or_payments riguarda gli incassi effettivamente stampati, non prodotti assenti. '
+        'Spiega in quality_reason quali dati ESSENZIALI non si leggono e come rifare la foto, solo se necessario. '
         'printed_date e printed_time sono data e ora stampate; date resta la data del documento. '
         'Per le chiusure non sommare rapporti finanziari, chiusura e ricevuta di trasmissione della stessa sessione. '
         'Non confondere gran totale cumulativo con incasso giornaliero. card comprende POS e carte una sola volta. '
@@ -121,6 +156,6 @@ def extract_document(data, kind, inventory=None):
         parsed = json.loads(output)
         if not isinstance(parsed, dict) or not isinstance(parsed.get('lines'), list):
             raise ValueError()
-        return parsed
+        return assess_readability(parsed)
     except (ValueError, TypeError):
         raise ValueError('Risposta AI non valida. Compila a mano o riprova.') from None
