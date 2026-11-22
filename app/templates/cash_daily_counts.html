@@ -114,7 +114,7 @@
 </form>
 </section>
 <section class="card ct-scroll">
-<h2>Movimenti tra aziende</h2>
+<h2>Prestiti tra aziende</h2>
 {% if movements %}
 <table><thead><tr><th>Data</th><th>Movimento</th><th>Da</th><th>A</th><th>Importo</th><th>Nota</th></tr></thead><tbody>
 {% for loan in movements %}<tr><td>{{ loan.day }}</td><td>{{ loan.kind }}</td><td>{{ companies[loan.lender] }}</td><td>{{ companies[loan.borrower] }}</td><td>{{ euro(loan.amount_cents) }}</td><td>{{ loan.notes or '—' }}</td></tr>{% endfor %}
