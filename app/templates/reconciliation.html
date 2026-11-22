@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% macro money(value) %}{% if value is none %}—{% else %}{{ ('%.2f'|format(value/100))|replace('.',',') }} €{% endif %}{% endmacro %}
+{% block content %}
+<style>.check-card{border:1px solid var(--border,#ddd);border-radius:16px;padding:20px;margin:18px 0}.check-head{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}.check-status{font-size:22px;font-weight:700}.check-scroll{overflow:auto}.check-table{width:100%;min-width:540px}.check-table th,.check-table td{padding:12px;text-align:right}.check-table th:first-child,.check-table td:first-child{text-align:left}.check-diff{font-size:20px;font-weight:700}.check-links{display:flex;gap:18px;flex-wrap:wrap;margin-top:16px}</style>
+<h1>Controllo dati</h1>
+<p>Confronta report dei dipendenti, chiusure reali della cassa e contante trovato nei negozi.</p>
+<form method="get" class="check-head"><label>Negozio <select name="store">{% if brand == 'ALL' %}<option value="ALL">Tutti</option>{% endif %}{% for key,label in stores.items() %}{% if brand == 'ALL' or key == brand %}<option value="{{ key }}" {% if store == key %}selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}</select></label><label>Dal <input type="date" name="start" value="{{ start }}" required></label><label>Al <input type="date" name="end" value="{{ end }}" required></label><button type="submit">Confronta</button></form>
+<p>Il periodo si riferisce alla giornata del report. Chiusura della cassa e contante trovato sono abbinati al giorno successivo, senza cambiare la data originale dei documenti.</p>
+<div class="check-head">{% for label,count in counts.items() %}<div>{{ label }} <strong style="font-size:28px">{{ count }}</strong></div>{% endfor %}</div>
+{% for row in rows %}<section class="check-card"><div class="check-head"><h2>{{ stores.get(row.store,row.store) }} · {{ row.day }}</h2><span class="check-status">{{ row.status }}</span></div>
+<p>Report: {{ row.day }} · Cassa e conteggio contanti: {{ row.next_day }}</p>
+{% if row.documents|length > 1 %}<p><strong>Più chiusure presenti: confronto cassa da verificare.</strong> Apri i documenti per distinguere turni e duplicati.</p>{% endif %}
+<div class="check-scroll"><table class="check-table"><thead><tr><th>Incassi</th><th>Report dipendenti</th><th>Cassa reale</th><th>Differenza cassa − report</th></tr></thead><tbody>{% for m in row.metrics %}<tr><td>{{ m.label }}</td><td>{{ money(m.reported) }}</td><td>{{ money(m.actual) }}</td><td class="check-diff">{{ money(m.difference) }}</td></tr>{% endfor %}</tbody></table></div>
+<div class="check-scroll"><table class="check-table"><thead><tr><th>Contante atteso</th><th>Spese sottratte</th><th>Contante trovato</th><th>Differenza trovato − atteso</th></tr></thead><tbody><tr><td>{{ money(row.expected) }}</td><td>{{ money(row.spent) }}</td><td>{{ money(row.found) }}</td><td class="check-diff">{{ money(row.cash_difference) }}</td></tr></tbody></table></div>
+<p>Contante atteso = Cash del report − spese pagate dagli incassi. Le spese dal fondo cassa sono escluse.</p>
+{% if row.status == 'Da completare' %}<p>Mancano dati per completare il confronto. Il trattino indica un dato assente, non zero.</p>{% endif %}
+<div class="check-links"><a href="{{ row.report_url }}">Apri report</a>{% for doc in row.documents %}<a href="/chiusure/{{ doc.id }}">Foto originale {{ loop.index }}</a>{% if doc.digital_id is not none %}<a href="/schede/chiusure/{{ doc.id }}">Scheda digitale {{ loop.index }}</a>{% endif %}{% endfor %}<a href="/contanti-nei-negozi/incassi?day={{ row.next_day }}">Contante trovato · inserisci / correggi</a></div></section>{% else %}<p>Nessun dato nel periodo selezionato.</p>{% endfor %}
+{% endblock %}

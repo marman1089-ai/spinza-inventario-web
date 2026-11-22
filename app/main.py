@@ -10231,3 +10231,6 @@ def _new_document_jobs(kind):
     return {row['doc_id']:row['state'] for row in rows}
 
 templates.globals['new_document_jobs']=_new_document_jobs
+
+from .reconciliation import install as install_reconciliation
+install_reconciliation(app, globals())
