@@ -33,3 +33,8 @@
 }
 .admin-nav-group.nav-dd[open]>.admin-nav-links{background:#0b1222!important;column-gap:8px}
 .menu-overlay:has(.admin-nav-group){background:#070c18!important}
+/* Keep the existing palette and comfortable reading sizes. */
+.admin-nav-summary{font-size:15px}
+.admin-nav-links a>span{font-size:15px;line-height:1.45}
+.admin-nav-links a>small,.admin-nav-description{font-size:13px;line-height:1.5;color:#b8c4d8}
+@media(max-width:780px){.admin-nav-summary,.admin-nav-links a>span{font-size:16px}}
