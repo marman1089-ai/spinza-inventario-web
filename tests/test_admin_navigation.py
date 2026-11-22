@@ -12,7 +12,7 @@ class AdminNavigationTests(unittest.TestCase):
             self.assertEqual(response.status_code,200,url)
             self.assertIn('Dashboard gestionale',response.text)
             self.assertIn('Report chiusura',response.text)
-            self.assertIn('Contanti nei negozi',response.text)
+            self.assertIn('Movimenti in contanti',response.text)
             if url!='/admin':
                 self.assertIn('aria-current="page"',response.text)
     def test_template_without_request_is_safe_and_staff_menu_is_unchanged(self):

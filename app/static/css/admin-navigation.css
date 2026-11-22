@@ -46,3 +46,8 @@
 @media(max-width:780px){.admin-nav-summary,.admin-nav-links a>span{font-size:16px}}
 
 @media(min-width:781px) and (max-width:1399px){.admin-header .top-menu{display:none}.admin-header .menu-btn{display:inline-flex;margin-left:auto}}
+.admin-nav-submenu{border:1px solid var(--line-soft);border-radius:11px;margin:3px 0;grid-column:1/-1;background:rgba(15,23,42,.6)}
+.admin-nav-submenu>summary{display:flex;justify-content:space-between;align-items:center;cursor:pointer;list-style:none;padding:13px 12px;font-size:15px;font-weight:650}
+.admin-nav-submenu>summary::-webkit-details-marker{display:none}
+.admin-nav-submenu>summary:focus-visible{outline:2px solid #93c5fd;outline-offset:2px}
+.admin-nav-submenu>div{padding:0 8px 8px}
