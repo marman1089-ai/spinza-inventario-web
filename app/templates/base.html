@@ -306,6 +306,7 @@
     body header .brand-line img.brand-logo{display:block;position:static!important;width:154px!important;height:auto!important;max-width:154px!important;max-height:none!important;object-fit:contain;filter:none!important;opacity:1!important;flex-shrink:0}
     @media(max-width:600px){body header .brand-line img.brand-logo{width:100px!important;max-width:100px!important;height:auto!important}}
   </style>
+  {% if user and user.role == 'admin' %}<link rel="stylesheet" href="/static/css/admin-navigation.css?v=1">{% endif %}
 </head>
 <body class="brand-{{ _brand or 'ALL' }}">
 <div id="pageProgress" aria-hidden="true"></div>
@@ -314,7 +315,7 @@
   <span id="pageLoaderText">Caricamento...</span>
 </div>
 
-<header>
+<header{% if user and user.role == 'admin' %} class="admin-header"{% endif %}>
   <div class="brand-block">
     <div class="brand-line">
       {% if _brand == 'spinza' %}
@@ -349,6 +350,9 @@
     <button class="menu-btn" type="button" onclick="openMobileMenu()">☰ Menu</button>
 
     <nav class="top-menu" aria-label="Menu">
+      {% if user.role == 'admin' %}
+        {% set mobile = false %}{% include '_admin_navigation.html' %}
+      {% else %}
       <details class="nav-dd" id="navGestionale">
         <summary class="pill" style="text-decoration:none;color:var(--text)">📊 Gestionale</summary>
         <div class="nav-dd-panel">
@@ -395,6 +399,7 @@
       {% endif %}
 
       <a href="/logout" class="pill" style="text-decoration:none;color:var(--text)">Esci</a>
+      {% endif %}
     </nav>
   {% endif %}
 </header>
@@ -407,6 +412,9 @@
     </div>
     <div class="menu-body">
 
+      {% if user.role == 'admin' %}
+        {% set mobile = true %}{% include '_admin_navigation.html' %}
+      {% else %}
       <div class="section">Gestionale</div>
       <div class="sub">
         <a href="/gestionale" onclick="closeMobileMenu()">📊 Dashboard gestionale</a>
@@ -453,6 +461,7 @@
       {% endif %}
 
       <a href="/logout" onclick="closeMobileMenu()" style="background:var(--text);color:var(--panel)">Esci</a>
+      {% endif %}
     </div>
   </div>
 {% endif %}
@@ -488,13 +497,12 @@
     document.body.style.overflow = '';
   }
   document.addEventListener('keydown', function(e){
-    if(e.key === 'Escape') closeMobileMenu();
+    if(e.key === 'Escape'){ closeMobileMenu(); document.querySelectorAll('.top-menu .nav-dd[open]').forEach(function(dd){dd.removeAttribute('open')}); }
   });
 
   // Desktop dropdown: chiudi i menu cliccando fuori o scegliendo una voce
   (function(){
-    ['navGestionale','navInventario','navStrumenti'].forEach(function(id){
-      const dd = document.getElementById(id);
+    document.querySelectorAll('.top-menu .nav-dd').forEach(function(dd){
       if(!dd) return;
       document.addEventListener('click', function(ev){
         if(dd.hasAttribute('open') && !dd.contains(ev.target)){
