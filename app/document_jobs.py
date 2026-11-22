@@ -131,7 +131,6 @@ def run_document(kind,doc_id,username='system'):
         old_revision=old['revision'] if old else 0
         applied=cur.execute(f'SELECT id FROM invoice_imports WHERE invoice_doc_id={p()} AND store={p()}',(doc_id,src['store'])).fetchone() if kind=='fatture' else None
     prior_details=json.loads(src.get('prior_details') or '{}')
-    selected_date=prior_details.get('selected_date') if kind=='chiusure' else None
     data=bytes(src['data'])
     if not data.startswith(b'%PDF'):
         from .pdf_tools import ensure_pdf
@@ -144,13 +143,13 @@ def run_document(kind,doc_id,username='system'):
     if not str(result.get('text') or '').strip():
         raise ValueError('Nessun testo leggibile nella foto: originale conservato, lettura da riprovare.')
     warnings=list(result.get('warnings') or [])
-    dt=selected_date or (result.get('printed_date') if kind=='chiusure' else None) or result.get('date')
+    dt=(result.get('printed_date') if kind=='chiusure' else None) or result.get('date')
     try:
         if not dt:
             raise HTTPException(422,'')
         dt=iso(dt)
     except HTTPException:
-        dt=str(src[datecol]);warnings.append('Data non leggibile: controllare la data proposta.')
+        raise ValueError('Data del documento non leggibile. Originale conservato; nessuna data sostitutiva inserita.') from None
     # Preserve the real document date. Cash reconciliation applies its own day offset.
     supplier=result.get('supplier') or (src.get('supplier') or '')
     amount=number(result.get('amount'),optional=True)

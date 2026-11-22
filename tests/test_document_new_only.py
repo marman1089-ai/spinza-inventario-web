@@ -43,7 +43,7 @@ class NewOnlyTests(unittest.TestCase):
         self.login(2)
         response=self.client.get(f'/schede/fatture/{did}/stato')
         self.assertEqual(response.status_code,200)
-        self.assertEqual(set(response.json()),{'state','error','revision','submission'})
+        self.assertEqual(set(response.json()),{'state','error','revision','submission','doc_date','supplier'})
         self.assertEqual(response.headers['cache-control'],'no-store')
         self.login(3)
         self.assertEqual(self.client.get(f'/schede/fatture/{did}/stato').status_code,404)

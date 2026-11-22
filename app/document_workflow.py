@@ -77,7 +77,7 @@ def install(app, api):
         scope=api['_effective_store'](request,user);table=KINDS[kind][0]
         with connect() as conn:
             row=conn.cursor().execute(f"""SELECT d.store,s.username,s.state AS submission,
-                COALESCE(j.state,'none') AS state,COALESCE(j.error,'') AS error,COALESCE(x.revision,0) AS revision
+                COALESCE(j.state,'none') AS state,COALESCE(j.error,'') AS error,COALESCE(x.revision,0) AS revision,x.doc_date,x.supplier
                 FROM {table} d
                 LEFT JOIN document_submissions s ON s.kind={p()} AND s.doc_id=d.id
                 LEFT JOIN document_ai_jobs j ON j.kind={p()} AND j.doc_id=d.id
@@ -86,7 +86,7 @@ def install(app, api):
         if not row or (scope!='ALL' and scope!=row['store']):raise HTTPException(404,'Documento non trovato.')
         if user['role']!='admin' and row['submission'] and row['submission']!='confirmed' and row['username']!=user['username']:
             raise HTTPException(403,'Invio non ancora confermato.')
-        return JSONResponse({key:row[key] for key in ('state','error','revision')}|{'submission':row['submission'] or 'legacy'},headers={'Cache-Control':'no-store'})
+        return JSONResponse({key:row[key] for key in ('state','error','revision','doc_date','supplier')}|{'submission':row['submission'] or 'legacy'},headers={'Cache-Control':'no-store'})
 
     @app.get('/schede/{kind}/{doc_id}/anteprima')
     def preview(request:Request,kind:str,doc_id:int):
