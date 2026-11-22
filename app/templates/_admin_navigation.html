@@ -33,12 +33,19 @@
  ('/profile','Profilo','Le impostazioni del tuo account'),
  ('/updates','Novità','Gli ultimi aggiornamenti')])
 ] %}
+{% set icon_paths = {
+ 'overview':['M3 3v18h18','M7 14l4-4 4 3 5-7'],
+ 'documents':['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z','M14 2v6h6','M8 13h8M8 17h6'],
+ 'checks':['M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-8','m9 11 3 3L22 4'],
+ 'cash':['M20 8V5a2 2 0 0 0-2-2H5a3 3 0 0 0 0 6h15v12H5a3 3 0 0 1-3-3V6','M20 12h-5v5h5'],
+ 'settings':['M4 21v-7m0-4V3m8 18v-9m0-4V3m8 18v-5m0-4V3','M1 10h6m2-2h6m2 8h6']
+} %}
 {% set current_path = request.url.path %}
 {% for key,icon,label,description,links in navigation %}
 {% set selected = namespace(value=false) %}
 {% for href,name,hint in links %}{% if href == current_path %}{% set selected.value=true %}{% endif %}{% endfor %}
 <details class="admin-nav-group {% if links|length > 7 %}admin-nav-wide {% endif %}{% if not mobile %}nav-dd{% endif %}{% if selected.value %} is-current{% endif %}">
-  <summary class="admin-nav-summary"><span class="admin-nav-icon" aria-hidden="true">{{ icon }}</span><span>{{ label }}</span><span class="admin-nav-chevron" aria-hidden="true">⌄</span></summary>
+  <summary class="admin-nav-summary"><span class="admin-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">{% for path in icon_paths[key] %}<path d="{{ path }}"/>{% endfor %}</svg></span><span>{{ label }}</span><span class="admin-nav-chevron" aria-hidden="true">⌄</span></summary>
   <div class="admin-nav-links {% if not mobile %}nav-dd-panel{% endif %}">
     <p class="admin-nav-description">{{ description }}</p>
     {% for href,name,hint in links %}<a href="{{ href }}" {% if href == current_path %}aria-current="page"{% endif %}{% if mobile %} onclick="closeMobileMenu()"{% endif %}><span>{{ name }}</span><small>{{ hint }}</small></a>{% endfor %}
