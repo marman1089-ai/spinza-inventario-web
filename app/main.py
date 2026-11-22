@@ -41,6 +41,8 @@ templates = Environment(
 
 def render(name: str, **ctx):
     request = ctx.get('request') or _render_request.get()
+    if request is not None:
+        ctx.setdefault('request', request)
     if name == 'inventario.html' and request is not None:
         ctx['inventory_batch_csrf'] = request.session.setdefault('inventory_batch_csrf', secrets.token_urlsafe(32))
     if request is not None and ctx.get('user'):

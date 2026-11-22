@@ -1,21 +1,21 @@
 {# Shared desktop/mobile structure: every destination has one home. #}
 {% set navigation = [
  ('overview','◈','Panoramica','L’andamento dei tuoi negozi',[
- ('/gestionale','Riepilogo','La situazione del negozio'),
- ('/gestionale/panoramica-totale','Tutti i negozi','Confronto generale'),
+ ('/gestionale','Dashboard gestionale','La situazione del negozio'),
+ ('/gestionale/panoramica-totale','Panoramica totale','Confronto generale'),
  ('/gestionale/storico-mensile','Storico mensile','Consulta i mesi precedenti')]),
  ('documents','▤','Documenti','Foto originali e schede digitali',[
  ('/fatture','Fatture','Carica e consulta le fatture'),
- ('/chiusure','Chiusure della cassa','Scontrini e dati digitali'),
+ ('/chiusure','Chiusure','Scontrini e dati digitali'),
  ('/spese-secondarie','Spese secondarie','Documenti delle altre spese'),
  ('/file-archiviati','File archiviati','Consulta l’archivio')]),
  ('checks','✓','Controlli e report','Verifica i dati e gestisci le scorte',[
  ('/gestionale/controllo-dati','Controllo dati','Report, cassa reale e contante a confronto'),
- ('/report-chiusura','Report dei dipendenti','Report delle chiusure compilati'),
+ ('/report-chiusura','Report chiusura','Report delle chiusure compilati'),
  ('/gestionale/consumi','Consumi','Tutti i report dell’inventario'),
  ('/gestionale/report-vendite','Report vendite','Andamento delle vendite'),
  ('/select-area?area=bibite','Inventario bibite','Scorte delle bevande'),
- ('/select-area?area=prodotti','Inventario cucina','Scorte dei prodotti'),
+ ('/select-area?area=prodotti','Inventario prodotti','Scorte dei prodotti'),
  ('/ordini','Ordini da fare','Prepara gli acquisti'),
  ('/ordini/preparazione','Preparazione fornitori','Organizza gli ordini per fornitore'),
  ('/ordinati','Ordini in corso','Controlla gli arrivi'),
@@ -23,12 +23,12 @@
  ('/scambi','Scambi tra negozi','Trasferimenti di prodotti')]),
  ('cash','€','Contanti e pagamenti','Incassi, spese e disponibilità',[
  ('/contanti-nei-negozi/incassi','Contante trovato','Registra il cash contato nei negozi'),
- ('/contanti-nei-negozi','Gestione contanti','Saldi e movimenti di cassa'),
+ ('/contanti-nei-negozi','Contanti nei negozi','Saldi e movimenti di cassa'),
  ('/gestionale/incassi','Incassi','Consulta gli incassi registrati'),
  ('/gestionale/uscite','Uscite','Consulta le spese registrate'),
  ('/contanti-nei-negozi/ricevute','Ricevute contanti','Documenti e ricevute dei pagamenti')]),
  ('settings','⚙','Impostazioni','Amministrazione e account',[
- ('/admin','Utenti e accessi','Gestisci utenti e permessi'),
+ ('/admin','Admin · utenti e accessi','Gestisci utenti e permessi'),
  ('/gestionale/archiviati','Negozi archiviati','Gestisci i negozi non attivi'),
  ('/profile','Profilo','Le impostazioni del tuo account'),
  ('/updates','Novità','Gli ultimi aggiornamenti')])
@@ -40,7 +40,7 @@
  'cash':['M20 8V5a2 2 0 0 0-2-2H5a3 3 0 0 0 0 6h15v12H5a3 3 0 0 1-3-3V6','M20 12h-5v5h5'],
  'settings':['M4 21v-7m0-4V3m8 18v-9m0-4V3m8 18v-5m0-4V3','M1 10h6m2-2h6m2 8h6']
 } %}
-{% set current_path = request.url.path %}
+{% set current_path = request.url.path if request is defined and request and request.url is defined else '' %}
 {% for key,icon,label,description,links in navigation %}
 {% set selected = namespace(value=false) %}
 {% for href,name,hint in links %}{% if href == current_path %}{% set selected.value=true %}{% endif %}{% endfor %}

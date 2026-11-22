@@ -19,8 +19,14 @@
 .menu-overlay .admin-nav-links a{margin:3px 0;padding:12px}
 .menu-overlay .admin-nav-exit{margin-top:20px;text-align:center}
 @media(min-width:781px){
-  .admin-header{flex-wrap:wrap}
-  .admin-header .top-menu{flex-basis:100%;padding-top:4px}
+  .admin-header{flex-wrap:nowrap}
+  .admin-header .top-menu{flex:1;flex-wrap:nowrap;padding-top:0;gap:5px}
+  .admin-header .brand-block{flex-direction:column;align-items:flex-start;gap:4px}
+  .admin-header .brand-line{gap:8px}
+  .admin-header .brand-store-switch select{max-width:190px}
+  .admin-header .user-line{font-size:11px}
+  .admin-header .admin-nav-summary{padding:8px;gap:5px;font-size:13px}
+  .admin-header .admin-nav-icon{width:22px;height:22px}
   .admin-nav-wide.nav-dd[open]>.admin-nav-links{width:620px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
   .admin-nav-wide .admin-nav-description{grid-column:1/-1}
 }
@@ -38,3 +44,5 @@
 .admin-nav-links a>span{font-size:15px;line-height:1.45}
 .admin-nav-links a>small,.admin-nav-description{font-size:13px;line-height:1.5;color:#b8c4d8}
 @media(max-width:780px){.admin-nav-summary,.admin-nav-links a>span{font-size:16px}}
+
+@media(min-width:781px) and (max-width:1199px){.admin-header .top-menu{display:none}.admin-header .menu-btn{display:inline-flex;margin-left:auto}}
