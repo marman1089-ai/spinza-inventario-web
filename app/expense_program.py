@@ -56,6 +56,7 @@ def schema(cur):
     cur.execute('''CREATE TABLE IF NOT EXISTS expense_program_postings (
         source_key TEXT PRIMARY KEY, expense_id INTEGER, cash_token TEXT NOT NULL DEFAULT '',
         method TEXT NOT NULL, original_json TEXT NOT NULL)''')
+    cur.execute('CREATE TABLE IF NOT EXISTS expense_native_actions (token TEXT PRIMARY KEY,method TEXT NOT NULL,path TEXT NOT NULL,applied_at TEXT NOT NULL)')
     cur.execute('''CREATE TABLE IF NOT EXISTS expense_archive_links (
         source_key TEXT PRIMARY KEY, target_key TEXT NOT NULL, username TEXT NOT NULL, linked_at TEXT NOT NULL)''')
 
@@ -147,9 +148,14 @@ def execute(method,path,payload,user):
         else:native.execute('BEGIN IMMEDIATE')
         state=cur.execute('SELECT * FROM expense_program_state WHERE id=1'+(' FOR UPDATE' if using_postgres() else '')).fetchone()
         if not state:raise HTTPException(409,'Il programma delle spese deve essere importato.')
+        operation=payload.get('__native_action_token')
+        if operation and cur.execute(f'SELECT token FROM expense_native_actions WHERE token={p()}',(operation,)).fetchone():return JSONResponse({'ok':True,'already_applied':True})
         if (method=='POST' and path=='/api/stores') or (method=='DELETE' and path.startswith('/api/stores/')):
             raise HTTPException(422,'I negozi sono collegati a quelli del gestionale e non si eliminano da qui.')
         with local_copy(state['data']) as file:
+            if payload.get('__expected_due') and path.startswith('/api/fixed-expenses/') and path.endswith('/pay'):
+                with legacy_connect() as db:fixed=db.execute('SELECT next_due_date FROM fixed_expenses WHERE id=?',(int(path.split('/')[3]),)).fetchone()
+                if not fixed or fixed['next_due_date']!=payload['__expected_due']:return JSONResponse({'error':'Questa rata è già stata aggiornata. Ricarica la pagina.'},status_code=409)
             if method!='GET':
                 with legacy_connect() as db:before=paid_rows(db)
             handler=Handler(path,payload)
@@ -165,6 +171,7 @@ def execute(method,path,payload,user):
                 cur.execute(f'INSERT INTO expense_program_history(revision,data,username,operation,saved_at) VALUES({",".join([p()]*5)})',
                             (state['revision'],state['data'],user['username'],method+' '+path,stamp()))
                 cur.execute(f'UPDATE expense_program_state SET data={p()},revision=revision+1,updated_at={p()} WHERE id=1',(updated,stamp()))
+            if operation:cur.execute(f'INSERT INTO expense_native_actions VALUES({p()},{p()},{p()},{p()})',(operation,method,path,stamp()))
             return result
 
 
@@ -179,7 +186,7 @@ def install(app,api):
     @app.on_event('startup')
     def init():
         with connect() as conn:schema(conn.cursor())
-    @app.get('/gestionale/spese-pagamenti')
+    @app.get('/spese-programma/stato')
     def index(request:Request):
         user=admin(request)
         with connect() as conn:
