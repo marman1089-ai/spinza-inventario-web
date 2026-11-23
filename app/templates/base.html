@@ -329,7 +329,7 @@
       <form class="brand-store-switch" method="post" action="/set-active-store">
         <input type="hidden" name="next_url" value="{{ request.url.path if request is defined and request.url is defined else '/inventario' }}{{ ('?' ~ request.url.query) if request is defined and request.url is defined and request.url.query else '' }}">
         <label for="header-store">Negozio attivo</label>
-        <select id="header-store" name="store" aria-label="Cambia negozio" onchange="this.form.next_url.value=location.pathname+location.search+location.hash;try{sessionStorage.setItem('scrollY',String(window.scrollY||0))}catch(e){}this.form.classList.add('is-switching');this.form.querySelector('label').textContent='Cambio negozio…';this.form.submit()">
+        <select id="header-store" name="store" aria-label="Cambia negozio" onchange="if(window.rememberStoreSwitch)rememberStoreSwitch();this.form.next_url.value=location.pathname+location.search+location.hash;try{sessionStorage.setItem('scrollY',String(window.scrollY||0))}catch(e){}this.form.classList.add('is-switching');this.form.querySelector('label').textContent='Cambio negozio…';this.form.submit()">
           {% set chosen = header_store or active_store or 'spinza' %}
           {% for key,label in [('spinza',"Spinza Santa'Agostino"),('reburger_maggio','Reburger San Felice'),('reburger_camaldoli','Reburger Camaldoli'),('ALL','Tutti i negozi')] %}
           {% if user.role=='admin' or key in user.allowed_stores %}<option value="{{ key }}" {% if chosen==key %}selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}
@@ -607,6 +607,7 @@
 
 <script defer src="/static/js/pro-ui-refresh.js?v=20260827c"></script>
 {% if user %}<div id="inventory-activity-context" hidden data-store="{{ store if store is defined and store else (active_store if active_store is defined else user.store) }}" data-area="{{ area if area is defined and area in ['prodotti','bibite'] else '' }}"></div><script src="/static/inventory_activity.js?v=20261030-live" defer></script><script src="/static/js/control-presence.js?v=20261030-live" defer></script><div id="assist-context" data-user="{{ user.id }}" data-role="{{ user.role }}" hidden></div><link rel="stylesheet" href="/static/css/control-assistance.css?v=replica-avvio-rapido-20261030d"><script src="/static/js/control-assistance.js?v=replica-avvio-rapido-20261030d" defer></script>{% endif %}
+<script src="/static/js/store-switch-position.js?v=1" defer></script>
 </body>
 
 </html>

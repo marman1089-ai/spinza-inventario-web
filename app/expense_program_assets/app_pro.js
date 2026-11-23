@@ -41,6 +41,8 @@ function saveUiState(){
   const payload={page:state.page,paymentStatus:state.paymentStatus,scope:state.scope,storeId:state.storeId,
     paidMonth:document.getElementById('paidMonth')?.value||'',rechargeMonth:document.getElementById('rechargeMonth')?.value||'',
     distanceMode:state.distanceMode,distanceValue:state.distanceValue,distancePinnedByUser:state.distancePinnedByUser,
+    historyPeriod:document.getElementById('historyPeriod')?.value||'',historyAnchor:document.getElementById('historyAnchor')?.value||'',
+    commandFilter,commandShowAll,awareSelectedDay:state.awareSelectedDay,awarePinnedByUser:state.awarePinnedByUser,
     scrollX:window.scrollX,scrollY:window.scrollY};
   savedScrollPosition={x:payload.scrollX,y:payload.scrollY};
   try{sessionStorage.setItem(UI_SESSION_KEY,JSON.stringify(payload))}catch{}
@@ -52,6 +54,10 @@ function applySavedUiState(saved){
   state.paymentStatus=saved.paymentStatus==='paid'?'paid':'pending';
   if(saved.scope==='global')state.scope='global';
   else if(state.stores.some(s=>Number(s.id)===Number(saved.storeId))){state.scope='store';state.storeId=Number(saved.storeId)}
+  if(saved.historyPeriod&&Array.from(document.getElementById('historyPeriod').options).some(o=>o.value===saved.historyPeriod))document.getElementById('historyPeriod').value=saved.historyPeriod;
+  if(saved.historyAnchor)document.getElementById('historyAnchor').value=saved.historyAnchor;
+  if(['now','week','no_date','all'].includes(saved.commandFilter))commandFilter=saved.commandFilter;
+  commandShowAll=Boolean(saved.commandShowAll);state.awarePinnedByUser=Boolean(saved.awarePinnedByUser);state.awareSelectedDay=saved.awareSelectedDay??null;
   if(saved.paidMonth)document.getElementById('paidMonth').value=saved.paidMonth;
   if(saved.rechargeMonth)document.getElementById('rechargeMonth').value=saved.rechargeMonth;
   state.distanceMode=saved.distanceMode==='months'?'months':'days';
@@ -86,11 +92,21 @@ function renderStoreChoices(){
   box.querySelectorAll('[data-delete-store]').forEach(btn=>btn.addEventListener('click',e=>{e.stopPropagation();deleteStore(Number(btn.dataset.deleteStore))}));
 }
 async function refreshStores(){const data=await api('/spese-programma/api/stores');state.stores=data.stores||[];renderStoreChoices();refreshOperationStoreFields();return state.stores}
-async function selectStore(id){
-  state.scope='store';state.storeId=Number(id);state.awarePinnedByUser=false;state.awareSelectedDay=null;closeModal('storeSwitcherModal');updateContextUI();saveUiState();window.scrollTo(0,0);await loadCurrentContext();
+async function changeStoreContext(scope,id=null){
+  const position={x:window.scrollX,y:window.scrollY};
+  state.scope=scope;if(id!==null)state.storeId=Number(id);
+  closeModal('storeSwitcherModal');updateContextUI();saveUiState();restoringScroll=true;
+  try{await loadCurrentContext()}finally{
+    savedScrollPosition=position;restoreExactScrollPosition();
+    // Save the new context with the original position before a possible host reload.
+    try{const saved=readSavedUiState()||{};sessionStorage.setItem(UI_SESSION_KEY,JSON.stringify({...saved,scope:state.scope,storeId:state.storeId,page:state.page,scrollX:position.x,scrollY:position.y}))}catch{}
+    const stores={1:'spinza',2:'reburger_camaldoli',3:'reburger_maggio'};
+    if(window.parent!==window)window.parent.postMessage({type:'expense-program-store',store:scope==='global'?'ALL':stores[state.storeId]},location.origin);
+  }
 }
-async function selectGlobal(){state.scope='global';state.awarePinnedByUser=false;state.awareSelectedDay=null;closeModal('storeSwitcherModal');updateContextUI();saveUiState();window.scrollTo(0,0);await loadCurrentContext()}
-async function loadCurrentContext(){await loadDashboard();if(state.page==='payments')await loadPayments();if(state.page==='fixed')await loadFixedExpenses();if(state.page==='variables')await loadVariableBudgets();if(state.page==='recharges')await loadRecharges();if(state.page==='budgets')await loadSpendingBudgets();if(state.page==='history')await loadExpenseHistory()}
+async function selectStore(id){await changeStoreContext('store',id)}
+async function selectGlobal(){await changeStoreContext('global')}
+async function loadCurrentContext(){await loadDashboard();if(state.page==='payments')await loadPayments();if(state.page==='fixed')await loadFixedExpenses();if(state.page==='variables')await loadVariableBudgets();if(state.page==='recharges')await loadRecharges();if(state.page==='budgets')await loadSpendingBudgets();if(state.page==='history')await loadExpenseHistory();if(state.page==='selected')await loadSelectedExpenses()}
 
 function daysInMonthFromIso(iso){const[y,m]=String(iso).split('-').map(Number);return new Date(y,m,0).getDate()}
 function daysInMonthForDate(d){return new Date(d.getFullYear(),d.getMonth()+1,0,12).getDate()}
@@ -523,7 +539,7 @@ document.getElementById('decisionShowUrgent').addEventListener('click',()=>{
 for(const id of ['decisionSetBudget','quickBudgetEdit'])document.getElementById(id).addEventListener('click',openQuickBudgetEditor);
 async function bootstrap(){
   initInteractiveEffects();const saved=readSavedUiState();
-  try{await refreshStores();if(!state.stores.length){document.getElementById('storeGate').hidden=false;return}state.storeId=state.stores[0].id;applySavedUiState(saved);if(state.scope==='store'&&!currentStore())state.storeId=state.stores[0].id;updateContextUI();document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.status===state.paymentStatus));document.getElementById('paidFilters').hidden=state.paymentStatus!=='paid';document.querySelectorAll('.distance-mode-btn').forEach(btn=>btn.classList.toggle('active',btn.dataset.distanceMode===state.distanceMode));setPage(state.page,false,false);await loadDashboard();if(state.page==='payments')await loadPayments();if(state.page==='fixed')await loadFixedExpenses();if(state.page==='variables')await loadVariableBudgets();if(state.page==='recharges')await loadRecharges();if(state.page==='budgets')await loadSpendingBudgets();if(state.page==='history')await loadExpenseHistory()}catch(e){toast(e.message,true)}finally{restoreExactScrollPosition();scheduleMidnightAwareRefresh()}
+  try{await refreshStores();if(!state.stores.length){document.getElementById('storeGate').hidden=false;return}state.storeId=state.stores[0].id;applySavedUiState(saved);const host=window.EXPENSE_SITE_CONTEXT;if(host){if(host.store==='ALL')state.scope='global';else if(state.stores.some(s=>Number(s.id)===Number(host.id))){state.scope='store';state.storeId=Number(host.id)}}if(state.scope==='store'&&!currentStore())state.storeId=state.stores[0].id;updateContextUI();document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.status===state.paymentStatus));document.getElementById('paidFilters').hidden=state.paymentStatus!=='paid';document.querySelectorAll('.distance-mode-btn').forEach(btn=>btn.classList.toggle('active',btn.dataset.distanceMode===state.distanceMode));setPage(state.page,false,false);await loadDashboard();if(state.page==='payments')await loadPayments();if(state.page==='fixed')await loadFixedExpenses();if(state.page==='variables')await loadVariableBudgets();if(state.page==='recharges')await loadRecharges();if(state.page==='budgets')await loadSpendingBudgets();if(state.page==='history')await loadExpenseHistory()}catch(e){toast(e.message,true)}finally{restoreExactScrollPosition();scheduleMidnightAwareRefresh()}
 }
 bootstrap();
 

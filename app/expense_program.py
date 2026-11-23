@@ -240,7 +240,10 @@ def install(app,api):
     @app.get(ROOT+'/app')
     def planner(request:Request):
         admin(request);csrf(request)
-        return Response((ASSETS/'index.html').read_text(),media_type='text/html',headers={'Cache-Control':'no-store'})
+        selected=request.session.get('active_store') or 'spinza'
+        config=dict(store=selected,id=next((key for key,value in STORE_MAP.items() if value==selected),None))
+        html=(ASSETS/'index.html').read_text().replace('</head>','<script>window.EXPENSE_SITE_CONTEXT='+json.dumps(config)+';</script></head>')
+        return Response(html,media_type='text/html',headers={'Cache-Control':'no-store'})
     @app.get(ROOT+'/assets/{name}')
     def asset(request:Request,name:str):
         admin(request)

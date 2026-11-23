@@ -31,6 +31,18 @@ class StoreSwitchTests(unittest.TestCase):
         self.assertEqual(dict(parse_qsl(target.query)),dict(area='bibite',cat='Birre',loc='SALA',only_low='1',store='reburger_maggio'))
         self.assertEqual(dict(parse_qsl(urlsplit(switch('/inventario/report?store=spinza&id=8&start=2026-11-01','reburger_maggio')).query)),dict(start='2026-11-01',store='reburger_maggio'))
 
+    def test_expense_and_cash_sections_keep_page_filters_and_anchor(self):
+        for path in ('/gestionale/spese-pagamenti','/gestionale/tutte-le-spese','/gestionale/controllo-dati','/contanti-nei-negozi/incassi','/contanti-nei-negozi/spese','/contanti-nei-negozi/bilanci','/contanti-nei-negozi/ricevute'):
+            target=urlsplit(switch(path+'?start=2026-11-01&end=2026-11-30&category=Affitto&origin=Programma&status=open&selected_only=true&page=2#archivio','reburger_maggio'))
+            self.assertEqual(target.path,path)
+            params=dict(parse_qsl(target.query))
+            self.assertEqual(params['category'],'Affitto')
+            self.assertEqual(params['origin'],'Programma')
+            self.assertEqual(params['status'],'open')
+            self.assertEqual(params['selected_only'],'true')
+            self.assertEqual(params['page'],'2')
+            self.assertEqual(target.fragment,'archivio')
+
     def test_redirect_safety(self):
         for url in ['https://evil.test/gestionale','//evil.test/gestionale','/logout','/set-active-store','/unknown','/inventario/report/csv','/fatture/123','http://[bad']:
             self.assertEqual(switch(url,'spinza'),'/inventario')

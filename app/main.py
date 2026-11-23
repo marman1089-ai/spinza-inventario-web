@@ -5675,11 +5675,19 @@ def _store_switch_url(next_url: str, store: str) -> str:
         '/gestionale','/gestionale/dashboard','/gestionale/incassi','/gestionale/uscite',
         '/gestionale/storico-mensile','/gestionale/report-vendite','/gestionale/consumi',
         '/gestionale/archiviati','/gestionale/panoramica-totale',
+        '/gestionale/spese-pagamenti','/gestionale/tutte-le-spese','/gestionale/controllo-dati',
+        '/contanti-nei-negozi/incassi','/contanti-nei-negozi/spese',
+        '/contanti-nei-negozi/bilanci','/contanti-nei-negozi/ricevute',
         '/fatture','/fatture/importa-prodotti','/chiusure','/report-chiusura',
         '/spese-secondarie','/ordini','/ordini/preparazione','/ordinati',
         '/storico-ordini','/scambi','/file-archiviati','/profile','/updates',
         '/digitalizza/archivio/tutti',
     }
+    # Recognize future stable GET pages too, so a newly added section never
+    # accidentally sends the user to inventory. Entity-specific URLs stay excluded.
+    application=globals().get('app')
+    if application is not None:
+        pages.update(r.path for r in application.routes if getattr(r,'methods',None) and 'GET' in r.methods and '{' not in r.path and r.path not in ('/logout','/admin-login','/'))
     if target.scheme or target.netloc or '\\' in next_url:
         return fallback
     path=target.path
@@ -5691,12 +5699,14 @@ def _store_switch_url(next_url: str, store: str) -> str:
     filters={'area','day','start','end','q','month','month_key','period_type',
         'anchor_date','flow_date','payment_method','category','cat','loc','only_low',
         'from_month','to_month','year','week','days','supplier','q_date','kind',
-        'limit','q_user','q_day','q_area','q_group','q_product','asof','who','all_pending'}
+        'limit','q_user','q_day','q_area','q_group','q_product','asof','who','all_pending',
+        'origin','status','selected_only','page'}
     params=[(k,v) for k,v in parse_qsl(target.query,keep_blank_values=True) if k in filters]
     store_pages={'/inventario','/inventario/conteggio','/inventario/report',
         '/inventario/fatture-settimana','/inventario-controllo','/admin',
         '/admin/fasce-orarie','/gestionale/report-vendite',
-        '/gestionale/panoramica-totale','/report-chiusura'}
+        '/gestionale/panoramica-totale','/report-chiusura',
+        '/gestionale/tutte-le-spese','/gestionale/controllo-dati','/gestionale/consumi'}
     if path in store_pages:
         params.append(('store',store))
     return path+('?' + urlencode(params) if params else '')+('#'+quote(target.fragment,safe='-_.~') if target.fragment else '')
