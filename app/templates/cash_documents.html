@@ -1,5 +1,63 @@
-{% extends "base.html" %}{% set title="Ricevute spese in contanti" %}{% block content %}<link rel="stylesheet" href="/static/css/cash-treasury.css?v=1">
-<div class="card"><h1>Ricevute spese in contanti</h1><p>Archivio admin. La data è quella della ricevuta: puoi caricare documenti anche dopo mesi. Il caricamento non registra una nuova uscita.</p><nav class="row"><a class="btn2" href="/contanti-nei-negozi/spese">Spese in cash</a><a class="btn2" href="/gestionale/uscite">Uscite</a><a class="btn2" href="/spese-secondarie">Spese secondarie · archivio esistente</a></nav></div>
-<section class="card" style="margin-top:16px"><h2>Aggiungi ricevuta</h2>{% if spending_token %}<p>Ricevuta collegata alla spesa selezionata. I documenti restano archiviati anche se la spesa viene eliminata.</p>{% endif %}<form method="post" enctype="multipart/form-data" class="ct-form" id="receipt-upload"><input type="hidden" name="csrf" value="{{ csrf }}"><label>Collega a una spesa in cash (facoltativo)<select name="spending_token" id="receipt-expense"><option value="">Nessun collegamento</option>{% for expense in spending_options %}<option value="{{ expense.token }}" data-day="{{ expense.day }}" data-description="{{ expense.description }}" data-store="{{ expense.store }}" data-payer="{{ expense.payer }}" {% if expense.token==spending_token %}selected{% endif %}>{{ expense.day }} · {{ expense.description }} · € {{ '%.2f'|format(expense.amount) }}</option>{% endfor %}</select></label><label>Data della ricevuta<input type="date" name="day" value="{{ day }}" required></label><label>Negozio / destinazione<select name="store" required><option value="">Seleziona…</option><option value="aziende" {% if selected=='aziende' %}selected{% endif %}>Spesa aziendale / ripartita</option>{% for key,label in stores.items() if key!='ALL' %}<option value="{{ key }}" {% if key==selected %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label><label>Descrizione<input name="description" value="{{ description }}" maxlength="250"></label><label>Pagata da<input name="payer" value="{{ payer }}" maxlength="500" placeholder="Azienda o soggetto che paga"></label><p class="muted">Scegli una spesa per compilare i campi vuoti. I dati già inseriti restano invariati. Per una ricevuta indipendente scegli “Nessun collegamento” e compila liberamente.</p><label>Foto o PDF<input type="file" name="files" accept="image/*,application/pdf" multiple required></label><p class="muted">Le pagine selezionate vengono riunite in un PDF.</p><button class="btn">Salva ricevuta</button></form></section>
-<section class="card" style="margin-top:16px"><h2>Archivio per data</h2><form method="get" class="row"><label>Data<input type="date" name="day" value="{{ day }}"></label><label>Negozio<select name="store"><option value="">Tutti</option><option value="aziende">Spesa aziendale / ripartita</option>{% for key,label in stores.items() if key!='ALL' %}<option value="{{ key }}" {% if key==selected %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label><input type="hidden" name="spending_token" value="{{ spending_token }}"><button class="btn2">Filtra</button><a href="/contanti-nei-negozi/ricevute">Tutte le ricevute</a></form>
-{% for group in rows|groupby('store') %}<h3>{{ stores.get(group.grouper,'Spesa aziendale / ripartita') }}</h3>{% for r in group.list %}<article style="padding:12px 0;border-bottom:1px solid var(--line-soft)"><strong>{{ r.receipt_date }}</strong> · {{ r.description or r.filename }}<p class="muted">{{ r.uploaded_by }}{% if r.spending_token %} · Collegata a una spesa{% endif %}{% if r.payer %}<br>Pagata da: {{ r.payer }}{% endif %}</p><a class="btn2" target="_blank" rel="noopener" href="/contanti-nei-negozi/ricevute/{{ r.id }}">Apri ricevuta</a><details><summary>Collega / cambia spesa</summary><form method="post" action="/contanti-nei-negozi/ricevute/{{ r.id }}/collega"><input type="hidden" name="csrf" value="{{ csrf }}"><label>Spesa in cash<select name="spending_token"><option value="">Nessun collegamento</option>{% for expense in spending_options %}<option value="{{ expense.token }}" {% if expense.token==r.spending_token %}selected{% endif %}>{{ expense.day }} · {{ expense.description }} · € {{ '%.2f'|format(expense.amount) }}</option>{% endfor %}</select></label><button class="btn2">Salva collegamento</button></form></details><form method="post" action="/contanti-nei-negozi/ricevute/{{ r.id }}/elimina" onsubmit="return confirm('Eliminare questa ricevuta? La spesa collegata resterà invariata.');" style="margin-top:12px"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn2" type="submit">Elimina ricevuta</button></form></article>{% endfor %}{% else %}<p>Nessuna ricevuta presente per questi filtri.</p>{% endfor %}</section><script src="/static/js/cash-receipts.js?v=1" defer></script>{% endblock %}
+{% extends "base.html" %}
+{% set title="Ricevute spese in contanti" %}
+{% block content %}
+<link rel="stylesheet" href="/static/multi_upload.css?v=3">
+<link rel="stylesheet" href="/static/css/cash-receipts.css?v=1">
+<div class="shine-hero">
+  <span class="eyebrow">ARCHIVIO DOCUMENTALE · ADMIN</span>
+  <h1>Ricevute spese in contanti</h1>
+  <p>Carica foto o PDF delle ricevute e collegale alle spese già registrate.</p>
+  <nav class="receipt-nav" aria-label="Spese e documenti">
+    <a class="shine-button secondary" href="/contanti-nei-negozi/spese">Spese in cash</a>
+    <a class="shine-button secondary" href="/gestionale/uscite">Uscite</a>
+    <a class="shine-button secondary" href="/spese-secondarie">Spese secondarie · archivio esistente</a>
+  </nav>
+</div>
+<section class="card shine-panel receipt-upload-panel">
+  <div class="receipt-heading"><div><span class="eyebrow">NUOVA RICEVUTA</span><h2>Carica foto o PDF</h2></div><span class="receipt-badge">Solo admin</span></div>
+  <p class="muted">La data è quella della ricevuta, anche se la carichi dopo mesi. Il caricamento non registra una nuova uscita.</p>
+  {% if spending_token %}<p class="receipt-notice">Ricevuta collegata alla spesa selezionata. I documenti restano archiviati anche se la spesa viene eliminata.</p>{% endif %}
+  <form method="post" enctype="multipart/form-data" class="receipt-form" id="receipt-upload">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="receipt-wide">Collega a una spesa in cash <small>Facoltativo</small>
+      <select name="spending_token" id="receipt-expense"><option value="">Nessun collegamento</option>{% for expense in spending_options %}<option value="{{ expense.token }}" data-day="{{ expense.day }}" data-description="{{ expense.description }}" data-store="{{ expense.store }}" data-payer="{{ expense.payer }}" {% if expense.token==spending_token %}selected{% endif %}>{{ expense.day }} · {{ expense.description }} · € {{ '%.2f'|format(expense.amount) }}</option>{% endfor %}</select>
+    </label>
+    <label>Data della ricevuta<input type="date" name="day" value="{{ day }}" required></label>
+    <label>Negozio / destinazione<select name="store" required><option value="">Seleziona…</option><option value="aziende" {% if selected=='aziende' %}selected{% endif %}>Spesa aziendale / ripartita</option>{% for key,label in stores.items() if key!='ALL' %}<option value="{{ key }}" {% if key==selected %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label>Descrizione<input name="description" value="{{ description }}" maxlength="250" placeholder="Es. ricevuta pagamento fornitore"></label>
+    <label>Pagata da<input name="payer" value="{{ payer }}" maxlength="500" placeholder="Azienda o soggetto che paga"></label>
+    <p class="muted receipt-wide">Scegli una spesa per compilare i campi vuoti. I dati già inseriti restano invariati.</p>
+    <div class="receipt-file receipt-wide"><label>Foto o PDF<input type="file" name="files" accept="image/*,application/pdf" multiple required></label><p class="muted">Puoi selezionare più pagine: verranno riunite in un solo PDF.</p></div>
+    <div class="receipt-wide"><button class="shine-button" type="submit">Salva ricevuta</button></div>
+  </form>
+</section>
+<section class="card shine-panel receipt-archive-toolbar">
+  <div class="receipt-heading"><div><span class="eyebrow">DOCUMENTI SALVATI</span><h2>Archivio per data</h2></div><span class="receipt-badge">{{ rows|length }} ricevute</span></div>
+  <form method="get" class="receipt-filters">
+    <label>Data<input type="date" name="day" value="{{ day }}"></label>
+    <label>Negozio<select name="store"><option value="">Tutti</option><option value="aziende" {% if selected=='aziende' %}selected{% endif %}>Spesa aziendale / ripartita</option>{% for key,label in stores.items() if key!='ALL' %}<option value="{{ key }}" {% if key==selected %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <input type="hidden" name="spending_token" value="{{ spending_token }}">
+    <button class="shine-button" type="submit">Filtra</button><a class="shine-button secondary" href="/contanti-nei-negozi/ricevute">Tutte le ricevute</a>
+  </form>
+</section>
+{% for group in rows|groupby('store') %}
+<h2 class="receipt-store-title">{{ stores.get(group.grouper,'Spesa aziendale / ripartita') }}</h2>
+<div class="shine-doc-grid">
+{% for r in group.list %}
+<article class="card shine-panel receipt-card">
+  <div class="receipt-heading"><span class="eyebrow">RICEVUTA</span><span class="receipt-badge">{{ 'Collegata a una spesa' if r.spending_token else 'Senza collegamento' }}</span></div>
+  <h3 class="receipt-date">{{ r.receipt_date }}</h3>
+  <p class="receipt-description">{{ r.description or r.filename }}</p>
+  {% if r.payer %}<div class="receipt-payer"><span class="muted">Pagata da</span><p>{{ r.payer }}</p></div>{% endif %}
+  <p class="muted receipt-filename">{{ r.filename }} · {{ r.uploaded_by }}</p>
+  <a class="shine-button" target="_blank" rel="noopener" href="/contanti-nei-negozi/ricevute/{{ r.id }}">Apri ricevuta</a>
+  <details class="receipt-link"><summary>Collega / cambia spesa</summary><form method="post" action="/contanti-nei-negozi/ricevute/{{ r.id }}/collega" class="receipt-edit-form"><input type="hidden" name="csrf" value="{{ csrf }}"><label>Spesa in cash<select name="spending_token"><option value="">Nessun collegamento</option>{% for expense in spending_options %}<option value="{{ expense.token }}" {% if expense.token==r.spending_token %}selected{% endif %}>{{ expense.day }} · {{ expense.description }} · € {{ '%.2f'|format(expense.amount) }}</option>{% endfor %}</select></label><button class="shine-button secondary" type="submit">Salva collegamento</button></form></details>
+  <form method="post" action="/contanti-nei-negozi/ricevute/{{ r.id }}/elimina" onsubmit="return confirm('Eliminare questa ricevuta? La spesa collegata resterà invariata.');"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="shine-button secondary receipt-delete" type="submit">Elimina ricevuta</button></form>
+</article>
+{% endfor %}
+</div>
+{% else %}
+<div class="card shine-panel receipt-empty"><h3>Nessuna ricevuta presente per questi filtri.</h3><p class="muted">Carica una ricevuta dal modulo in alto oppure modifica i filtri dell’archivio.</p></div>
+{% endfor %}
+<script src="/static/js/cash-receipts.js?v=1" defer></script>
+{% endblock %}
