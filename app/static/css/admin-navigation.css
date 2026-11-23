@@ -45,7 +45,7 @@
 .admin-nav-links a>small,.admin-nav-description{font-size:13px;line-height:1.5;color:#b8c4d8}
 @media(max-width:780px){.admin-nav-summary,.admin-nav-links a>span{font-size:16px}}
 
-@media(min-width:781px) and (max-width:1399px){.admin-header .top-menu{display:none}.admin-header .menu-btn{display:inline-flex;margin-left:auto}}
+@media(min-width:781px) and (max-width:1599px){.admin-header .top-menu{display:none}.admin-header .menu-btn{display:inline-flex;margin-left:auto}}
 .admin-nav-submenu{border:1px solid var(--line-soft);border-radius:11px;margin:3px 0;grid-column:1/-1;background:rgba(15,23,42,.6)}
 .admin-nav-submenu>summary{display:flex;justify-content:space-between;align-items:center;cursor:pointer;list-style:none;padding:13px 12px;font-size:15px;font-weight:650}
 .admin-nav-submenu>summary::-webkit-details-marker{display:none}

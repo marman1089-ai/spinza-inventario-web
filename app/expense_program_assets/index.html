@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#07111f" />
+  <title>Gestione Pagamenti</title>
+  <link rel="stylesheet" href="/spese-programma/assets/style_pro.css?fresh=v41-selection" />
+</head>
+<body>
+  <div class="ambient-layer" aria-hidden="true">
+    <span class="orb orb-a"></span><span class="orb orb-b"></span><span class="orb orb-c"></span>
+    <span class="mesh-glow"></span><span class="scanline"></span>
+  </div>
+  <div class="cursor-aura" id="cursorAura" aria-hidden="true"></div>
+
+  <div class="app-shell" id="appShell">
+    <aside class="sidebar glass-panel">
+      <div class="brand">
+        <div class="brand-mark"><span>G</span><i></i></div>
+        <div class="brand-copy">
+          <strong>Gestione Pagamenti</strong>
+          <span>PAGAMENTI E BUDGET</span>
+        </div>
+      </div>
+
+      <button class="context-switcher" id="openStoreSwitcher" type="button">
+        <span class="context-icon" id="contextIcon">N</span>
+        <span class="context-copy"><small>AREA ATTIVA</small><strong id="contextName">Seleziona negozio</strong></span>
+        <span class="context-arrow">⌄</span>
+      </button>
+
+      <nav class="main-nav">
+        <button class="nav-btn active" data-page="home"><span class="nav-icon">⌂</span><span>Cruscotto</span><i></i></button>
+        <button class="nav-btn" data-page="payments"><span class="nav-icon">▣</span><span>Spese da pagare</span><i></i></button>
+        <button class="nav-btn" data-page="selected"><span class="nav-icon">✓</span><span>Spese selezionate</span><i></i></button>
+        <button class="nav-btn" data-page="fixed"><span class="nav-icon">◫</span><span>Spese fisse</span><i></i></button>
+        <button class="nav-btn nav-variable" data-page="variables"><span class="nav-icon">◩</span><span>Spese variabili</span><i></i></button>
+        <button class="nav-btn" data-page="budgets"><span class="nav-icon">◉</span><span>Budget spese</span><i></i></button>
+        <button class="nav-btn" data-page="history"><span class="nav-icon">◷</span><span>Storico spese</span><i></i></button>
+        <button class="nav-btn" data-page="recharges"><span class="nav-icon">↗</span><span>Ricariche</span><i></i></button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="signal"><span></span><b>Sistema attivo</b></div>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div class="topbar-copy">
+          <p class="eyebrow" id="scopeEyebrow">CONTROLLO FINANZIARIO</p>
+          <div class="title-row"><h1 id="pageTitle">Cruscotto</h1><span class="scope-chip" id="scopeChip">Negozio</span></div>
+        </div>
+        <div class="topbar-right">
+          <button class="secondary-btn export-btn" id="exportCsv" type="button">↓ Esporta CSV</button>
+          <div class="live-dot"><span></span>LIVE</div>
+          <div class="topbar-date" id="todayLabel"></div>
+        </div>
+      </header>
+
+      <section id="page-home" class="page active">
+        <!-- HOME OPERATIVA: decisioni in primo piano, dettagli tecnici a richiesta -->
+        <div class="command-intro">
+          <div><span class="eyebrow">IL CONTROLLO DI OGGI</span><h2>Apri. Controlla. Paga.</h2><p>Tre numeri da guardare ogni giorno. Le cifre cambiano quando registri un pagamento.</p></div>
+          <button type="button" class="primary-btn command-add" id="quickNewPayment">+ Nuovo pagamento</button>
+        </div>
+        <section class="decision-board" aria-label="Situazione pagamenti e budget">
+          <article class="decision-card decision-pay" id="decisionPayCard">
+            <div class="decision-card-top"><span class="decision-dot"></span><span>01 · PRIORITÀ DI OGGI</span><span class="decision-flag" id="decisionNowFlag">Da controllare</span></div>
+            <h3>DA PAGARE SUBITO</h3>
+            <div class="decision-value" id="decisionNow" aria-live="polite">€ 0,00</div>
+            <p id="decisionNowSub">Pagamenti già scaduti + quelli che scadono oggi.</p>
+            <button class="decision-button" type="button" id="decisionShowUrgent">Vedi i pagamenti urgenti <span>↘</span></button>
+          </article>
+          <article class="decision-card decision-budget" id="decisionBudgetCard">
+            <div class="decision-card-top"><span class="decision-dot"></span><span>02 · MARGINE DEL MESE</span><span class="decision-flag" id="decisionSpendFlag">Da impostare</span></div>
+            <h3>TI RESTA DA SPENDERE</h3>
+            <div class="decision-value" id="decisionSpend" aria-live="polite">—</div>
+            <p id="decisionSpendSub">Quanto rimane del limite mensile, tenendo conto delle spese conosciute.</p>
+            <button class="decision-button" type="button" id="decisionSetBudget">Imposta / modifica il limite <span>↘</span></button>
+          </article>
+        </section>
+        <section class="command-metrics" aria-label="Riepilogo immediato">
+          <div class="command-metric"><span>DA PAGARE NEI PROSSIMI 7 GIORNI</span><strong id="decisionNextWeek">€ 0,00</strong><small>Non comprende scaduti e oggi</small></div>
+          <div class="command-metric"><span>ANCORA DA PAGARE NEL MESE</span><strong id="decisionOtherOpen">€ 0,00</strong><small>Comprende arretrati, rate fisse e spese senza data</small></div>
+          <div class="command-metric"><span>GIÀ SPESO QUESTO MESE</span><strong id="decisionMonthPaid">€ 0,00</strong><small>Uscite effettivamente pagate</small></div>
+          <div class="command-metric balance-metric"><span>SALDO REALE REGISTRATO</span><strong id="decisionBalance">€ 0,00</strong><small>Denaro presente, non budget spendibile</small></div>
+        </section>
+        <section class="command-budget-progress card" id="budgetAtGlance">
+          <div class="command-progress-head"><div><span class="eyebrow">03 · DOVE SEI NEL MESE</span><h3>Controllo del tetto di spesa</h3></div><button type="button" class="command-link" id="quickBudgetEdit">Modifica budget ↗</button></div>
+          <div class="command-progress-track" role="progressbar" aria-label="Quota del budget del mese impegnata" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="budgetProgressTrack"><i id="budgetProgressPaid"></i><b id="budgetProgressDue"></b></div>
+          <div class="command-progress-legend"><span><i class="legend-paid"></i> Pagato <strong id="budgetProgressPaidLabel">€ 0,00</strong></span><span><i class="legend-due"></i> Da pagare nel mese <strong id="budgetProgressDueLabel">€ 0,00</strong></span><span><i class="legend-left"></i> Margine <strong id="budgetProgressLeftLabel">—</strong></span></div>
+          <p class="command-progress-note" id="budgetProgressNote">Imposta i limiti mensili per visualizzare la ripartizione.</p>
+        </section>
+        <section class="action-center card" id="actionCenter">
+          <div class="command-list-head"><div><span class="eyebrow">COSA PAGARE ADESSO</span><h2>Elenco pagamenti</h2><p>Ordinati per scadenza. Premi <b>Paga</b> solo quando hai davvero effettuato il pagamento.</p></div><button type="button" class="secondary-btn" data-go="payments">Gestisci tutto →</button></div>
+          <div class="command-filters" role="group" aria-label="Filtra i pagamenti">
+            <button type="button" class="command-filter active" data-urgency-filter="now">Scaduti + oggi <b id="filterNowCount">0</b></button>
+            <button type="button" class="command-filter" data-urgency-filter="week">Entro 7 giorni <b id="filterWeekCount">0</b></button>
+            <button type="button" class="command-filter" data-urgency-filter="all">Tutti <b id="filterAllCount">0</b></button>
+            <button type="button" class="command-filter" data-urgency-filter="no_date">Senza data <b id="filterNoDateCount">0</b></button>
+          </div>
+          <div id="urgentPaymentsList" class="urgent-payments-list" aria-live="polite"><div class="empty-state">Caricamento scadenze…</div></div>
+          <div class="action-footer"><span id="urgentStatus">Controllo in corso</span><button type="button" class="text-btn" id="showAllUrgent" hidden>Mostra tutti ↓</button></div>
+        </section>
+        <details class="budget-quick card" id="homeBudgetEditor"><summary><span>IMPOSTA I LIMITI MENSILI</span><b id="budgetEditorSummary">Configura un limite per ogni negozio</b><span class="budget-quick-chevron">⌄</span></summary>
+          <p>Il limite è la cifra <strong>massima che vuoi spendere in un mese</strong>, non il saldo del conto. Si applica anche ai mesi successivi finché non lo cambi.</p>
+          <div id="homeBudgetStores" class="home-budget-stores"></div>
+        </details>
+        <details class="analysis-drawer" id="analysisDrawer"><summary><span>⌁</span><div><strong>Analisi approfondite</strong><small>Fondi consapevoli, quote giornaliere, grafici, fornitori e prospetti</small></div><span class="drawer-chevron">Apri ▾</span></summary><div class="analysis-drawer-body">
+        <div class="expense-type-strip" aria-label="Tre tipi di uscita">
+          <button class="expense-type-card" data-go="payments" type="button"><span class="expense-type-number">01</span><div><strong>Pagamenti</strong><small>Spese da pagare senza una ricorrenza fissa</small></div><b>→</b></button>
+          <button class="expense-type-card" data-go="fixed" type="button"><span class="expense-type-number">02</span><div><strong>Spese fisse</strong><small>Rate ricorrenti e accantonamenti automatici</small></div><b>→</b></button>
+          <button class="expense-type-card variable-highlight" data-go="variables" type="button"><span class="expense-type-number">03</span><div><strong>Spese variabili</strong><small>Metro, fornitori e ordini distribuiti durante il mese</small></div><b>→</b></button>
+        </div>
+
+        <section class="forecast-guardrail card" id="forecastGuardrail">
+          <div class="forecast-shield"><span>◎</span></div>
+          <div class="forecast-guardrail-copy">
+            <div class="forecast-guardrail-top"><p class="eyebrow">QUALITÀ DELLA PREVISIONE</p><span class="forecast-quality" id="forecastQualityBadge">Controllo dati</span></div>
+            <h2 id="forecastGuardrailTitle">Sto verificando la base di calcolo…</h2>
+            <p id="forecastGuardrailText">Il programma distingue i mesi completi dai mesi parziali per evitare che un mese iniziato tardi venga interpretato come una spesa pari a zero.</p>
+            <div class="forecast-facts">
+              <span><small>Base usata</small><strong id="forecastReferenceFact">—</strong></span>
+              <span><small>Monitoraggio</small><strong id="forecastTrackingFact">—</strong></span>
+              <span><small>Prossimo cambio mese</small><strong id="forecastNextMonthFact">—</strong></span>
+            </div>
+          </div>
+        </section>
+
+        <div class="hero-grid">
+          <article class="card hero-card balance-card" data-tilt>
+            <div class="card-orbit"></div>
+            <div class="card-head">
+              <div><span class="card-kicker">LIQUIDITÀ</span><strong>Saldo reale</strong></div>
+              <span class="status-dot"></span>
+            </div>
+            <div class="big-money" id="balanceValue">€ 0,00</div>
+            <p class="muted" id="balanceSubtitle">Disponibilità reale aggiornata con movimenti e pagamenti.</p>
+            <button class="primary-btn action-recharge" id="openRecharge">+ Ricarica</button>
+            <div class="micro-grid"><span></span><span></span><span></span><span></span></div>
+          </article>
+
+          <article class="card hero-card aware-card" data-tilt>
+            <div class="card-orbit accent"></div>
+            <div class="card-head">
+              <div><span class="card-kicker">PREVISIONE DI SPESA</span><strong>Fondi consapevoli</strong></div>
+              <span class="pill" id="awareModeBadge">Previsione</span>
+            </div>
+            <div class="big-money aware-money" id="awareValue">€ 0,00</div>
+            <p class="muted" id="awareExplanation">Calcolo in corso…</p>
+
+            <div class="aware-ruler-panel">
+              <div class="aware-ruler-head">
+                <span id="awareRulerLabel">Oggi</span>
+                <strong id="awareRulerDayValue">Giorno 1</strong>
+              </div>
+              <div class="aware-ruler" id="awareRuler">
+                <div class="aware-day-labels" id="awareDayLabels"></div>
+                <div class="aware-track-wrap">
+                  <div class="aware-track-glow"></div>
+                  <div class="aware-track-fill" id="awareProgress"></div>
+                  <div class="aware-preview-line" id="awarePreviewLine"></div>
+                  <input id="awareDaySlider" class="aware-day-slider" type="range" min="1" max="30" value="1" step="1" aria-label="Sposta il giorno dei fondi consapevoli" />
+                </div>
+              </div>
+              <p class="aware-ruler-hint">Trascina sul giorno che vuoi simulare. È una previsione di budget, non il denaro presente sul conto.</p>
+              <div class="aware-linked-preview" aria-live="polite">
+                <div class="linked-metric linked-available">
+                  <span>Fondi consapevoli</span>
+                  <strong id="awareLinkedFunds">€ 0,00</strong>
+                  <small id="awareLinkedFundsSub">Budget flessibile previsto, non saldo reale</small>
+                </div>
+                <div class="linked-flow"><span>LIBERO</span><i></i><b>PROTETTO</b></div>
+                <div class="linked-metric linked-locked">
+                  <span>Soldi impegnati</span>
+                  <strong id="awareLinkedCommitted">€ 0,00</strong>
+                  <small><b id="awareLinkedCommittedPct">0%</b> delle prossime rate già accantonato</small>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <div class="stat-grid">
+          <article class="mini-card history-card" data-tilt><span>Base previsione mensile</span><strong id="prevExpenses">€ 0,00</strong><small id="prevExpensesSub">Fonte del calcolo mensile</small><i class="mini-glow"></i></article>
+          <article class="mini-card expense-card" data-tilt><span>Spese questo mese</span><strong id="currentExpenses">€ 0,00</strong><small>Denaro già uscito</small><i class="mini-glow"></i></article>
+          <article class="mini-card recharge-card" data-tilt><span>Ricariche questo mese</span><strong id="currentRecharges">€ 0,00</strong><small>Liquidità entrata</small><i class="mini-glow"></i></article>
+          <article class="mini-card credit-card" data-tilt><span>Credito da pagare</span><strong id="pendingCredit">€ 0,00</strong><small>Obblighi ancora da saldare</small><i class="mini-glow"></i></article>
+          <article class="mini-card committed-card clickable-card" data-tilt data-go="fixed" role="button" tabindex="0">
+            <span>Soldi impegnati</span><strong id="committedMoney">€ 0,00</strong>
+            <div class="committed-mini-progress"><i id="committedProgressFill"></i></div>
+            <small id="committedSubtitle">Protetti per le prossime spese</small><i class="mini-glow"></i>
+          </article>
+          <article class="mini-card protected-quota-card" data-tilt><span>Quota fissa mensile</span><strong id="monthlyProtectedQuota">€ 0,00</strong><small id="monthlyProtectedQuotaSub">Fisse + budget variabili previsti</small><i class="mini-glow"></i></article>
+          <article class="mini-card variable-budget-card" data-tilt data-go="variables" role="button" tabindex="0"><span>Budget variabili del mese</span><strong id="homeVariableBudget">€ 0,00</strong><small id="homeVariableBudgetSub">Previsione fornitori e materie prime</small><i class="mini-glow"></i></article>
+          <article class="mini-card pending-card" data-tilt><span>Pagamenti in corso</span><strong id="pendingCount">0</strong><small>Numero di scadenze aperte</small><i class="mini-glow"></i></article>
+          <article class="mini-card obligation-card" data-tilt><span>Impegni complessivi</span><strong id="knownObligations">€ 0,00</strong><small>Protetti + pagamenti aperti, senza doppi conteggi</small><i class="mini-glow"></i></article>
+          <article class="mini-card cash-margin-card" data-tilt><span>Liquidità dopo impegni</span><strong id="cashAfterCommitments">€ 0,00</strong><small id="cashAfterCommitmentsSub">Saldo reale meno gli obblighi conosciuti</small><i class="mini-glow"></i></article>
+        </div>
+
+        <section class="financial-overview-grid">
+          <article class="card plan-chart-card">
+            <div class="section-title-row">
+              <div><p class="eyebrow">PIANO DEL MESE</p><h2>Come è composta la previsione</h2></div>
+              <div class="plan-total"><small>Totale pianificato</small><strong id="planTotal">€ 0,00</strong></div>
+            </div>
+            <div class="plan-stacked" id="planStacked" aria-label="Composizione del piano mensile">
+              <i class="plan-segment fixed" id="planFixedBar"></i>
+              <i class="plan-segment variable" id="planVariableBar"></i>
+              <i class="plan-segment flexible" id="planFlexibleBar"></i>
+            </div>
+            <div class="plan-legend">
+              <div><span class="legend-dot fixed"></span><p><b>Spese fisse</b><strong id="planFixedValue">€ 0,00</strong><small id="planFixedPct">0%</small></p></div>
+              <div><span class="legend-dot variable"></span><p><b>Budget variabili</b><strong id="planVariableValue">€ 0,00</strong><small id="planVariablePct">0%</small></p></div>
+              <div><span class="legend-dot flexible"></span><p><b>Budget flessibile</b><strong id="planFlexibleValue">€ 0,00</strong><small id="planFlexiblePct">0%</small></p></div>
+            </div>
+            <p class="chart-note" id="planChartNote">Il grafico divide la previsione in costi ricorrenti, budget fornitori e parte flessibile.</p>
+          </article>
+
+          <article class="card cash-health-card">
+            <div class="section-title-row">
+              <div><p class="eyebrow">COPERTURA LIQUIDITÀ</p><h2>Quanto sei coperto oggi</h2></div>
+              <div class="coverage-ring" id="coverageRing"><span id="coveragePct">0%</span></div>
+            </div>
+            <div class="cash-health-values">
+              <div><span>Saldo reale</span><strong id="healthBalance">€ 0,00</strong></div>
+              <div><span>Impegni conosciuti</span><strong id="healthObligations">€ 0,00</strong></div>
+              <div class="health-result"><span>Dopo gli impegni</span><strong id="healthAfter">€ 0,00</strong></div>
+            </div>
+            <div class="deadline-strip">
+              <div><span>Scaduti</span><strong id="healthOverdue">€ 0,00</strong><small id="healthOverdueCount">0 voci</small></div>
+              <div><span>Entro 7 giorni</span><strong id="healthDue7">€ 0,00</strong><small id="healthDue7Count">0 voci</small></div>
+              <div><span>Entro 30 giorni</span><strong id="healthDue30">€ 0,00</strong><small id="healthDue30Count">0 voci</small></div>
+            </div>
+            <p class="chart-note" id="cashHealthNote">Il saldo reale è confrontato con gli impegni senza sommare due volte gli ordini già inclusi nei budget.</p>
+          </article>
+        </section>
+
+        <section class="card insight-stream" id="insightStream">
+          <div class="section-title-row"><div><p class="eyebrow">LETTURA RAPIDA</p><h2>Cosa sta succedendo</h2></div><span class="soft-label">Aggiornato in tempo reale</span></div>
+          <div class="insight-grid">
+            <div class="insight-item"><span class="insight-icon">◌</span><div><small>Qualità dati</small><strong id="insightDataTitle">—</strong><p id="insightDataText">—</p></div></div>
+            <div class="insight-item"><span class="insight-icon">↗</span><div><small>Ritmo del mese</small><strong id="insightPaceTitle">—</strong><p id="insightPaceText">—</p></div></div>
+            <div class="insight-item"><span class="insight-icon">◇</span><div><small>Fornitori</small><strong id="insightSupplierTitle">—</strong><p id="insightSupplierText">—</p></div></div>
+          </div>
+        </section>
+
+        <section class="allocation-panel card" id="allocationPanel">
+          <div class="allocation-head">
+            <div><p class="eyebrow">DOVE VANNO I SOLDI</p><h2>Ripartizione del budget</h2></div>
+            <button class="text-btn" data-go="fixed">Gestisci spese fisse →</button>
+          </div>
+          <div class="allocation-flow">
+            <div class="allocation-step"><span>Base previsione</span><strong id="allocationPrevious">€ 0,00</strong><small id="allocationPreviousSub">Fonte del calcolo</small></div>
+            <div class="allocation-symbol">−</div>
+            <div class="allocation-step locked"><span>Quota fissa mensile</span><strong id="allocationFixed">€ 0,00</strong><small>Denaro da proteggere</small></div>
+            <div class="allocation-symbol">=</div>
+            <div class="allocation-step available"><span>Budget variabile</span><strong id="allocationVariable">€ 0,00</strong><small>Base dei fondi consapevoli</small></div>
+            <div class="allocation-symbol">÷</div>
+            <div class="allocation-step daily"><span>Quota giornaliera</span><strong id="allocationDaily">€ 0,00</strong><small id="allocationDays">per giorno</small></div>
+          </div>
+          <div class="allocation-note"><span class="lock-pulse">◆</span><p id="allocationNote">Le spese fisse vengono separate dalla capacità di spesa. Le rate non mensili accumulano una quota ogni giorno nei Soldi impegnati.</p></div>
+          <div class="home-fixed-preview" id="homeFixedPreview"></div>
+        </section>
+
+        <section class="card variable-control-panel" id="homeVariablePanel">
+          <div class="section-title-row">
+            <div><p class="eyebrow">CONTROLLO FORNITORI</p><h2>Andamento spese variabili</h2></div>
+            <button class="text-btn" data-go="variables">Gestisci ordini →</button>
+          </div>
+          <div class="variable-kpi-grid">
+            <div class="variable-kpi"><span>Budget previsto</span><strong id="homeVarBudgetKpi">€ 0,00</strong><small>Conta subito nella Quota fissa mensile</small></div>
+            <div class="variable-kpi"><span>Ordini registrati</span><strong id="homeVarOrderedKpi">€ 0,00</strong><small id="homeVarOrderCount">0 ordini questo mese</small></div>
+            <div class="variable-kpi"><span>Ancora da ordinare</span><strong id="homeVarRemainingKpi">€ 0,00</strong><small>Per arrivare al budget previsto</small></div>
+            <div class="variable-kpi warning"><span>Ordini da pagare</span><strong id="homeVarPendingKpi">€ 0,00</strong><small id="homeVarPendingCount">0 ordini ancora da saldare</small></div>
+            <div class="variable-kpi success"><span>Ordini già pagati</span><strong id="homeVarPaidKpi">€ 0,00</strong><small>Uscita reale già avvenuta</small></div>
+            <div class="variable-kpi projection"><span>Proiezione fine mese</span><strong id="homeVarProjectionKpi">€ 0,00</strong><small id="homeVarProjectionSub">Stima lineare sul ritmo attuale</small></div>
+          </div>
+          <div class="variable-analysis-line">
+            <div><span>Utilizzo budget</span><strong id="homeVarProgress">0%</strong></div>
+            <div class="analysis-progress"><i id="homeVarProgressFill"></i></div>
+            <p id="homeVarAnalysisText">Aggiungi un budget variabile per iniziare l'analisi.</p>
+          </div>
+        </section>
+
+        <section class="global-breakdown" id="globalBreakdown" hidden>
+          <div class="section-title-row">
+            <div><p class="eyebrow">RETE NEGOZI</p><h2>Situazione per negozio</h2></div>
+            <span class="soft-label">Confronto in tempo reale</span>
+          </div>
+          <div class="store-breakdown-grid" id="storeBreakdownGrid"></div>
+        </section>
+
+        <div class="section-grid">
+          <article class="card section-card">
+            <div class="section-title-row">
+              <div><p class="eyebrow">SCADENZE</p><h2>Prossimi pagamenti</h2></div>
+              <button class="text-btn" data-go="payments">Vedi tutti →</button>
+            </div>
+            <div id="nextDueList" class="list"></div>
+          </article>
+          <article class="card section-card insight-card">
+            <div class="section-title-row"><div><p class="eyebrow">MODELLO</p><h2>Motore finanziario</h2></div><span class="pulse-ring"></span></div>
+            <div class="logic-box"><span class="logic-index">01</span><div><span class="logic-label">Saldo reale</span><p>Saldo precedente + ricariche − pagamenti svolti.</p></div></div>
+            <div class="logic-box"><span class="logic-index">02</span><div><span class="logic-label">Fondi consapevoli</span><p>Base previsione affidabile − quota mensile protetta. Se il mese precedente è parziale, il sistema mantiene l’ultimo storico valido invece di azzerare la previsione.</p></div></div>
+            <div class="logic-box"><span class="logic-index">03</span><div><span class="logic-label">Soldi impegnati</span><p>Accantonamenti protetti che crescono ogni giorno per preparare le rate mensili, bimestrali, trimestrali, semestrali e annuali.</p></div></div>
+            <div class="logic-box"><span class="logic-index">04</span><div><span class="logic-label">Visione globale</span><p>Somma i dati di tutti i negozi e mantiene separato il dettaglio di ciascuno.</p></div></div>
+            <details class="method-details"><summary>Come viene scelta la base previsione?</summary><p>Il programma usa il consuntivo reale solo quando il mese precedente è stato monitorato dall’inizio. Se hai iniziato a usare il gestionale a fine mese, mantiene l’ultimo storico affidabile. Se un mese completo non contiene nessuna uscita registrata, applica un guardrail e non sostituisce automaticamente lo storico con zero.</p></details>
+          </article>
+        </div>
+        </div></details>
+      </section>
+
+      <section id="page-selected" class="page">
+        <div class="page-actions"><div><p class="eyebrow">PIANIFICA I PAGAMENTI</p><h2>Spese selezionate</h2><p>La selezione resta salvata. Il saldo cambia solo quando confermi un pagamento.</p></div></div>
+        <article class="card table-card"><div id="selectedExpensesList" class="list"></div></article>
+      </section>
+      <section id="page-payments" class="page">
+        <div class="page-actions">
+          <div class="tabs neon-tabs">
+            <button class="tab active" data-status="pending">Pagamenti in corso</button>
+            <button class="tab" data-status="paid">Pagati</button>
+          </div>
+          <button class="primary-btn" id="openPayment">+ Nuovo pagamento</button>
+        </div>
+
+        <div class="filter-row" id="paidFilters" hidden>
+          <label>Mese<input type="month" id="paidMonth" /></label>
+          <button class="secondary-btn" id="clearPaidMonth">Tutti i mesi</button>
+        </div>
+
+        <div class="payment-distance-filter" id="pendingDistanceFilter">
+          <div class="distance-mode-switch" aria-label="Unità distanza scadenze">
+            <button type="button" class="distance-mode-btn active" data-distance-mode="days">Giorni</button>
+            <button type="button" class="distance-mode-btn" data-distance-mode="months">Mesi</button>
+          </div>
+          <div class="distance-ruler-area">
+            <div class="distance-ruler-head">
+              <div><span>DISTANZA SCADENZE</span><small>Riduci il campo per isolare le spese più vicine.</small></div>
+              <strong id="distanceValueLabel">Tutte le scadenze</strong>
+            </div>
+            <div class="distance-ruler">
+              <div class="distance-labels" id="distanceLabels"></div>
+              <div class="distance-track-wrap">
+                <div class="distance-track-fill" id="distanceProgress"></div>
+                <div class="distance-preview-line" id="distancePreviewLine"></div>
+                <input id="distanceSlider" class="distance-slider" type="range" min="0" max="30" value="30" step="1" aria-label="Filtra pagamenti per distanza dalla scadenza" />
+              </div>
+            </div>
+            <div class="distance-summary" id="distanceSummary">Tutti i pagamenti in corso</div>
+          </div>
+        </div>
+
+        <article class="card table-card"><div id="paymentsList" class="list"></div></article>
+      </section>
+
+      <section id="page-fixed" class="page">
+        <div class="page-actions fixed-page-head">
+          <div><p class="eyebrow">ACCANTONAMENTI AUTOMATICI</p><h2>Spese fisse</h2><p class="fixed-intro">Ogni rata viene trasformata nella sua quota mensile e poi giornaliera. Quello che matura finisce nei <strong>Soldi impegnati</strong> e non va considerato disponibile.</p></div>
+          <button class="primary-btn" id="openFixedExpense">+ Nuova spesa fissa</button>
+        </div>
+        <div class="fixed-summary-grid">
+          <article class="mini-card committed-card"><span>Soldi impegnati</span><strong id="fixedCommittedTotal">€ 0,00</strong><small>Spese fisse + budget variabili protetti</small><i class="mini-glow"></i></article>
+          <article class="mini-card"><span>Quota fissa mensile</span><strong id="fixedMonthlyTotal">€ 0,00</strong><small>Comprende anche i budget mensili delle spese variabili</small><i class="mini-glow"></i></article>
+          <article class="mini-card"><span>Accantonamento di oggi</span><strong id="fixedDailyTotal">€ 0,00</strong><small>Quota che matura ogni giorno di questo mese</small><i class="mini-glow"></i></article>
+          <article class="mini-card"><span>Spese fisse attive</span><strong id="fixedCountTotal">0</strong><small>Rate sotto controllo</small><i class="mini-glow"></i></article>
+        </div>
+        <article class="card fixed-explain-card">
+          <div class="fixed-explain-icon">◆</div>
+          <div><strong>Perché questi soldi non sono spendibili?</strong><p>Le spese fisse vengono accantonate nel tempo. I budget variabili entrano subito per intero nella Quota fissa mensile; nei Soldi impegnati resta la parte che devi ancora pagare o che prevedi ancora di ordinare, senza contare due volte ciò che è già uscito dal saldo.</p></div>
+        </article>
+        <div id="fixedExpensesList" class="fixed-expense-grid"></div>
+      </section>
+
+
+      <section id="page-variables" class="page">
+        <div class="page-actions fixed-page-head">
+          <div><p class="eyebrow">FORNITORI E MATERIE PRIME</p><h2>Spese variabili</h2><p class="fixed-intro">Imposta il budget mensile del fornitore, poi registra gli ordini. Il budget entra nei <strong>Soldi impegnati</strong> e nella <strong>Quota fissa mensile</strong>.</p></div>
+          <button class="primary-btn" id="openVariableBudget">+ Nuova spesa variabile</button>
+        </div>
+        <div class="variable-summary-grid">
+          <article class="mini-card"><span>Budget previsto</span><strong id="variableSummaryBudget">€ 0,00</strong><small>Impatta subito sulla Quota fissa mensile</small><i class="mini-glow"></i></article>
+          <article class="mini-card"><span>Ordini del mese</span><strong id="variableSummaryOrdered">€ 0,00</strong><small id="variableSummaryOrderCount">0 ordini registrati</small><i class="mini-glow"></i></article>
+          <article class="mini-card"><span>Da ordinare</span><strong id="variableSummaryRemaining">€ 0,00</strong><small>Budget ancora disponibile per nuovi ordini</small><i class="mini-glow"></i></article>
+          <article class="mini-card pending-card"><span>Da pagare</span><strong id="variableSummaryPending">€ 0,00</strong><small id="variableSummaryPendingCount">0 ordini aperti</small><i class="mini-glow"></i></article>
+          <article class="mini-card"><span>Già pagato</span><strong id="variableSummaryPaid">€ 0,00</strong><small>Pagamenti reali degli ordini</small><i class="mini-glow"></i></article>
+          <article class="mini-card"><span>Ordine medio</span><strong id="variableSummaryAverage">€ 0,00</strong><small>Media degli ordini registrati</small><i class="mini-glow"></i></article>
+        </div>
+        <div class="variable-help card"><strong>Come funziona</strong><span>Il budget mensile è una previsione: appena lo crei aumenta subito la <b>Quota fissa mensile</b>. Poi registri ogni ordine separatamente. Se non lo paghi subito scegli la scadenza: va nei <b>Pagamenti</b> e il saldo scenderà solo quando lo segnerai come pagato.</span></div>
+        <div id="variableBudgetsList" class="fixed-expense-grid"></div>
+      </section>
+
+      <section id="page-budgets" class="page">
+        <div class="page-actions fixed-page-head"><div><p class="eyebrow">MARGINI DI SPESA</p><h2>Budget spese mensile</h2><p class="fixed-intro">Imposta quanto <strong>puoi spendere al massimo ogni mese</strong> per ciascun negozio. Qui vedi quanto è già uscito, quanto devi ancora pagare e quanto resta.</p></div></div>
+        <div class="budget-kpi-grid">
+          <article class="mini-card"><span>Limite mensile</span><strong id="spendingLimitTotal">—</strong><small>Limite impostato dall'azienda</small></article>
+          <article class="mini-card"><span>Già pagato nel mese</span><strong id="spendingMonthPaid">€ 0,00</strong><small>Uscite realmente registrate</small></article>
+          <article class="mini-card"><span>Da pagare / scaduti</span><strong id="spendingMonthDue">€ 0,00</strong><small>Pagamenti aperti + rate fisse del mese</small></article>
+          <article class="mini-card"><span>Margine residuo</span><strong id="spendingMonthMargin">—</strong><small id="spendingMarginHint">Budget meno pagato e da pagare</small></article>
+        </div>
+        <p class="budget-explanation card">Questo limite è <strong>separato</strong> dai budget dei fornitori e dai fondi consapevoli. Per prudenza, nel calcolo contano anche i debiti arretrati e le spese aperte senza scadenza; i pagamenti già registrati non vengono sommati due volte.</p>
+        <div id="spendingBudgetStores" class="budget-store-grid"></div>
+      </section>
+
+      <section id="page-history" class="page">
+        <div class="page-actions fixed-page-head"><div><p class="eyebrow">CONSUNTIVO REALE</p><h2>Storico di tutte le spese pagate</h2><p class="fixed-intro">Consulta i pagamenti già effettuati, le rate fisse pagate e gli ordini dei fornitori saldati. Filtra per settimana, mese, anno o tutto lo storico.</p></div><button class="secondary-btn" id="historyExportCsv" type="button">↓ Esporta storico CSV</button></div>
+        <div class="history-controls card"><label>Periodo<select id="historyPeriod"><option value="week">Settimana</option><option value="month" selected>Mese</option><option value="year">Anno</option><option value="all">Tutto</option></select></label><label>Data di riferimento<input type="date" id="historyAnchor" /></label><button type="button" class="secondary-btn" id="historyCurrent">Periodo attuale</button></div>
+        <div class="history-totals"><div class="mini-card"><span>Spesa complessiva del periodo</span><strong id="historyTotal">€ 0,00</strong><small id="historyPeriodLabel">Periodo selezionato</small></div><div class="mini-card"><span>Uscite registrate</span><strong id="historyCount">0</strong><small>Contate una sola volta</small></div></div>
+        <div class="card table-card"><div id="expenseHistoryList" class="list"><div class="empty-state">Caricamento dello storico…</div></div></div>
+      </section>
+
+      <section id="page-recharges" class="page">
+        <div class="page-actions">
+          <div><p class="eyebrow">STORICO LIQUIDITÀ</p><h2>Ricariche del saldo</h2></div>
+          <button class="primary-btn" id="openRecharge2">+ Ricarica</button>
+        </div>
+        <div class="filter-row"><label>Mese<input type="month" id="rechargeMonth" /></label><button class="secondary-btn" id="clearRechargeMonth">Tutti i mesi</button></div>
+        <article class="card table-card"><div id="rechargesList" class="list"></div></article>
+      </section>
+    </main>
+  </div>
+
+  <div class="gate" id="storeGate" hidden>
+    <div class="gate-beam"></div>
+    <div class="gate-card glass-panel">
+      <div class="gate-logo"><span>G</span></div>
+      <p class="eyebrow">NUOVO SPAZIO</p>
+      <h1>Configura il primo negozio</h1>
+      <p>Ogni negozio avrà saldo, pagamenti, spese fisse, soldi impegnati, ricariche e fondi consapevoli indipendenti.</p>
+      <form id="firstStoreForm">
+        <label>Nome del negozio<input name="name" autocomplete="off" placeholder="es. Spinza" required maxlength="80" /></label>
+        <button class="primary-btn full" type="submit">Crea negozio →</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="storeSwitcherModal" hidden>
+    <div class="modal wide-modal">
+      <div class="modal-head"><div><p class="eyebrow">SELEZIONE AREA</p><h2>Negozi e visione globale</h2></div><button class="icon-btn" data-close="storeSwitcherModal">×</button></div>
+      <button class="global-choice" id="selectGlobal" type="button"><span class="choice-icon">∞</span><span><small>VISIONE COMPLETA</small><strong>Tutti i negozi</strong><em>Somma saldi, fondi consapevoli, soldi impegnati, spese, ricariche e scadenze.</em></span><b>→</b></button>
+      <div class="store-choice-list" id="storeChoiceList"></div>
+      <div class="new-store-box">
+        <div><p class="eyebrow">AGGIUNGI</p><strong>Nuovo negozio</strong></div>
+        <form id="newStoreForm"><input name="name" autocomplete="off" placeholder="Nome negozio" required maxlength="80" /><button class="primary-btn" type="submit">Crea</button></form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="setupModal" hidden>
+    <div class="modal setup-modal">
+      <div class="setup-header">
+        <div><p class="eyebrow">CONFIGURAZIONE NEGOZIO</p><h2 id="setupStoreName">Impostazione iniziale</h2><p class="muted">Servono solo due valori per attivare il motore finanziario.</p></div>
+        <div class="setup-badge">UNA SOLA VOLTA</div>
+      </div>
+      <form id="setupForm">
+        <input type="hidden" name="store_id" />
+        <section class="setup-section"><div class="setup-step"><span>01</span><div><strong>Saldo iniziale</strong><small>Quanto denaro è realmente disponibile nel negozio in questo momento.</small></div></div><label>Saldo iniziale (€)<input name="initial_amount" inputmode="decimal" placeholder="es. 33000" required /></label></section>
+        <section class="setup-section"><div class="setup-step"><span>02</span><div><strong>Spese totali di <b id="setupPreviousMonth">mese scorso</b></strong><small>Il totale complessivo serve per calcolare la quota giornaliera consapevole.</small></div></div><label>Spese totali mese scorso (€)<input name="previous_month_total" inputmode="decimal" placeholder="es. 18000" required /></label><div class="setup-summary"><span>Quota giornaliera prevista</span><strong id="setupDailyAware">€ 0,00 / giorno</strong></div></section>
+        <button class="primary-btn full setup-submit" type="submit">Attiva il negozio →</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="rechargeModal" hidden>
+    <div class="modal">
+      <div class="modal-head"><div><p class="eyebrow">SALDO REALE</p><h2>Nuova ricarica</h2></div><button class="icon-btn" data-close="rechargeModal">×</button></div>
+      <form id="rechargeForm" class="form-grid">
+        <label class="store-field" id="rechargeStoreField">Negozio<select name="store_id"></select></label>
+        <label>Importo (€)<input name="amount" inputmode="decimal" placeholder="es. 2500" required /></label>
+        <label class="span-2">Nota<input name="note" placeholder="es. Versamento, trasferimento..." /></label>
+        <button class="primary-btn span-2" type="submit">Aggiungi al saldo</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="paymentModal" hidden>
+    <div class="modal">
+      <div class="modal-head"><div><p class="eyebrow">NUOVA SCADENZA</p><h2>Aggiungi pagamento</h2></div><button class="icon-btn" data-close="paymentModal">×</button></div>
+      <form id="paymentForm" class="form-grid">
+        <label class="store-field" id="paymentStoreField">Negozio<select name="store_id"></select></label>
+        <label>Descrizione<input name="description" placeholder="es. Affitto" required /></label>
+        <label>Importo (€)<input name="amount" inputmode="decimal" placeholder="es. 1200" required /></label>
+        <label>Scadenza<input name="due_date" type="date" /></label>
+        <label>Priorità 1–100<input name="priority" type="number" min="1" max="100" value="50" required /></label>
+        <label>Categoria<input name="category" placeholder="es. Fornitore" /></label>
+        <label class="span-2">Note<textarea name="notes" rows="3" placeholder="Informazioni utili..."></textarea></label>
+        <button class="primary-btn span-2" type="submit">Aggiungi ai pagamenti in corso</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="fixedExpenseModal" hidden>
+    <div class="modal">
+      <div class="modal-head"><div><p class="eyebrow">DENARO PROTETTO</p><h2>Nuova spesa fissa</h2><p class="muted">Inserisci l'importo della rata completa: il programma calcolerà da solo quota mensile, quota giornaliera e accantonamento.</p></div><button class="icon-btn" data-close="fixedExpenseModal">×</button></div>
+      <form id="fixedExpenseForm" class="form-grid">
+        <label class="store-field" id="fixedStoreField">Negozio<select name="store_id"></select></label>
+        <label>Descrizione<input name="description" placeholder="es. Assicurazione" required /></label>
+        <label>Importo della rata (€)<input name="amount" inputmode="decimal" placeholder="es. 1200" required /></label>
+        <label>Frequenza<select name="frequency_months" required><option value="1">Mensile</option><option value="2">Bimestrale</option><option value="3">Trimestrale</option><option value="6">Semestrale</option><option value="12">Annuale</option></select></label>
+        <label>Prossima scadenza<input name="next_due_date" type="date" required /></label>
+        <label>Categoria<input name="category" placeholder="es. Assicurazione, affitto..." /></label>
+        <label class="span-2">Note<textarea name="notes" rows="3" placeholder="Informazioni utili..."></textarea></label>
+        <div class="fixed-modal-preview span-2" id="fixedModalPreview"><span>Quota stimata</span><strong>Inserisci importo e frequenza</strong></div>
+        <button class="primary-btn span-2" type="submit">Attiva accantonamento</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="fixedPayModal" hidden>
+    <div class="modal small-modal">
+      <div class="modal-head"><div><p class="eyebrow">RATA FISSA</p><h2>Conferma pagamento</h2></div><button class="icon-btn" data-close="fixedPayModal">×</button></div>
+      <div class="fixed-pay-summary" id="fixedPaySummary"></div>
+      <form id="fixedPayForm" class="form-grid"><input type="hidden" name="fixed_expense_id" /><label>Importo realmente pagato (€)<input name="actual_amount" inputmode="decimal" required /></label><label>Data pagamento<input name="paid_date" type="date" required /></label><button class="primary-btn span-2" type="submit">Paga rata e avvia il prossimo ciclo</button></form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="variableBudgetModal" hidden>
+    <div class="modal">
+      <div class="modal-head"><div><p class="eyebrow">BUDGET MENSILE</p><h2>Nuova spesa variabile</h2><p class="muted">Per fornitori come Metro: il budget è una previsione, non scala il saldo.</p></div><button class="icon-btn" data-close="variableBudgetModal">×</button></div>
+      <form id="variableBudgetForm" class="form-grid">
+        <label class="store-field" id="variableStoreField">Negozio<select name="store_id"></select></label>
+        <label>Fornitore / voce<input name="description" placeholder="es. Metro" required /></label>
+        <label>Budget mensile stimato (€)<input name="monthly_budget" inputmode="decimal" placeholder="es. 3000" required /></label>
+        <label>Categoria<input name="category" placeholder="es. Materie prime" /></label>
+        <label class="span-2">Note<textarea name="notes" rows="3" placeholder="Informazioni utili..."></textarea></label>
+        <button class="primary-btn span-2" type="submit">Crea budget mensile</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="variablePurchaseModal" hidden>
+    <div class="modal small-modal">
+      <div class="modal-head"><div><p class="eyebrow">NUOVO ORDINE</p><h2>Registra ordine</h2></div><button class="icon-btn" data-close="variablePurchaseModal">×</button></div>
+      <div class="fixed-pay-summary" id="variablePurchaseSummary"></div>
+      <form id="variablePurchaseForm" class="form-grid">
+        <input type="hidden" name="budget_id" />
+        <label>Importo ordine (€)<input name="amount" inputmode="decimal" required /></label>
+        <label>Data ordine<input name="purchase_date" type="date" required /></label>
+        <label class="span-2">Pagamento
+          <select name="payment_status" id="variablePaymentStatus" required>
+            <option value="pending">Da pagare</option>
+            <option value="paid">Già pagato</option>
+          </select>
+        </label>
+        <label class="span-2" id="variableDueDateField">Data di scadenza
+          <input name="due_date" type="date" />
+          <span class="field-help">Decidi quando prevedi di pagare questo ordine.</span>
+          <span class="quick-due-buttons"><button type="button" data-due-days="7">+7 giorni</button><button type="button" data-due-days="15">+15 giorni</button><button type="button" data-due-days="30">+30 giorni</button><button type="button" data-due-days="60">+60 giorni</button></span>
+        </label>
+        <label class="span-2">Nota<input name="note" placeholder="es. ordine settimanale, numero fattura..." /></label>
+        <button class="primary-btn span-2" type="submit">Registra ordine</button>
+      </form>
+      <div id="variablePurchaseHistory" class="variable-purchase-history"></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="payModal" hidden>
+    <div class="modal small-modal">
+      <div class="modal-head"><div><p class="eyebrow">CONFERMA USCITA</p><h2>Segna come pagato</h2></div><button class="icon-btn" data-close="payModal">×</button></div>
+      <p class="pay-description" id="payDescription"></p>
+      <form id="payForm" class="form-grid"><input type="hidden" name="payment_id" /><label>Importo realmente pagato (€)<input name="actual_amount" inputmode="decimal" required /></label><label>Data pagamento<input name="paid_date" type="date" required /></label><button class="primary-btn span-2" type="submit">Conferma pagamento</button></form>
+    </div>
+  </div>
+
+  <button id="selectionSummary" class="selection-summary" type="button" onclick="setPage('selected')" aria-label="Apri spese selezionate"><span>Spese selezionate · <b id="selectionCount">0</b></span><strong id="selectionTotal" aria-live="polite">Caricamento…</strong><small id="selectionScope"></small></button>
+  <div id="toast" class="toast" hidden></div>
+  <script src="/spese-programma/bridge.js"></script>
+<script src="/spese-programma/assets/app_pro.js?fresh=v41-selection"></script>
+</body>
+</html>

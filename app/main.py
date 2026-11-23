@@ -10236,3 +10236,8 @@ templates.globals['new_document_jobs']=_new_document_jobs
 
 from .reconciliation import install as install_reconciliation
 install_reconciliation(app, globals())
+
+from .expense_program import install as install_expense_program
+install_expense_program(app, globals())
+from .expense_archive import install as install_expense_archive
+install_expense_archive(app, globals())
