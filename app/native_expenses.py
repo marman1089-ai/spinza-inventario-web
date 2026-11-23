@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from datetime import date
 from urllib.parse import urlencode
 from fastapi import Request,HTTPException
-from fastapi.responses import RedirectResponse,Response
+from fastapi.responses import RedirectResponse,Response,JSONResponse
 from starlette.concurrency import run_in_threadpool
 from .db import connect
 from . import expense_program as program
@@ -67,6 +67,12 @@ def view_data(db,store,today,tab,status,period,anchor,q,page,aware_day,month='',
     selected_keys={r[0] for r in db.execute('SELECT selection_key FROM expense_selections')}
     for r in candidates:r['selected']=r['selection_key'] in selected_keys
     selected=[r for r in candidates if r['selected']]
+    candidate_map={(r['kind'],r['id']):r for r in candidates}
+    for group in overview['groups'].values():
+        for r in group:
+            matching=candidate_map.get((r['kind'],r['id']))
+            if matching:r.update(selection_key=matching['selection_key'],selected=matching['selected'])
+    command_items=[r for bucket in ('overdue','today','week','later','no_date') for r in overview['groups'][bucket]]
     where='' if scope=='global' else ' AND store_id=?';args=() if scope=='global' else (sid,)
     payments=[dict(r) for r in db.execute('SELECT * FROM payments WHERE status=?'+where+' ORDER BY due_date,id',(status,*args))]
     if month and status=='paid':payments=[r for r in payments if str(r['paid_at'] or '').startswith(month)]
@@ -80,6 +86,7 @@ def view_data(db,store,today,tab,status,period,anchor,q,page,aware_day,month='',
     fixed=[legacy.serialize_fixed_expense(r,today) for r in db.execute('SELECT f.*,s.name AS store_name FROM fixed_expenses f JOIN stores s ON s.id=f.store_id WHERE f.active=1'+('' if scope=='global' else ' AND f.store_id=?')+' ORDER BY f.next_due_date,f.id',args)]
     variables=[legacy.serialize_variable_budget(db,r,today) for r in db.execute('SELECT b.*,s.name AS store_name FROM variable_budgets b JOIN stores s ON s.id=b.store_id WHERE b.active=1'+('' if scope=='global' else ' AND b.store_id=?')+' ORDER BY b.id',args)]
     variable_orders=[dict(r) for r in db.execute('SELECT v.*,b.description FROM variable_purchases v JOIN variable_budgets b ON b.id=v.budget_id WHERE 1=1'+('' if scope=='global' else ' AND v.store_id=?')+' ORDER BY v.purchase_date DESC,v.id DESC',args)] if tab=='variables' else []
+    for order in variable_orders:order['selection_candidate']=candidate_map.get(('payment',order.get('payment_id')))
     history=legacy.expense_history(db,scope,sid,period,anchor) if tab=='history' else None
     recharges=[dict(r) for r in db.execute('SELECT * FROM recharges WHERE 1=1'+where+' ORDER BY created_at DESC,id DESC',args)] if tab=='recharges' else []
     if month and tab=='recharges':recharges=[r for r in recharges if str(r['created_at']).startswith(month)]
@@ -88,7 +95,7 @@ def view_data(db,store,today,tab,status,period,anchor,q,page,aware_day,month='',
     simulated_fixed=sum(legacy.fixed_reserved_amount(r,target) for r in fixed)
     gross=int((Decimal(dashboard['variable_budget_cents'])*day/dashboard['month_days']).quantize(Decimal('1'),rounding=ROUND_HALF_UP))
     simulation=dict(day=day,committed=simulated_fixed+dashboard['variable_budget_commitment_cents'],funds=dashboard['aware_funds_cents'] if day==dashboard['aware_days'] else gross-dashboard['current_variable_expenses_cents'])
-    return dict(dashboard=dashboard,overview=overview,candidates=candidates,selected=selected,selected_total=sum(r['amount_cents'] for r in selected),
+    return dict(dashboard=dashboard,overview=overview,command_items=command_items,candidates=candidates,selection_data=[dict(key=r['selection_key'],amount=r['amount_cents'],selected=r['selected']) for r in candidates],selected=selected,selected_total=sum(r['amount_cents'] for r in selected),
                 details_metrics=[dict(label=label,value=dashboard[key],money=key.endswith('_cents')) for key,label in DETAIL_LABELS.items() if key in dashboard],payments=payments[(page-1)*25:page*25],payment_count=len(payments),fixed=fixed,variables=variables,variable_orders=variable_orders,
                 history=history,recharges=recharges,simulation=simulation,source_stores=[dict(r) for r in db.execute('SELECT * FROM stores')],sid=sid,scope=scope,aware_day=day)
 
@@ -102,9 +109,10 @@ def install(app,api):
     def destination(tab,message='',error=''):
         return ROOT+'?'+urlencode(dict(tab=tab,**({'message':message} if message else {}),**({'error':error} if error else {})))
     @app.get(ROOT)
-    def index(request:Request,tab:str='home',status:str='pending',period:str='month',anchor:str='',q:str='',page:int=1,aware_day:int=0,message:str='',error:str='',month:str='',distance:int=0,distance_unit:str='days',due_filter:str='all'):
+    def index(request:Request,tab:str='home',status:str='pending',period:str='month',anchor:str='',q:str='',page:int=1,aware_day:int=0,message:str='',error:str='',month:str='',distance:int=0,distance_unit:str='days',due_filter:str='all',command_filter:str='now'):
         user=admin(request);store=api['_effective_store'](request,user);today=api['_rome_today']()
         if tab not in TABS or status not in ('pending','paid') or period not in ('week','month','year','all'):raise HTTPException(422,'Filtro non valido.')
+        if command_filter not in ('now','week','no_date','all'):raise HTTPException(422,'Filtro scadenze non valido.')
         if month and not re.fullmatch(r'\d{4}-\d{2}',month):raise HTTPException(422,'Mese non valido.')
         if not 0<=distance<=3650 or distance_unit not in ('days','months') or due_filter not in ('all','overdue','no_date'):raise HTTPException(422,'Filtro scadenze non valido.')
         try:anchor_day=date.fromisoformat(anchor) if anchor else today
@@ -121,8 +129,34 @@ def install(app,api):
                 with memory_data() as fresh:data=calculate(fresh)
             else:data=calculate(db)
         return api['render']('native_expenses.html',request=request,user=user,data=data,tabs=TABS,tab=tab,status=status,period=period,anchor=anchor_day.isoformat(),q=q,page=max(1,page),today=today.isoformat(),
-            csrf=csrf(request),action_token=lambda:secrets.token_urlsafe(32),site_store=store,message=message,error=error,month=month,distance=distance,distance_unit=distance_unit,due_filter=due_filter,
+            csrf=csrf(request),action_token=lambda:secrets.token_urlsafe(32),site_store=store,message=message,error=error,month=month,distance=distance,distance_unit=distance_unit,due_filter=due_filter,command_filter=command_filter,
             tab_url=lambda t,**kw:ROOT+'?'+urlencode(dict(tab=t,**kw)))
+
+    def selection_state(request):
+        store=api['_effective_store'](request,admin(request))
+        sid=next((key for key,value in STORE_MAP.items() if value==store),None)
+        with memory_data() as db:
+            if db is None:raise HTTPException(404,'Dati non disponibili.')
+            candidates=[dict(r) for r in legacy.selection_candidates(db) if store=='ALL' or r['store_id']==sid]
+            keys={r[0] for r in db.execute('SELECT selection_key FROM expense_selections')}
+        items=[dict(key=r['selection_key'],amount=r['amount_cents'],selected=r['selection_key'] in keys) for r in candidates]
+        return dict(items=items,count=sum(r['selected'] for r in items),total_cents=sum(r['amount'] for r in items if r['selected']),next_operation=secrets.token_urlsafe(32))
+
+    @app.get(ROOT+'/selezione')
+    def get_selection(request:Request):
+        return JSONResponse(selection_state(request),headers={'Cache-Control':'no-store'})
+
+    @app.post(ROOT+'/selezione')
+    async def set_selection(request:Request):
+        user=admin(request);form=await request.form()
+        if not secrets.compare_digest(str(form.get('csrf','')),csrf(request)):raise HTTPException(403,'Ricarica la pagina.')
+        if form.get('scope_store')!=api['_effective_store'](request,user):raise HTTPException(409,'Il negozio è cambiato: ricarica la pagina.')
+        operation=str(form.get('operation',''))
+        if not re.fullmatch(r'[A-Za-z0-9_-]{43}',operation):raise HTTPException(422,'Ricarica la pagina.')
+        result=await run_in_threadpool(program.execute,'POST','/api/expenses/selection',dict(key=str(form.get('key','')),selected=form.get('selected')=='1',__native_action_token=operation),user)
+        if result.status_code>=400:return result
+        data=await run_in_threadpool(selection_state,request)
+        return JSONResponse(data,headers={'Cache-Control':'no-store'})
 
     @app.post(ROOT+'/azione')
     async def action(request:Request):

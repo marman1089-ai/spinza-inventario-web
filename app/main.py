@@ -5700,7 +5700,7 @@ def _store_switch_url(next_url: str, store: str) -> str:
         'anchor_date','flow_date','payment_method','category','cat','loc','only_low',
         'from_month','to_month','year','week','days','supplier','q_date','kind',
         'limit','q_user','q_day','q_area','q_group','q_product','asof','who','all_pending',
-        'origin','status','selected_only','page','tab','period','anchor','aware_day','distance','distance_unit','due_filter'}
+        'origin','status','selected_only','page','tab','period','anchor','aware_day','distance','distance_unit','due_filter','command_filter'}
     params=[(k,v) for k,v in parse_qsl(target.query,keep_blank_values=True) if k in filters]
     store_pages={'/inventario','/inventario/conteggio','/inventario/report',
         '/inventario/fatture-settimana','/inventario-controllo','/admin',

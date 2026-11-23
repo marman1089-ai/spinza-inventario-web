@@ -96,3 +96,21 @@ class NativeExpenseTests(unittest.TestCase):
         self.assertEqual(response.status_code,200)
         self.assertIn('27,00',response.text)
         self.assertIn('Acquisto reale',response.text)
+    def test_live_selection_returns_authoritative_total_and_persists_without_accounting(self):
+        self.import_data();self.login(store='spinza')
+        page=self.client.get('/gestionale/spese-pagamenti?tab=payments')
+        fields=self.fields(page.text,'selection');fields['scope_store']='spinza'
+        response=self.client.post('/gestionale/spese-pagamenti/selezione',data=fields)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()['total_cents'],12345)
+        self.assertEqual(response.json()['count'],1)
+        self.assertEqual(self.sql('SELECT * FROM cash_expenses'),[])
+        self.assertEqual(self.sql('SELECT * FROM cash_company_spending'),[])
+        repeat=self.client.post('/gestionale/spese-pagamenti/selezione',data=fields)
+        self.assertEqual(repeat.json()['total_cents'],12345)
+        fields['selected']='0';fields['operation']=response.json()['next_operation']
+        self.assertEqual(self.client.post('/gestionale/spese-pagamenti/selezione',data=fields).json()['count'],0)
+        fields['scope_store']='reburger_maggio'
+        self.assertEqual(self.client.post('/gestionale/spese-pagamenti/selezione',data=fields).status_code,409)
+        self.login(2)
+        self.assertEqual(self.client.get('/gestionale/spese-pagamenti/selezione').status_code,403)
