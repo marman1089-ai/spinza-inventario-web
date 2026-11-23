@@ -79,6 +79,7 @@
   for(const link of document.querySelectorAll('[data-show-urgent]'))link.addEventListener('click',()=>commandFilter('now'));
   const current=document.querySelector('[data-command-filter][aria-pressed="true"]');if(current)commandFilter(current.dataset.commandFilter,false);
   const nav=document.querySelector('.np-tabs'),active=nav?.querySelector('[aria-current]');
-  if(nav&&active&&nav.scrollWidth>nav.clientWidth)nav.scrollLeft=active.offsetLeft-nav.offsetLeft-nav.clientWidth/2+active.offsetWidth/2;
+  function alignNavigation(){if(nav&&active&&nav.scrollWidth>nav.clientWidth)nav.scrollLeft=active.offsetLeft-nav.offsetLeft-nav.clientWidth/2+active.offsetWidth/2}
+  alignNavigation();window.addEventListener('resize',alignNavigation,{passive:true});
   render();
 })();
