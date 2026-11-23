@@ -6,7 +6,9 @@
   <meta name="theme-color" content="#07111f" />
   <title>Gestione Pagamenti</title>
   <link rel="stylesheet" href="/spese-programma/assets/style_pro.css?fresh=v41-selection" />
-</head>
+<style>/* Static effects keep the same palette without continuous repainting. */
+.ambient-layer *,.mini-glow,.orb,.scanline{animation:none!important}.cursor-aura{display:none!important}#activeStoreLabel{cursor:default;transform:none}#activeStoreLabel:hover{transform:none}
+</style></head>
 <body>
   <div class="ambient-layer" aria-hidden="true">
     <span class="orb orb-a"></span><span class="orb orb-b"></span><span class="orb orb-c"></span>
@@ -24,11 +26,11 @@
         </div>
       </div>
 
-      <button class="context-switcher" id="openStoreSwitcher" type="button">
+      <div class="context-switcher" id="activeStoreLabel">
         <span class="context-icon" id="contextIcon">N</span>
         <span class="context-copy"><small>AREA ATTIVA</small><strong id="contextName">Seleziona negozio</strong></span>
-        <span class="context-arrow">⌄</span>
-      </button>
+        <span class="context-arrow" aria-hidden="true">•</span>
+      </div>
 
       <nav class="main-nav">
         <button class="nav-btn active" data-page="home"><span class="nav-icon">⌂</span><span>Cruscotto</span><i></i></button>

@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal,ROUND_HALF_UP
 from urllib.parse import urlencode
 from fastapi import Request,HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse,JSONResponse
 from .db import connect,using_postgres
 from .expense_program import schema,p,local_copy,legacy_connect,STORE_MAP,stamp
 from .cash_treasury import ensure_schema as cash_schema
@@ -101,12 +101,18 @@ def archive_schema(cur):
     cur.execute('CREATE TABLE IF NOT EXISTS expense_archive_categories (source_key TEXT PRIMARY KEY,category TEXT NOT NULL)')
 
 
+PAGE_SIZE=25
+
 def install(app,api):
     def admin(request):
         user=api['require_login'](request)
         if not user or not api['is_admin'](request):raise HTTPException(403,'Sezione riservata agli admin.')
         return user
     def csrf(request):return request.session.setdefault('expense_archive_csrf',secrets.token_urlsafe(32))
+    @app.on_event('startup')
+    def init_archive():
+        with connect() as conn:archive_schema(conn.cursor())
+
     @app.get('/gestionale/tutte-le-spese')
     def index(request:Request,store:str='ALL',category:str='',origin:str='',status:str='',start:str='',end:str='',q:str='',page:int=1,selected_only:bool=False):
         user=admin(request)
@@ -117,7 +123,7 @@ def install(app,api):
             if start and end and start>end:raise ValueError()
         except ValueError:raise HTTPException(422,'Periodo non valido.')
         with connect() as conn:
-            cur=conn.cursor();archive_schema(cur);allrows=collect(cur)
+            cur=conn.cursor();allrows=collect(cur)
             selected={r['source_key'] for r in cur.execute('SELECT source_key FROM expense_archive_selected').fetchall()}
             for row in allrows:row['selected']=row['key'] in selected
         rows=[r for r in allrows if (store=='ALL' or r['store']==store) and (not category or r['category']==category) and (not origin or r['origin']==origin) and (not status or r['status']==status) and (not start or r['day']>=start) and (not end or r['day']<=end) and (not selected_only or r['selected']) and (not q or q.casefold() in (r['description']+' '+r['category']+' '+r['origin']).casefold())]
@@ -125,10 +131,20 @@ def install(app,api):
         totals={s:sum(r['amount'] or 0 for r in rows if r['status']==s and not r['possible_duplicate']) for s in ('paid','open')}
         summary=Counter(r['status'] for r in rows)
         parameters=dict(store=store,category=category,origin=origin,status=status,start=start,end=end,q=q,selected_only=selected_only)
-        return api['render']('expense_archive.html',request=request,user=user,rows=rows[(page-1)*100:page*100],allrows=allrows,count=count,page=page,
-            next_url='/gestionale/tutte-le-spese?'+urlencode(dict(parameters,page=page+1)) if page*100<count else '',
+        return api['render']('expense_archive.html',request=request,user=user,rows=rows[(page-1)*PAGE_SIZE:page*PAGE_SIZE],count=count,page=page,
+            next_url='/gestionale/tutte-le-spese?'+urlencode(dict(parameters,page=page+1)) if page*PAGE_SIZE<count else '',
             prev_url='/gestionale/tutte-le-spese?'+urlencode(dict(parameters,page=page-1)) if page>1 else '',
             totals=totals,summary=summary,selected_count=sum(r['selected'] for r in allrows),selected_total=sum((r['amount'] or 0) for r in allrows if r['selected'] and not r['possible_duplicate']),categories=sorted({r['category'] for r in allrows}),origins=sorted({r['origin'] for r in allrows}),csrf=csrf(request),program_csrf=request.session.setdefault('expense_program_csrf',secrets.token_urlsafe(32)),**parameters)
+    @app.get('/gestionale/tutte-le-spese/pagamenti')
+    def payment_options(request:Request,q:str='',exclude:str='',page:int=1):
+        admin(request)
+        page=max(1,page)
+        with connect() as conn:rows=collect(conn.cursor())
+        q=q.strip().casefold()[:200]
+        options=[r for r in rows if r['status']=='paid' and r['key']!=exclude and (not q or q in (r['description']+' '+r['day']+' '+r['category']).casefold())]
+        start=(page-1)*20
+        return JSONResponse({'items':[dict(key=r['key'],description=r['description'],day=r['day'],amount=r['amount']) for r in options[start:start+20]],'has_more':start+20<len(options)},headers={'Cache-Control':'no-store'})
+
     @app.post('/gestionale/tutte-le-spese/classifica')
     async def classify(request:Request):
         user=admin(request);form=await request.form()
@@ -136,7 +152,7 @@ def install(app,api):
         key=str(form.get('key',''));category=str(form.get('category','')).strip()
         if not category or len(category)>120:raise HTTPException(422,'Inserisci una categoria fino a 120 caratteri.')
         with connect() as conn:
-            cur=conn.cursor();archive_schema(cur)
+            cur=conn.cursor()
             if key not in {r['key'] for r in collect(cur)}:raise HTTPException(404,'Voce non trovata.')
             cur.execute(f'INSERT INTO expense_archive_categories VALUES({p()},{p()}) ON CONFLICT(source_key) DO UPDATE SET category=excluded.category',(key,category))
         return RedirectResponse('/gestionale/tutte-le-spese',303)
@@ -146,7 +162,7 @@ def install(app,api):
         if not secrets.compare_digest(str(form.get('csrf','')),csrf(request)):raise HTTPException(403,'Ricarica la pagina.')
         source,target=str(form.get('source','')),str(form.get('target',''))
         with connect() as conn:
-            cur=conn.cursor();archive_schema(cur);rows={r['key']:r for r in collect(cur)}
+            cur=conn.cursor();rows={r['key']:r for r in collect(cur)}
             if source==target or source not in rows or target not in rows or rows[target]['status']!='paid':raise HTTPException(422,'Scegli il pagamento corrispondente.')
             # No chains: all provenance must remain visible at the surviving payment.
             if cur.execute(f'SELECT source_key FROM expense_archive_links WHERE target_key={p()}',(source,)).fetchone():raise HTTPException(422,'Questa voce ha già altri documenti collegati.')
@@ -166,7 +182,7 @@ def install(app,api):
         if not secrets.compare_digest(str(form.get('csrf','')),csrf(request)):raise HTTPException(403,'Ricarica la pagina.')
         key=str(form.get('key',''))
         with connect() as conn:
-            cur=conn.cursor();archive_schema(cur)
+            cur=conn.cursor()
             if key not in {r['key'] for r in collect(cur)}:raise HTTPException(404,'Voce non trovata.')
             if form.get('selected')=='1':cur.execute(f'INSERT INTO expense_archive_selected VALUES({p()}) ON CONFLICT(source_key) DO NOTHING',(key,))
             else:cur.execute(f'DELETE FROM expense_archive_selected WHERE source_key={p()}',(key,))

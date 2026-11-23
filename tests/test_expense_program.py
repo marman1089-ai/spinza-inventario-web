@@ -6,7 +6,9 @@ import test_control as fixture
 from app import expense_program as program,expense_archive as archive,db
 
 class ExpenseProgramTests(unittest.TestCase):
-    setUp=fixture.ControlTests.setUp
+    def setUp(self):
+        fixture.ControlTests.setUp(self)
+        with db.connect() as conn:archive.archive_schema(conn.cursor())
     login=fixture.ControlTests.login
     sql=fixture.ControlTests.sql
     def seed(self):
@@ -106,3 +108,31 @@ class ExpenseProgramTests(unittest.TestCase):
         self.assertEqual(self.client.post('/spese-programma/rate-saldate/1',data=payload,follow_redirects=False).status_code,409)
         self.assertEqual(len(self.sql('SELECT * FROM cash_expenses')),1)
         self.assertEqual(self.client.get('/gestionale/tutte-le-spese').status_code,200)
+    def test_large_archive_is_paginated_and_payment_choices_are_lazy(self):
+        with db.connect() as conn:
+            conn.executemany("INSERT INTO cash_expenses(store,flow_date,category,payment_method,amount,notes,created_by) VALUES('spinza','2026-11-23','Varie','Carta',25,?,'testadmin')",[(f'Pagamento {i}',) for i in range(100)])
+            conn.executemany("INSERT INTO secondary_expenses(store,expense_date,uploaded_by,filename,content_type,data) VALUES('spinza','2026-11-23','testadmin',?,'application/pdf',?)",[(f'ricevuta {i}.pdf',b'%PDF') for i in range(80)])
+        response=self.client.get('/gestionale/tutte-le-spese?status=document')
+        self.assertEqual(response.status_code,200)
+        self.assertIn('80 registrazioni',response.text)
+        self.assertEqual(response.text.count('data-expense-match data-exclude='),25)
+        self.assertLess(response.text.count('<option'),150)
+        self.assertLess(len(response.content),250000)
+        self.assertIn('page=2',response.text)
+        options=self.client.get('/gestionale/tutte-le-spese/pagamenti').json()
+        self.assertEqual(len(options['items']),20)
+        self.assertTrue(options['has_more'])
+        second=self.client.get('/gestionale/tutte-le-spese/pagamenti?page=2').json()
+        self.assertTrue({x['key'] for x in options['items']}.isdisjoint({x['key'] for x in second['items']}))
+        self.login(2)
+        self.assertEqual(self.client.get('/gestionale/tutte-le-spese/pagamenti').status_code,403)
+    def test_planner_reads_do_not_run_schema_migrations_and_has_no_second_store_button(self):
+        self.import_data()
+        with patch.object(program,'schema') as ddl,patch.object(program,'cash_schema') as cash_ddl:
+            self.assertEqual(self.client.get('/spese-programma/api/dashboard?scope=global').status_code,200)
+            self.assertEqual(self.client.get('/gestionale/spese-pagamenti').status_code,200)
+            ddl.assert_not_called();cash_ddl.assert_not_called()
+        html=self.client.get('/spese-programma/app').text
+        self.assertNotIn('id="openStoreSwitcher"',html)
+        self.assertIn('id="activeStoreLabel"',html)
+        self.assertIn('EXPENSE_SITE_CONTEXT',html)

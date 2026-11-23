@@ -142,7 +142,7 @@ def sync_payments(cur,before,after,method,user):
 
 def execute(method,path,payload,user):
     with connect() as native:
-        cur=native.cursor();schema(cur);cash_schema(cur)
+        cur=native.cursor()
         if using_postgres():cur.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',('expense-program',))
         else:native.execute('BEGIN IMMEDIATE')
         state=cur.execute('SELECT * FROM expense_program_state WHERE id=1'+(' FOR UPDATE' if using_postgres() else '')).fetchone()
@@ -150,14 +150,16 @@ def execute(method,path,payload,user):
         if (method=='POST' and path=='/api/stores') or (method=='DELETE' and path.startswith('/api/stores/')):
             raise HTTPException(422,'I negozi sono collegati a quelli del gestionale e non si eliminano da qui.')
         with local_copy(state['data']) as file:
-            with legacy_connect() as db:before=paid_rows(db)
+            if method!='GET':
+                with legacy_connect() as db:before=paid_rows(db)
             handler=Handler(path,payload)
             getattr(handler,'do_'+method)()
             result=handler.result
             if result is None:raise HTTPException(500,'Risposta del programma non disponibile.')
             if result.status_code>=400:return result
-            with legacy_connect() as db:after=paid_rows(db)
-            sync_payments(cur,before,after,payload.get('payment_method'),user)
+            if method!='GET':
+                with legacy_connect() as db:after=paid_rows(db)
+                sync_payments(cur,before,after,payload.get('payment_method'),user)
             updated=file.read_bytes()
             if updated!=bytes(state['data']):
                 cur.execute(f'INSERT INTO expense_program_history(revision,data,username,operation,saved_at) VALUES({",".join([p()]*5)})',
@@ -181,7 +183,7 @@ def install(app,api):
     def index(request:Request):
         user=admin(request)
         with connect() as conn:
-            cur=conn.cursor();schema(cur);state=cur.execute('SELECT revision,updated_at FROM expense_program_state WHERE id=1').fetchone()
+            cur=conn.cursor();state=cur.execute('SELECT revision,updated_at FROM expense_program_state WHERE id=1').fetchone()
         return api['render']('expense_program.html',request=request,user=user,state=state,csrf=csrf(request))
     @app.post(ROOT+'/importa')
     async def import_data(request:Request):

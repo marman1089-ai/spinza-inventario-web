@@ -33,8 +33,8 @@ function currentStore(){return state.stores.find(s=>Number(s.id)===Number(state.
 function isGlobal(){return state.scope==='global'}
 function scopeQuery(){return isGlobal()?'scope=global':`store_id=${encodeURIComponent(state.storeId)}`}
 
-function animateMoney(id,target){const el=document.getElementById(id);if(!el)return;const to=Number(target)||0;const from=Number(el.dataset.cents||0);el.dataset.cents=String(to);if(Math.abs(to-from)<2){el.textContent=formatMoney(to);return}const start=performance.now(),dur=620;const tick=now=>{const p=Math.min(1,(now-start)/dur);const eased=1-Math.pow(1-p,3);el.textContent=formatMoney(Math.round(from+(to-from)*eased));if(p<1)requestAnimationFrame(tick)};requestAnimationFrame(tick)}
-function animateInteger(id,target){const el=document.getElementById(id);if(!el)return;const to=Number(target)||0,from=Number(el.dataset.value||0);el.dataset.value=String(to);const start=performance.now(),dur=420;const tick=now=>{const p=Math.min(1,(now-start)/dur);el.textContent=String(Math.round(from+(to-from)*(1-Math.pow(1-p,3))));if(p<1)requestAnimationFrame(tick)};requestAnimationFrame(tick)}
+function animateMoney(id,target){const el=document.getElementById(id);if(el){el.dataset.cents=String(Number(target)||0);el.textContent=formatMoney(target)}}
+function animateInteger(id,target){const el=document.getElementById(id);if(el){el.dataset.value=String(Number(target)||0);el.textContent=String(Math.round(Number(target)||0))}}
 
 function saveUiState(){
   if(restoringScroll)return;
@@ -253,7 +253,7 @@ async function loadDashboard(){
   document.getElementById('allocationDays').textContent=`per giorno • ${d.month_days} giorni`;
   document.getElementById('allocationNote').textContent=((d.fixed_expenses_count||0)||(d.variable_budget_count||0))?`${formatMoney(d.fixed_monthly_equivalent_cents)} di Quota fissa mensile: ${formatMoney(d.fixed_only_monthly_equivalent_cents||0)} dalle spese fisse + ${formatMoney(d.variable_monthly_budget_total_cents||0)} dai budget variabili. I budget variabili entrano subito, prima ancora di registrare gli ordini.`:'Nessuna quota mensile è ancora protetta. Aggiungi spese fisse o budget variabili.';
   document.getElementById('todayLabel').textContent=new Date(d.today+'T12:00:00').toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
-  renderForecastGuardrail(d);renderHomeVariableMetrics(d);renderPlanAndCashHealth(d);renderInsights(d);setupAwareRuler(d);renderNextDue(d.next_due);renderStoreBreakdown(d);updateContextUI();await loadExecutiveOverview();await loadSelectedExpenses();
+  renderForecastGuardrail(d);renderHomeVariableMetrics(d);renderPlanAndCashHealth(d);renderInsights(d);setupAwareRuler(d);renderNextDue(d.next_due);renderStoreBreakdown(d);updateContextUI();await Promise.all([loadExecutiveOverview(),loadSelectedExpenses()]);
   if(!d.is_global&&!d.setup_complete)prepareSetup(d);
 }
 
@@ -397,7 +397,7 @@ function renderHomeBudgetEditor(d){
       const val=form.elements.monthly_limit.value;
       await api('/spese-programma/api/expenses/limit',{method:'POST',body:JSON.stringify({store_id:Number(form.dataset.homeLimitStore),monthly_limit:val})});
       toast('Limite mensile aggiornato');
-      await loadExecutiveOverview();await loadSelectedExpenses();
+      await Promise.all([loadExecutiveOverview(),loadSelectedExpenses()]);
       if(state.page==='budgets')await loadSpendingBudgets();
     }catch(err){toast(err.message,true)}
   }));
@@ -448,7 +448,7 @@ async function loadExecutiveOverview(){
   const d=await api(`/spese-programma/api/expenses/overview?${scopeQuery()}`);expenseOverview=d;renderExecutiveOverview(d);return d;
 }
 async function loadSpendingBudgets(){
-  const d=await loadExecutiveOverview();await loadSelectedExpenses();if(!d)return;
+  const d=await Promise.all([loadExecutiveOverview(),loadSelectedExpenses()]);if(!d)return;
   const complete=d.limit_complete;
   setTextIfPresent('spendingLimitTotal',complete?formatMoney(d.monthly_limit_cents):'Da impostare');
   setTextIfPresent('spendingMonthPaid',formatMoney(d.paid_this_month_cents));
@@ -484,17 +484,14 @@ function exportExpenseHistoryCsv(){
   }).catch(e=>toast(e.message,true));
 }
 
-function initInteractiveEffects(){
-  const aura=document.getElementById('cursorAura');let tx=-500,ty=-500,cx=-500,cy=-500,running=true;window.addEventListener('pointermove',e=>{tx=e.clientX-130;ty=e.clientY-130},{passive:true});const auraTick=()=>{cx+=(tx-cx)*.14;cy+=(ty-cy)*.14;aura.style.transform=`translate3d(${cx}px,${cy}px,0)`;if(running)requestAnimationFrame(auraTick)};requestAnimationFrame(auraTick);
-  document.querySelectorAll('[data-tilt]').forEach(el=>{let raf=0;el.addEventListener('pointermove',e=>{if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;const r=el.getBoundingClientRect(),x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;el.style.setProperty('--mx',`${x*100}%`);el.style.setProperty('--my',`${y*100}%`);cancelAnimationFrame(raf);raf=requestAnimationFrame(()=>el.style.transform=`perspective(900px) rotateX(${(0.5-y)*2.2}deg) rotateY(${(x-0.5)*2.7}deg) translateY(-1px)`)});el.addEventListener('pointerleave',()=>{el.style.transform=''})});
-}
+function initInteractiveEffects(){ /* Decorative continuous animations disabled. */ }
 
 // Eventi UI
 document.querySelectorAll('.nav-btn').forEach(btn=>btn.addEventListener('click',()=>setPage(btn.dataset.page)));
 document.querySelectorAll('[data-go]').forEach(btn=>btn.addEventListener('click',()=>setPage(btn.dataset.go)));
 document.querySelectorAll('[data-close]').forEach(btn=>btn.addEventListener('click',()=>closeModal(btn.dataset.close)));
 document.querySelectorAll('.modal-backdrop').forEach(backdrop=>backdrop.addEventListener('click',e=>{if(e.target===backdrop&&backdrop.id!=='setupModal')backdrop.hidden=true}));
-document.getElementById('openStoreSwitcher').onclick=()=>{renderStoreChoices();openModal('storeSwitcherModal')};document.getElementById('selectGlobal').onclick=selectGlobal;
+document.getElementById('selectGlobal').onclick=selectGlobal;
 document.getElementById('quickNewPayment').onclick=()=>openOperationModal('payment');document.getElementById('historyPeriod').addEventListener('change',()=>loadExpenseHistory().catch(e=>toast(e.message,true)));document.getElementById('historyAnchor').addEventListener('change',()=>loadExpenseHistory().catch(e=>toast(e.message,true)));document.getElementById('historyCurrent').onclick=()=>{document.getElementById('historyAnchor').value=state.dashboard?.today||new Date().toISOString().slice(0,10);loadExpenseHistory().catch(e=>toast(e.message,true))};document.getElementById('historyExportCsv').onclick=exportExpenseHistoryCsv;
 document.getElementById('openRecharge').onclick=()=>openOperationModal('recharge');document.getElementById('openRecharge2').onclick=()=>openOperationModal('recharge');document.getElementById('openPayment').onclick=()=>openOperationModal('payment');document.getElementById('openFixedExpense').onclick=()=>openOperationModal('fixed');document.getElementById('openVariableBudget').onclick=()=>openOperationModal('variable');document.getElementById('exportCsv').onclick=exportCsv;
 document.getElementById('awareDaySlider').addEventListener('input',e=>{state.awarePinnedByUser=true;renderAwareForDay(Number(e.currentTarget.value))});document.getElementById('awareDaySlider').addEventListener('change',e=>{state.awarePinnedByUser=true;renderAwareForDay(Number(e.currentTarget.value))});
