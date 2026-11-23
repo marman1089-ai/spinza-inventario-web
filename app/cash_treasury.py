@@ -200,10 +200,8 @@ def company_cash_balances(receipts, expenses, loans):
         for key, value in daily['receipts'].items():
             income[key] += value
             cash[key] += value
-        # Same-day receipts fund the day's expenses. Only the remainder of those
-        # receipts can be allocated to repayment after the day's movements.
-        daily_spent = defaultdict(int)
-        prior_debt = dict(outstanding)
+        # Expenses are funded first; all remaining liquidity repays debt,
+        # including prior balances and money returned by the other company.
         for loan in daily['loans']:
             lender, borrower, value = loan['lender'], loan['borrower'], loan['amount_cents']
             outstanding[borrower] += value
@@ -213,19 +211,26 @@ def company_cash_balances(receipts, expenses, loans):
                 value = expense[key+'_cents']
                 cash[key] -= value
                 spent[key] += value
-                daily_spent[key] += value
         for key in COMPANIES:
             lender = partner[key]
             advance = min(max(-cash[key], 0), max(cash[lender], 0))
-            if daily_spent[key] and advance:
+            if advance:
                 outstanding[key] += advance
                 transfer(day, lender, key, advance, 'Prestito automatico', 'Copertura spese del giorno')
+        # Opposing debts cancel without moving physical cash.
+        offset = min(outstanding['sc'], outstanding['reburger'])
+        if offset:
+            outstanding['sc'] -= offset
+            outstanding['reburger'] -= offset
+            movements.append(dict(day=day, lender='sc', borrower='reburger',
+                                  amount_cents=offset, kind='Compensazione prestiti',
+                                  notes='Riduzione reciproca dei debiti; nessuno spostamento di contanti'))
         for key in COMPANIES:
-            remaining_receipts = max(daily['receipts'][key] - daily_spent[key], 0)
-            repayment = min(remaining_receipts, max(cash[key], 0), prior_debt.get(key, 0))
+            repayment = min(max(cash[key], 0), outstanding[key])
             if repayment:
                 outstanding[key] -= repayment
-                transfer(day, key, partner[key], repayment, 'Rimborso da incassi', '')
+                transfer(day, key, partner[key], repayment, 'Rimborso automatico',
+                         'Tutta la disponibilità residua viene destinata al debito')
 
     rows = [
         dict(label=label, income=income[key], spent=spent[key], expected=income[key]-spent[key],

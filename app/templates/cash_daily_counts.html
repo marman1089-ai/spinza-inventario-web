@@ -90,7 +90,7 @@
 {% elif view=='balances' %}
 <section class="card ct-scroll">
 <h2>Bilanci cash al {{ today }}</h2>
-<p class="muted">Se una spesa supera la disponibilità di un’azienda, il bilancio calcola un prestito dalla liquidità disponibile dell’altra. Gli incassi rimasti dopo le spese del giorno vengono destinati al rimborso. I saldi includono questi rimborsi, da eseguire fisicamente tra le casse.</p>
+<p class="muted">Se una spesa supera la disponibilità di un’azienda, il bilancio calcola un prestito dalla liquidità disponibile dell’altra. Dopo le spese, tutta la disponibilità residua viene destinata automaticamente al rimborso: finché resta un debito il saldo disponibile è zero. I prestiti opposti si compensano. I saldi includono questi rimborsi, da eseguire fisicamente tra le casse.</p>
 <table><thead><tr><th>Azienda</th><th>Incassi contati</th><th>Spese reali</th><th>Saldo senza prestiti</th><th>Da rimborsare</th><th>Da ricevere</th><th>Saldo dopo i prestiti</th><th>Scoperto</th></tr></thead><tbody>
 {% for row in balances %}
 <tr><th scope="row">{{ row.label }}</th><td>{{ euro(row.income) }}</td><td>{{ euro(row.spent) }}</td><td>{{ euro(row.expected) }}</td><td>{{ euro(row.debt) }}</td><td>{{ euro(row.credit) }}</td><td><strong{% if row.balance<0 %} class="cash-short"{% endif %}>{{ euro(row.balance) }}</strong></td><td>{{ euro(row.uncovered) }}</td></tr>
