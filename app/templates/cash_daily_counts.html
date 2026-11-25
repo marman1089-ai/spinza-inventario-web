@@ -102,14 +102,15 @@
 </section>
 <section class="card">
 <h2>Registra prestito tra aziende</h2>
-<p class="muted">Il prestito sottrae contanti a chi li dà e li aggiunge a chi li riceve. Registralo qui una sola volta, nella data del trasferimento.</p>
+<p class="muted">Scegli se il prestito usa il cash del gestionale oppure è stato pagato con altri fondi. Con altri fondi si registra solo il debito: nessun contante viene sottratto o aggiunto. Il rimborso automatico usa la disponibilità residua del debitore, anche già presente alla data scelta.</p>
 <form class="ct-form" method="post" action="{{ root }}/bilanci/prestiti">
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <input type="hidden" name="submission" value="{{ submission }}">
 <label>Data del prestito<input type="date" name="day" value="{{ today }}" max="{{ today }}" required></label>
+<label>Origine del prestito<select name="funding" required><option value="external">Pagato con altri fondi · solo debito</option><option value="cash">Trasferimento dal cash del gestionale</option></select></label>
 <label>Azienda che presta<select name="lender" required><option value="">Seleziona</option>{% for key,label in companies.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
 <label>Azienda che riceve<select name="borrower" required><option value="">Seleziona</option>{% for key,label in companies.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
-<label>Importo (€)<input name="amount" inputmode="decimal" pattern="[0-9]{1,9}([.,][0-9]{1,2})?" required></label>
+<label>Importo (€)<input name="amount" inputmode="decimal" placeholder="Es. 1000,00 oppure 1.000,00" required></label>
 <label>Nota facoltativa<input name="notes" maxlength="250"></label>
 <button class="btn">Registra prestito</button>
 </form>

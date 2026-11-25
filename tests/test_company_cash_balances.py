@@ -43,3 +43,16 @@ class CompanyCashBalancesTests(unittest.TestCase):
             loan('01','reburger','sc',10000),loan('01','sc','reburger',3000)])
         self.assertEqual((rows[0]['balance'],rows[0]['debt'],rows[1]['credit']),(0,0,0))
         self.assertTrue(any(m['kind']=='Compensazione prestiti' and m['amount_cents']==3000 for m in moves))
+
+    def test_external_funding_records_debt_without_initial_cash_transfer(self):
+        external=dict(loan('01','reburger','sc',10000),funding='external')
+        rows,moves=self.calculate([receipt('01','reburger_maggio',20000)],[],[external])
+        self.assertEqual((rows[0]['balance'],rows[0]['debt'],rows[1]['balance'],rows[1]['credit']),(0,10000,20000,10000))
+        self.assertEqual(moves[0]['kind'],'Prestito con altri fondi')
+        rows,moves=self.calculate([receipt('01','reburger_maggio',20000),receipt('02','spinza',4000),receipt('03','spinza',8000)],[],[external])
+        self.assertEqual((rows[0]['balance'],rows[0]['debt'],rows[1]['balance']),(2000,0,30000))
+
+    def test_external_funding_can_repay_from_existing_cash_after_expenses(self):
+        external=dict(loan('02','reburger','sc',10000),funding='external')
+        rows,_=self.calculate([receipt('01','spinza',8000)],[expense('02',sc=3000)],[external])
+        self.assertEqual((rows[0]['balance'],rows[0]['debt'],rows[1]['balance']),(0,5000,5000))

@@ -35,6 +35,10 @@ def ensure_schema(cur):
         token TEXT PRIMARY KEY, day TEXT NOT NULL, lender TEXT NOT NULL,
         borrower TEXT NOT NULL, amount_cents BIGINT NOT NULL,
         notes TEXT NOT NULL, recorded_by TEXT NOT NULL)''')
+    if using_postgres():
+        cur.execute("ALTER TABLE cash_company_loans ADD COLUMN IF NOT EXISTS funding TEXT NOT NULL DEFAULT 'cash'")
+    elif 'funding' not in {r['name'] for r in cur.execute('PRAGMA table_info(cash_company_loans)').fetchall()}:
+        cur.execute("ALTER TABLE cash_company_loans ADD COLUMN funding TEXT NOT NULL DEFAULT 'cash'")
     cur.execute('''CREATE TABLE IF NOT EXISTS cash_treasury_openings (
         store TEXT PRIMARY KEY,start_date TEXT NOT NULL,amount_cents BIGINT NOT NULL,
         created_by TEXT NOT NULL,created_at TEXT NOT NULL)''')
@@ -205,7 +209,11 @@ def company_cash_balances(receipts, expenses, loans):
         for loan in daily['loans']:
             lender, borrower, value = loan['lender'], loan['borrower'], loan['amount_cents']
             outstanding[borrower] += value
-            transfer(day, lender, borrower, value, 'Prestito registrato', loan['notes'])
+            if dict(loan).get('funding', 'cash') == 'external':
+                movements.append(dict(day=day, lender=lender, borrower=borrower,
+                                      amount_cents=value, kind='Prestito con altri fondi', notes=loan['notes']))
+            else:
+                transfer(day, lender, borrower, value, 'Prestito registrato', loan['notes'])
         for expense in daily['expenses']:
             for key in COMPANIES:
                 value = expense[key+'_cents']
@@ -396,7 +404,13 @@ def install(app, api):
         user, form = await read_form(request)
         day = selected_day(form.get('day')).isoformat()
         lender, borrower = form.get('lender'), form.get('borrower')
-        value = cents(form.get('amount',''))
+        raw_amount = str(form.get('amount','')).strip().replace(' ', '').replace('€', '')
+        if re.fullmatch(r'\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?', raw_amount):
+            raw_amount = raw_amount.replace('.', '')
+        value = cents(raw_amount)
+        funding = str(form.get('funding', 'cash'))
+        if funding not in ('cash', 'external'):
+            raise HTTPException(422, 'Scegli come è stato finanziato il prestito.')
         notes = str(form.get('notes','')).strip()
         token = str(form.get('submission',''))
         if lender not in COMPANIES or borrower not in COMPANIES or lender == borrower:
@@ -405,9 +419,9 @@ def install(app, api):
             raise HTTPException(422, 'Controlla importo e note e riprova.')
         with connect() as conn:
             conn.cursor().execute(f'''
-                INSERT INTO cash_company_loans(token,day,lender,borrower,amount_cents,notes,recorded_by)
-                VALUES({p()},{p()},{p()},{p()},{p()},{p()},{p()}) ON CONFLICT(token) DO NOTHING
-            ''', (token,day,lender,borrower,value,notes,user['username']))
+                INSERT INTO cash_company_loans(token,day,lender,borrower,amount_cents,notes,recorded_by,funding)
+                VALUES({p()},{p()},{p()},{p()},{p()},{p()},{p()},{p()}) ON CONFLICT(token) DO NOTHING
+            ''', (token,day,lender,borrower,value,notes,user['username'],funding))
         return RedirectResponse(root+'/bilanci',303)
 
     @app.get(root+'/bilanci')
