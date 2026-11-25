@@ -2,7 +2,8 @@
 {% set title="Contanti nei negozi" %}
 {% macro euro(value) %}{{ ('%.2f' % (value/100)).replace('.',',') ~ ' €' if value is not none else '—' }}{% endmacro %}
 {% macro outcome(row) %}
-{% if row.difference is none %}Report assente
+{% if row.missing_days|default(0) %}Da verificare · {{ row.missing_days }} giornate senza report
+{% elif row.difference is none %}Report assente
 {% elif row.difference == 0 %}<strong class="cash-ok">Conforme</strong>
 {% elif row.difference < 0 %}<strong class="cash-short">Ammanco {{ euro(row.difference) }}</strong>
 {% else %}<strong class="cash-ok">Eccedenza +{{ euro(row.difference) }}</strong>{% endif %}
@@ -35,7 +36,7 @@
 {% if view=='receipts' %}
 <section class="card">
 <h2>Registra incassi</h2>
-<p>Inserisci il contante che hai contato, escluso il fondo cassa. Il confronto usa la chiusura del {{ previous }}.</p>
+<p>Inserisci il contante che hai contato, escluso il fondo cassa. Il contante atteso somma tutti i report non ancora coperti da un conteggio, fino al giorno precedente. Se salti un giorno, il totale passa al conteggio successivo.</p>
 <form class="ct-form" method="post" action="{{ root }}/incassi">
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <input type="hidden" name="day" value="{{ day }}">
@@ -45,22 +46,22 @@
 <div>
 <h3>{{ labels[store] }}</h3>
 <p>{{ companies['sc' if store=='spinza' else 'reburger'] }}</p>
-<p>Dichiarato {{ euro(declared[store]) }}{% if declared[store] is none %} · Report assente{% endif %}</p>
+<p>Contante atteso <strong>{{ euro(declared[store]) }}</strong></p><p class="muted">Report dal {{ periods[store].report_start }} al {{ periods[store].report_end }} · {{ periods[store].report_days }} giornate registrate{% if periods[store].missing_days %}<br>Da verificare: {{ periods[store].missing_days }} giornate senza report. L’importo disponibile è parziale.{% endif %}</p>
 {% if row %}<p>Registrato {{ euro(row.amount_cents) }} · {{ outcome(row) }}</p>{% endif %}
 <label>Contante contato (€)<input name="{{ store }}" inputmode="decimal" pattern="[0-9]{1,9}([.,][0-9]{1,2})?"></label>
 </div>
 {% endfor %}
 </div>
-<p>Compila i negozi da registrare o correggere. Inserisci 0 per registrare un conteggio a zero.</p>
+<p>Compila solo i negozi che hai contato. Vuoto = nessun conteggio, il contante atteso si accumula. Inserisci 0 solo se hai contato e trovato zero.</p>
 <button class="btn">Salva incassi del {{ day }}</button>
 </form>
 </section>
 <section class="card ct-scroll">
 <h2>Archivio incassi · {{ day[:7] }}</h2>
 {% if history %}
-<table><thead><tr><th>Conteggio</th><th>Negozio</th><th>Reale</th><th>Dichiarato</th><th>Chiusura</th><th>Dichiarato da</th><th>Contato da</th><th>Esito</th><th>Azioni</th></tr></thead><tbody>
+<table><thead><tr><th>Conteggio</th><th>Negozio</th><th>Reale</th><th>Dichiarato</th><th>Report coperti</th><th>Dichiarato da</th><th>Contato da</th><th>Esito</th><th>Azioni</th></tr></thead><tbody>
 {% for row in history %}
-<tr><td><a href="?day={{ row.day }}">{{ row.day }}</a></td><th scope="row">{{ labels[row.store] }}</th><td>{{ euro(row.amount_cents) }}</td><td>{{ euro(row.declared) }}</td><td>{% if row.declared is not none %}<a href="/report-chiusura?store={{ row.store }}&amp;day={{ row.report_day }}">{{ row.report_day }}</a>{% else %}{{ row.report_day }}{% endif %}</td><td>{{ row.authors or '—' }}</td><td>{{ row.counted_by }}</td><td>{{ outcome(row) }}</td><td>{{ delete_action('incassi', row, 'Elimina incasso') }}</td></tr>
+<tr><td><a href="?day={{ row.day }}">{{ row.day }}</a></td><th scope="row">{{ labels[row.store] }}</th><td>{{ euro(row.amount_cents) }}</td><td>{{ euro(row.declared) }}</td><td>{% if row.declared is not none %}<a href="/report-chiusura?store={{ row.store }}&amp;start={{ row.report_start }}&amp;end={{ row.report_end }}">{{ row.report_start }} → {{ row.report_end }}</a>{% else %}{{ row.report_day }}{% endif %}</td><td>{{ row.authors or '—' }}</td><td>{{ row.counted_by }}</td><td>{{ outcome(row) }}</td><td>{{ delete_action('incassi', row, 'Elimina incasso') }}</td></tr>
 {% endfor %}
 </tbody></table>
 {% else %}<p>Nessun incasso registrato per questo mese.</p>{% endif %}

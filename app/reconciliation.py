@@ -6,9 +6,11 @@ from urllib.parse import urlencode
 from fastapi import Request, HTTPException
 from .db import connect
 from .cash_treasury import p, amount, ensure_schema
+from .cash_collection import collection_windows,CollectionIndex
 
 
-def comparisons(reports, documents, receipts):
+def comparisons(reports, documents, receipts, windows=None):
+    collections=CollectionIndex(collection_windows(reports,receipts) if windows is None else windows)
     groups = defaultdict(lambda: dict(reports=[], documents=[], receipt=None))
     for row in reports:
         groups[(row['store'], str(row['closure_date']))]['reports'].append(dict(row))
@@ -34,14 +36,15 @@ def comparisons(reports, documents, receipts):
             reported = channels.get(channel) if rs else None
             actual = amount(details[field]) if details.get(field) is not None else None
             metrics.append(dict(label=label, reported=reported, actual=actual, difference=actual-reported if actual is not None and reported is not None else None))
-        expected = channels.get('Cash', 0)-spent if rs and 'Cash' in channels else None
-        found = group['receipt']['amount_cents'] if group['receipt'] else None
-        cash_difference = found-expected if found is not None and expected is not None else None
+        collection=collections.for_report(store,day)
+        expected = collection['declared'] if collection else (channels.get('Cash',0)-spent if rs and 'Cash' in channels else None)
+        found = collection['amount_cents'] if collection else None
+        cash_difference = collection['difference'] if collection else None
         complete = all(m['difference'] is not None for m in metrics) and cash_difference is not None
         different = any(m['difference'] not in (None, 0) for m in metrics) or cash_difference not in (None, 0)
         status = 'Differenze' if different else ('Coincide' if complete else 'Da completare')
         result.append(dict(group, store=store, day=day, next_day=(date.fromisoformat(day)+timedelta(days=1)).isoformat(), metrics=metrics,
-                           spent=spent if rs else None, expected=expected, found=found, cash_difference=cash_difference, status=status,
+                           spent=collection['spent'] if collection else (spent if rs else None), collection=collection,collection_day=collection['day'] if collection else (date.fromisoformat(day)+timedelta(days=1)).isoformat(),expected=expected, found=found, cash_difference=cash_difference, status=status,
                            report_url='/report-chiusura?'+urlencode(dict(store=store, day=day))))
     return result
 
@@ -74,13 +77,15 @@ def install(app, api):
             ensure_schema(cur)
             reports = cur.execute(f'''SELECT r.*,e.lines_json AS expenses_json FROM closure_reports r
                 LEFT JOIN closure_report_expenses e ON e.report_id=r.id
-                WHERE r.closure_date BETWEEN {p()} AND {p()}{extra}''', (start,end,*args)).fetchall()
+                WHERE 1=1{extra}''',args).fetchall()
             lo, hi = (first+timedelta(days=1)).isoformat(), (last+timedelta(days=1)).isoformat()
             documents = cur.execute(f'''SELECT r.id,r.store,r.closure_date,d.doc_id AS digital_id,t.details_json
                 FROM closures r LEFT JOIN digital_documents d ON d.kind='chiusure' AND d.doc_id=r.id AND d.store=r.store
                 LEFT JOIN document_details t ON t.kind='chiusure' AND t.doc_id=d.doc_id
                 WHERE r.closure_date BETWEEN {p()} AND {p()}{extra}''',(lo,hi,*args)).fetchall()
-            receipts = cur.execute(f'SELECT r.* FROM cash_store_receipts r WHERE r.day BETWEEN {p()} AND {p()}{extra}',(lo,hi,*args)).fetchall()
-        rows = comparisons(reports,documents,receipts)
+            all_receipts=cur.execute(f'SELECT r.* FROM cash_store_receipts r WHERE 1=1{extra}',args).fetchall()
+            receipts=[r for r in all_receipts if lo<=str(r['day'])[:10]<=hi]
+        windows=collection_windows(reports,all_receipts)
+        rows = comparisons([r for r in reports if start<=str(r['closure_date'])[:10]<=end],documents,receipts,windows)
         return api['render']('reconciliation.html', request=request,user=user,brand=scope, stores=api['STORES'],store=store,start=start,end=end,rows=rows,
                              counts={s:sum(r['status']==s for r in rows) for s in ('Coincide','Differenze','Da completare')})

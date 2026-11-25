@@ -292,39 +292,22 @@ def install(app, api):
         first = chosen.replace(day=1)
         last = chosen.replace(day=monthrange(chosen.year, chosen.month)[1])
         previous = (chosen - timedelta(days=1)).isoformat()
+        from .cash_collection import collection_windows
         with connect() as conn:
-            cur = conn.cursor()
-            records = cur.execute(f"""
-                SELECT * FROM cash_store_receipts WHERE day BETWEEN {p()} AND {p()}
-                ORDER BY day DESC,store
-            """, (first.isoformat(), last.isoformat())).fetchall()
-            reports = cur.execute(f"""
-                SELECT r.store,r.closure_date,r.created_by,r.lines_json,e.lines_json AS expenses_json
-                FROM closure_reports r
-                LEFT JOIN closure_report_expenses e ON e.report_id=r.id
-                WHERE r.closure_date BETWEEN {p()} AND {p()}
-            """, ((max(first,date.min+timedelta(days=1))-timedelta(days=1)).isoformat(),
-                  (last-timedelta(days=1)).isoformat())).fetchall()
-        declared = defaultdict(int)
-        authors = defaultdict(set)
-        for report in reports:
-            key = (report['store'], str(report['closure_date']))
-            cash = sum(line['cents'] for line in json.loads(report['lines_json']) if line['name']=='Cash')
-            spent = sum(line['cents'] for line in json.loads(report['expenses_json'] or '[]')
-                        if line.get('mode') != 'cash_fund')
-            declared[key] += cash-spent
-            authors[key].add(report['created_by'])
-        history = []
-        for row in records:
-            report_day = (date.fromisoformat(row['day'])-timedelta(days=1)).isoformat()
-            key = (row['store'], report_day)
-            expected = declared.get(key)
-            history.append(dict(row, report_day=report_day, declared=expected,
-                                authors=', '.join(sorted(authors[key])),
-                                difference=row['amount_cents']-expected if expected is not None else None))
-        current = {row['store']: row for row in history if row['day']==chosen.isoformat()}
+            cur=conn.cursor()
+            # Preceding counts and uncollected reports may be in a previous month.
+            records=cur.execute(f'SELECT * FROM cash_store_receipts WHERE day<={p()} ORDER BY day DESC,store',(last.isoformat(),)).fetchall()
+            reports=cur.execute(f"""SELECT r.store,r.closure_date,r.created_by,r.lines_json,e.lines_json AS expenses_json
+                FROM closure_reports r LEFT JOIN closure_report_expenses e ON e.report_id=r.id
+                WHERE r.closure_date<{p()}""",(last.isoformat(),)).fetchall()
+        windows=collection_windows(reports,records)
+        history=sorted((row for row in windows.values() if first.isoformat()<=row['day']<=last.isoformat()),key=lambda row:(row['day'],row['store']),reverse=True)
+        current={row['store']:row for row in history if row['day']==chosen.isoformat()}
+        earlier=[row for row in records if str(row['day'])[:10]<chosen.isoformat()]
+        previews=collection_windows(reports,earlier+[dict(store=store,day=chosen.isoformat(),amount_cents=None,counted_by='') for store in ORDER])
+        periods={store:previews[(store,chosen.isoformat())] for store in ORDER}
         return show(request,user,'receipts',day=chosen.isoformat(),previous=previous,current=current,
-                    declared={store:declared.get((store,previous)) for store in ORDER},history=history)
+                    declared={store:periods[store]['declared'] for store in ORDER},periods=periods,history=history)
 
     @app.post(root+'/incassi')
     async def save_receipts(request: Request):
