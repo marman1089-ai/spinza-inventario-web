@@ -43,3 +43,19 @@ class BankReconciliationTests(unittest.TestCase):
         response=self.client.get('/gestionale?period_type=month&anchor_date=2026-11-20')
         self.assertEqual(response.status_code,200)
         self.assertIn('Programma spese',response.text)
+
+    def test_batch_is_atomic_on_stale_match_and_posts_every_transfer_once(self):
+        csrf,_=self.import_data();headers={'x-expense-csrf':csrf}
+        new=dict(store_id=1,actual_amount='10',paid_date='2026-11-25',bank_reference='test-bank-1',description='Fornitore nuovo',category='Fornitura')
+        existing=dict(new,id=1,expected_amount_cents=1,expected_status='pending',bank_reference='test-bank-2',actual_amount='123.45')
+        data=dict(items=[new,existing],payment_method='Bonifico',__native_action_token=secrets.token_urlsafe(32))
+        url='/spese-programma/api/payments/reconcile-batch'
+        self.assertEqual(self.client.post(url,headers=headers,json=data).status_code,400)
+        self.assertEqual(self.sql('SELECT * FROM cash_expenses'),[])
+        existing['expected_amount_cents']=12345
+        for _ in range(2):
+            r=self.client.post(url,headers=headers,json=data)
+            self.assertEqual(r.status_code,200,r.text)
+        self.assertEqual(len(self.sql('SELECT * FROM cash_expenses')),2)
+        self.assertEqual(sum(r['amount'] for r in self.sql('SELECT * FROM cash_expenses')),133.45)
+        self.assertEqual(self.sql('SELECT * FROM cash_company_spending'),[])

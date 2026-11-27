@@ -1490,6 +1490,36 @@ class AppHandler(BaseHTTPRequestHandler):
                         conn.execute("UPDATE variable_purchases SET payment_id=? WHERE id=?",(payment_id,oid))
                 return self._send_json({"ok":True,"id":oid,"payment_id":payment_id,"status":payment_status},HTTPStatus.CREATED)
 
+            if path == "/api/payments/reconcile-batch":
+                items = payload.get("items")
+                if not isinstance(items,list) or not 1 <= len(items) <= 100: raise ValueError("Elenco pagamenti non valido")
+                result=[]
+                with get_db() as conn:
+                    for item in items:
+                        sid=parse_store_id(item.get("store_id"));get_store(conn,sid)
+                        paid_date=str(item.get("paid_date") or "");date.fromisoformat(paid_date)
+                        actual=money_to_cents(item.get("actual_amount"))
+                        reference=str(item.get("bank_reference") or "").strip()[:250]
+                        description=str(item.get("description") or "").strip()[:500]
+                        if not reference or not description:raise ValueError("Riferimento bancario e beneficiario obbligatori")
+                        pid=item.get("id")
+                        if pid:
+                            row=conn.execute("SELECT * FROM payments WHERE id=?",(int(pid),)).fetchone()
+                            if not row or row["store_id"]!=sid or row["amount_cents"]!=int(item.get("expected_amount_cents",-1)) or row["status"]!=item.get("expected_status"):
+                                raise ValueError("Una spesa è cambiata: ricontrolla l’intero elenco")
+                            estimated=row["estimated_amount_cents"] or (row["amount_cents"] if actual!=row["amount_cents"] else None)
+                            notes=(row["notes"] or "")+"\n"+reference
+                            conn.execute("UPDATE payments SET status='paid',paid_at=?,amount_cents=?,estimated_amount_cents=?,notes=?,description=? WHERE id=?",(paid_date+' 12:00:00',actual,estimated,notes,description,pid))
+                            conn.execute("UPDATE variable_purchases SET status='paid',paid_at=?,amount_cents=? WHERE payment_id=?",(paid_date+' 12:00:00',actual,pid))
+                            conn.execute("DELETE FROM movements WHERE movement_type='payment' AND ref_id=?",(pid,))
+                        else:
+                            if conn.execute("SELECT 1 FROM payments WHERE instr(notes,?)>0",(reference,)).fetchone():raise ValueError("Pagamento bancario già presente: ricontrolla l’elenco")
+                            cursor=conn.execute("INSERT INTO payments(store_id,description,amount_cents,due_date,category,priority,notes,status,created_at,paid_at) VALUES(?,?,?,NULL,?,50,?,'paid',?,?)",(sid,description,actual,str(item.get("category") or "Da classificare")[:80],reference,now_iso(),paid_date+' 12:00:00'))
+                            pid=cursor.lastrowid
+                        conn.execute("INSERT INTO movements(store_id,movement_type,amount_cents,ref_id,note,created_at) VALUES(?,'payment',?,?,?,?)",(sid,-actual,pid,description,paid_date+' 12:00:00'))
+                        result.append(dict(id=pid,amount_cents=actual,paid_date=paid_date))
+                return self._send_json({"ok":True,"payments":result})
+
             if path == "/api/payments":
                 store_id = parse_store_id(payload.get("store_id")); description = (payload.get("description") or "").strip()
                 if not description: raise ValueError("Inserisci una descrizione")
