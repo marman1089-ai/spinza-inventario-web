@@ -1490,6 +1490,21 @@ class AppHandler(BaseHTTPRequestHandler):
                         conn.execute("UPDATE variable_purchases SET payment_id=? WHERE id=?",(payment_id,oid))
                 return self._send_json({"ok":True,"id":oid,"payment_id":payment_id,"status":payment_status},HTTPStatus.CREATED)
 
+            if path.startswith("/api/payments/") and path.endswith("/move"):
+                pid=int(path.strip("/").split("/")[2])
+                target=parse_store_id(payload.get("store_id"))
+                with get_db() as conn:
+                    get_store(conn,target)
+                    row=conn.execute("SELECT * FROM payments WHERE id=?",(pid,)).fetchone()
+                    if not row:return self._send_json({"error":"Spesa non trovata"},HTTPStatus.NOT_FOUND)
+                    if row["store_id"]!=int(payload.get("expected_store_id",-1)):
+                        return self._send_json({"error":"Il negozio della spesa è già cambiato"},HTTPStatus.CONFLICT)
+                    if row["fixed_expense_id"] or conn.execute("SELECT 1 FROM variable_purchases WHERE payment_id=?",(pid,)).fetchone():
+                        raise ValueError("La spesa è collegata a una rata o un ordine: correggi prima il collegamento")
+                    conn.execute("UPDATE payments SET store_id=? WHERE id=?",(target,pid))
+                    conn.execute("UPDATE movements SET store_id=? WHERE movement_type='payment' AND ref_id=?",(target,pid))
+                return self._send_json({"ok":True,"id":pid,"store_id":target})
+
             if path == "/api/payments/reconcile-batch":
                 items = payload.get("items")
                 if not isinstance(items,list) or not 1 <= len(items) <= 100: raise ValueError("Elenco pagamenti non valido")

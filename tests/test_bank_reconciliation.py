@@ -94,3 +94,20 @@ class BankReconciliationTests(unittest.TestCase):
         self.assertIn('Fornitore nuovo SF',page.text)
         self.assertEqual(len(self.sql('SELECT * FROM cash_expenses')),2)
         self.assertIn('Apri spesa',page.text)
+
+    def test_move_paid_expense_keeps_same_payment_and_native_posting_without_cash_movement(self):
+        csrf,_=self.import_data();headers={'x-expense-csrf':csrf}
+        self.assertEqual(self.client.post('/spese-programma/api/payments/1/pay',headers=headers,json=dict(actual_amount='120',paid_date='2026-11-12',payment_method='Bonifico')).status_code,200)
+        before=self.sql('SELECT * FROM cash_expenses')[0]
+        data=dict(store_id=3,expected_store_id=1,payment_method='Bonifico',__native_action_token=secrets.token_urlsafe(32))
+        url='/spese-programma/api/payments/1/move'
+        for _ in range(2):self.assertEqual(self.client.post(url,headers=headers,json=data).status_code,200)
+        after=self.sql('SELECT * FROM cash_expenses');self.assertEqual(len(after),1)
+        self.assertEqual((after[0]['id'],after[0]['store'],after[0]['amount'],after[0]['flow_date']),(before['id'],'reburger_maggio',120,'2026-11-12'))
+        self.assertEqual(self.sql('SELECT * FROM cash_company_spending'),[])
+        with program.local_copy(self.sql('SELECT data FROM expense_program_state')[0]['data']):
+            with program.legacy_connect() as c:
+                self.assertEqual(c.execute('SELECT store_id FROM payments WHERE id=1').fetchone()[0],3)
+                self.assertEqual(c.execute("SELECT store_id FROM movements WHERE movement_type='payment' AND ref_id=1").fetchone()[0],3)
+        data['__native_action_token']=secrets.token_urlsafe(32)
+        self.assertEqual(self.client.post(url,headers=headers,json=data).status_code,409)
