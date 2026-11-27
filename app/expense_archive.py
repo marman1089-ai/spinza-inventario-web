@@ -24,6 +24,7 @@ def collect(cur, include_documents=True):
     for r in cur.execute('SELECT * FROM cash_expenses ORDER BY flow_date DESC,id DESC').fetchall():
         rows.append(record('uscita:'+str(r['id']),r['store'],r['flow_date'],r['notes'] or r['supplier'],cents(r['amount']),r['category'],
                            'Report chiusura' if (r['notes'] or '').startswith('Report chiusura #') else 'Uscite gestionale','paid','/gestionale/uscite',r['payment_method']))
+        rows[-1]['created_by']=r['created_by']
     for r in cur.execute('SELECT * FROM cash_company_spending ORDER BY day DESC').fetchall():
         if r['token'] in cash_tokens:continue
         for key,store in (('sc_cents','spinza'),('reburger_cents','aziende')):
@@ -196,7 +197,7 @@ def financial_expenses(cur, store='ALL'):
     return [dict(id=int(r['key'].split(':')[1]) if r['key'].startswith('uscita:') else 0,
                  flow_date=r['day'], store=r['store'], category=r['category'], supplier='',
                  payment_method=r['method'], amount=r['amount']/100, notes=r['description'],
-                 ts=r['day'], created_by='Programma spese' if r['origin']=='Programma spese' else r['origin'],
+                 ts=r['day'], created_by=r.get('created_by') or r['origin'],
                  source_url='/gestionale/spese-pagamenti?tab=history' if r['origin']=='Programma spese' or any('Programma spese' in v['description'] for v in r['provenance']) else r['url'],
                  editable=r['key'].startswith('uscita:') and not any('Programma spese' in v['description'] for v in r['provenance']), source_key=r['key'])
             for r in rows if r['status']=='paid' and r['amount'] is not None
