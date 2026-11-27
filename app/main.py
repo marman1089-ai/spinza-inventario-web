@@ -2558,7 +2558,7 @@ def _build_cash_dashboard(cur, scope_store: str, period_type: str = 'week', anch
     return compare, totals, recent_entries, recent_expenses, period_meta, insights
 
 
-def _build_store_period_chart(cur, store: str, period_type: str = 'week', anchor_s: str = ''):
+def _build_store_period_chart(cur, store: str, period_type: str = 'week', anchor_s: str = '', expense_rows=None):
     anchor_day = date.today()
     if anchor_s:
         try:
@@ -2569,10 +2569,17 @@ def _build_store_period_chart(cur, store: str, period_type: str = 'week', anchor
     ph = _ph()
     start_s = start_d.isoformat()
     end_s = end_d.isoformat()
-    entries = _dict_rows(cur, f"SELECT flow_date, SUM(amount) AS total FROM cash_entries WHERE store={ph} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date ORDER BY flow_date ASC", (store, start_s, end_s))
-    expenses = _dict_rows(cur, f"SELECT flow_date, SUM(amount) AS total FROM cash_expenses WHERE store={ph} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date ORDER BY flow_date ASC", (store, start_s, end_s))
+    where_sql, params = _cash_scope_where(store)
+    entries = _dict_rows(cur, f"SELECT flow_date, SUM(amount) AS total FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date ORDER BY flow_date ASC", params+(start_s,end_s))
+    if expense_rows is None:
+        expenses = _dict_rows(cur, f"SELECT flow_date, SUM(amount) AS total FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date ORDER BY flow_date ASC", params+(start_s,end_s))
+    else:
+        expenses = [dict(flow_date=r["flow_date"],total=r["amount"]) for r in expense_rows if start_s<=r["flow_date"]<=end_s]
     by_entry = {str(r['flow_date']): float(r.get('total') or 0) for r in entries}
-    by_expense = {str(r['flow_date']): float(r.get('total') or 0) for r in expenses}
+    by_expense = {}
+    for r in expenses:
+        key = str(r['flow_date'])
+        by_expense[key] = by_expense.get(key,0) + float(r.get('total') or 0)
     rows = []
     max_amount = 1.0
     days_count = (end_d - start_d).days + 1
@@ -4385,8 +4392,10 @@ def _cash_entries_page_context(request: Request, user: dict, flow_date: str = ''
         payments = [r['payment_method'] for r in _dict_rows(cur, f"SELECT DISTINCT payment_method FROM cash_entries WHERE {where_sql} ORDER BY payment_method ASC", params) if r.get('payment_method')]
         available_payment_methods = _load_cash_payment_methods(cur)
         history_methods, grouped_rows = _group_cash_rows_by_date(rows, available_payment_methods)
-        chart_rows = _build_store_period_chart(cur, chart_store, period_type, anchor_s)
-        _, page_totals, _, _, period_meta, page_insights = _build_cash_dashboard(cur, chart_store, period_type, anchor_s)
+        from .expense_archive import financial_expenses
+        all_expenses = financial_expenses(cur, chart_store)
+        chart_rows = _build_store_period_chart(cur, chart_store, period_type, anchor_s, expense_rows=all_expenses)
+        _, page_totals, _, _, period_meta, page_insights = _build_cash_dashboard(cur, chart_store, period_type, anchor_s, expense_rows=all_expenses)
         month_options = _month_options_for_scope(cur, brand, selected_month)
         total_amount = sum(float(r.get('amount') or 0) for r in rows)
         income_breakdown = [dict(x) for x in (page_insights.get('income_breakdown') or [])]
@@ -5118,25 +5127,22 @@ def cash_expenses_page(request: Request, flow_date: str = "", category: str = "A
     anchor_s = anchor_day.isoformat()
     where_sql, params = _cash_scope_where(brand)
     ph = _ph()
-    sql = f"SELECT id, flow_date, store, category, supplier, payment_method, amount, notes, created_by FROM cash_expenses WHERE {where_sql}"
-    qparams = list(params)
-    if flow_date:
-        sql += f" AND flow_date={ph}"
-        qparams.append(flow_date)
-    if category and category != 'ALL':
-        sql += f" AND category={ph}"
-        qparams.append(category)
-    sql += " ORDER BY ts DESC, id DESC"
-    chart_store = brand if brand != 'ALL' else (active_store or 'spinza')
+    chart_store = brand
+    from .expense_archive import financial_expenses
     with connect() as conn:
         cur = conn.cursor()
-        rows = _dict_rows(cur, sql, tuple(qparams))
-        categories = [r['category'] for r in _dict_rows(cur, f"SELECT DISTINCT category FROM cash_expenses WHERE {where_sql} ORDER BY category ASC", params) if r.get('category')]
-        chart_rows = _build_store_period_chart(cur, chart_store, period_type, anchor_s)
-        _, page_totals, _, _, period_meta, page_insights = _build_cash_dashboard(cur, chart_store, period_type, anchor_s)
+        all_expenses = financial_expenses(cur, brand)
+        _, start_d, end_d = _period_bounds(period_type, anchor_day)
+        rows = [r for r in all_expenses if start_d.isoformat() <= r['flow_date'] <= end_d.isoformat()
+                and (not flow_date or r['flow_date']==flow_date)
+                and (not category or category=='ALL' or r['category']==category)]
+        rows.sort(key=lambda r:(r['flow_date'],r['source_key']),reverse=True)
+        categories = sorted({r['category'] for r in all_expenses if r['category']})
+        chart_rows = _build_store_period_chart(cur, chart_store, period_type, anchor_s, expense_rows=all_expenses)
+        _, page_totals, _, _, period_meta, page_insights = _build_cash_dashboard(cur, chart_store, period_type, anchor_s, expense_rows=all_expenses)
         month_options = _month_options_for_scope(cur, brand, selected_month)
         total_amount = sum(float(r.get('amount') or 0) for r in rows)
-        expense_overview = _build_expense_overview(cur, chart_store, period_type, anchor_s)
+        expense_overview = _build_expense_overview(cur, chart_store, period_type, anchor_s, expense_rows=all_expenses)
     prev_anchor = _shift_anchor_date(period_type, anchor_day, -1).isoformat()
     next_anchor = _shift_anchor_date(period_type, anchor_day, 1).isoformat()
     nav_prev_url = _query_url('/gestionale/uscite', flow_date=flow_date, category=category, period_type=period_type, month_key=_month_key_from_value(prev_anchor), anchor_date=prev_anchor)

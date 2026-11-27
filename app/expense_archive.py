@@ -196,6 +196,8 @@ def financial_expenses(cur, store='ALL'):
     return [dict(id=int(r['key'].split(':')[1]) if r['key'].startswith('uscita:') else 0,
                  flow_date=r['day'], store=r['store'], category=r['category'], supplier='',
                  payment_method=r['method'], amount=r['amount']/100, notes=r['description'],
-                 ts=r['day'], source_url=r['url'], source_key=r['key'])
+                 ts=r['day'], created_by='Programma spese' if r['origin']=='Programma spese' else r['origin'],
+                 source_url='/gestionale/spese-pagamenti?tab=history' if r['origin']=='Programma spese' or any('Programma spese' in v['description'] for v in r['provenance']) else r['url'],
+                 editable=r['key'].startswith('uscita:') and not any('Programma spese' in v['description'] for v in r['provenance']), source_key=r['key'])
             for r in rows if r['status']=='paid' and r['amount'] is not None
             and not r['possible_duplicate'] and (store=='ALL' or r['store']==store)]

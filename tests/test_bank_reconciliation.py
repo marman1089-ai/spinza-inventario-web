@@ -59,3 +59,38 @@ class BankReconciliationTests(unittest.TestCase):
         self.assertEqual(len(self.sql('SELECT * FROM cash_expenses')),2)
         self.assertEqual(sum(r['amount'] for r in self.sql('SELECT * FROM cash_expenses')),133.45)
         self.assertEqual(self.sql('SELECT * FROM cash_company_spending'),[])
+
+    def test_san_felice_old_and_new_planner_payments_match_expense_page_and_charts(self):
+        import sqlite3
+        original_seed=self.seed
+        def seed_with_paid():
+            c=sqlite3.connect(':memory:');c.deserialize(original_seed())
+            c.execute("INSERT INTO payments(store_id,description,amount_cents,status,created_at,paid_at) VALUES(3,'Luce San Felice',48036,'paid','2026-11-01','2026-11-10')")
+            c.execute("INSERT INTO payments(store_id,description,amount_cents,status,created_at) VALUES(3,'Fornitore nuovo SF',9000,'pending','2026-11-01')")
+            c.execute("INSERT INTO payments(store_id,description,amount_cents,status,created_at,paid_at) VALUES(2,'Altro negozio',5000,'paid','2026-11-01','2026-11-10')")
+            c.commit();data=c.serialize();c.close();return data
+        self.seed=seed_with_paid
+        csrf,_=self.import_data();self.login(store='reburger_maggio')
+        self.sql("INSERT INTO cash_expenses(store,flow_date,category,payment_method,amount,notes,created_by) VALUES('reburger_maggio','2026-11-12','Varie','Contanti',40,'Spesa reale','testadmin')")
+        for _ in range(2):
+            page=self.client.get('/gestionale/uscite?month_key=2026-11')
+            self.assertEqual(page.status_code,200)
+            self.assertIn('520.36',page.text)
+            self.assertIn('Luce San Felice',page.text)
+            self.assertNotIn('Altro negozio',page.text)
+            self.assertNotIn('/uscite/0/delete',page.text)
+        self.assertEqual(len(self.sql('SELECT * FROM cash_expenses')),1)
+        with db.connect() as conn:
+            rows=archive.financial_expenses(conn.cursor(),'reburger_maggio')
+            chart=main._build_store_period_chart(conn.cursor(),'reburger_maggio','month','2026-11-01',expense_rows=rows)
+            self.assertAlmostEqual(sum(r['expense'] for r in chart),520.36)
+        page=self.client.get('/gestionale/spese-pagamenti')
+        import re
+        csrf=re.search(r'id="expense-program-csrf" value="([^"]+)"',page.text)[1]
+        r=self.client.post('/spese-programma/api/payments/3/pay',headers={'x-expense-csrf':csrf},json=dict(actual_amount='90',paid_date='2026-11-20',payment_method='Bonifico'))
+        self.assertEqual(r.status_code,200,r.text)
+        page=self.client.get('/gestionale/uscite?month_key=2026-11')
+        self.assertIn('610.36',page.text)
+        self.assertIn('Fornitore nuovo SF',page.text)
+        self.assertEqual(len(self.sql('SELECT * FROM cash_expenses')),2)
+        self.assertIn('Apri spesa',page.text)

@@ -212,13 +212,13 @@
           <td>{{ r.supplier or '-' }}</td>
           <td>{{ r.payment_method or '-' }}</td>
           <td><strong>€ {{ '%.2f'|format(r.amount or 0) }}</strong></td>
-          <td>{{ r.notes or '-' }}{% if user.role=='admin' and (r.payment_method or '')|lower in ['contanti','cash','contante'] %}<br><a href="/contanti-nei-negozi/ricevute?spending_token=expense:{{ r.id }}">Ricevute / aggiungi</a>{% endif %}</td>
+          <td>{{ r.notes or '-' }}{% if user.role=='admin' and r.id and (r.payment_method or '')|lower in ['contanti','cash','contante'] %}<br><a href="/contanti-nei-negozi/ricevute?spending_token=expense:{{ r.id }}">Ricevute / aggiungi</a>{% endif %}</td>
           <td>{{ r.created_by }}</td>
           {% if can_edit_management %}
           <td>
-            <form method="post" action="/gestionale/uscite/{{ r.id }}/delete" onsubmit="return confirm('Eliminare questa uscita?');" style="margin:0;">
+            {% if r.editable %}<form method="post" action="/gestionale/uscite/{{ r.id }}/delete" onsubmit="return confirm('Eliminare questa uscita?');" style="margin:0;">
               <button class="btn2" type="submit" style="border-color:rgba(248,113,113,.34);background:rgba(244,63,94,.10);">Elimina</button>
-            </form>
+            </form>{% else %}<a class="btn2" href="{{ r.source_url }}">Apri spesa</a>{% endif %}
           </td>
           {% endif %}
         </tr>
