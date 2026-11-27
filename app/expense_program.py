@@ -121,7 +121,29 @@ def sync_payments(cur,before,after,method,user):
                 cur.execute(f'DELETE FROM cash_expenses WHERE id={p()}',(link['expense_id'],))
             if link['cash_token']:cur.execute(f'DELETE FROM cash_company_spending WHERE token={p()}',(link['cash_token'],))
             cur.execute(f'DELETE FROM expense_program_postings WHERE source_key={p()}',(key,))
-    for key in set(after)-set(before):
+    changed = {key for key in set(after) & set(before) if after[key] != before[key]}
+    for key in changed:
+        link=cur.execute(f'SELECT * FROM expense_program_postings WHERE source_key={p()}',(key,)).fetchone()
+        if not link:
+            continue
+        if method not in ('Bonifico','Carta','Contanti'):raise HTTPException(422,'Scegli come è stata pagata la spesa.')
+        row=after[key];store=STORE_MAP[row['store_id']];day=str(row['paid_at'])[:10]
+        date.fromisoformat(day)
+        value=int(row['amount_cents']);description=row['description']
+        cur.execute(f'UPDATE cash_expenses SET store={p()},flow_date={p()},category={p()},payment_method={p()},amount={p()},notes={p()} WHERE id={p()}',
+                    (store,day,row.get('category') or 'Da classificare',method,value/100,description,link['expense_id']))
+        cash_token=link['cash_token']
+        if cash_token and method!='Contanti':
+            cur.execute(f'DELETE FROM cash_company_spending WHERE token={p()}',(cash_token,));cash_token=''
+        if method=='Contanti':
+            cash_token=cash_token or secrets.token_urlsafe(32)
+            cur.execute(f'INSERT INTO cash_company_spending VALUES({",".join([p()]*6)}) ON CONFLICT(token) DO UPDATE SET day=excluded.day,description=excluded.description,reburger_cents=excluded.reburger_cents,sc_cents=excluded.sc_cents',
+                        (cash_token,day,description,0 if store=='spinza' else value,value if store=='spinza' else 0,user['username']))
+        cur.execute(f'UPDATE expense_program_postings SET cash_token={p()},method={p()},original_json={p()} WHERE source_key={p()}',(cash_token,method,json.dumps(row),key))
+    new_keys=set(after)-set(before)
+    for key in changed:
+        if not cur.execute(f'SELECT source_key FROM expense_program_postings WHERE source_key={p()}',(key,)).fetchone():new_keys.add(key)
+    for key in new_keys:
         if method not in ('Bonifico','Carta','Contanti'):raise HTTPException(422,'Scegli come è stata pagata la spesa.')
         row=after[key];store=STORE_MAP.get(row['store_id'])
         if not store:raise HTTPException(422,'Negozio non collegato al gestionale.')

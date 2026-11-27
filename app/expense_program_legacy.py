@@ -1506,6 +1506,28 @@ class AppHandler(BaseHTTPRequestHandler):
                     cur = conn.execute("INSERT INTO payments(store_id,description,amount_cents,due_date,category,priority,notes,status,created_at) VALUES(?,?,?,?,?,?,?,'pending',?)", (store_id,description,amount,due_date,category,priority,notes,now_iso())); pid = cur.lastrowid
                 return self._send_json({"ok":True,"id":pid}, HTTPStatus.CREATED)
 
+            if path.startswith("/api/payments/") and path.endswith("/reconcile"):
+                pid = int(path.strip("/").split("/")[2])
+                paid_date = str(payload.get("paid_date") or "")
+                date.fromisoformat(paid_date)
+                actual = money_to_cents(payload.get("actual_amount"))
+                reference = str(payload.get("bank_reference") or "").strip()[:250]
+                if not reference: raise ValueError("Indica il riferimento del pagamento bancario")
+                with get_db() as conn:
+                    row = conn.execute("SELECT * FROM payments WHERE id=?", (pid,)).fetchone()
+                    if not row: return self._send_json({"error":"Pagamento non trovato"}, HTTPStatus.NOT_FOUND)
+                    if int(payload.get("expected_amount_cents", -1)) != row["amount_cents"] or payload.get("expected_status") != row["status"]:
+                        return self._send_json({"error":"La spesa è cambiata: ricontrolla prima di confermare"}, HTTPStatus.CONFLICT)
+                    estimated = row["estimated_amount_cents"] or (row["amount_cents"] if actual != row["amount_cents"] else None)
+                    notes = (row["notes"] or "") + "\n" + reference
+                    description = str(payload.get("description") or row["description"]).strip()[:500]
+                    paid_at = paid_date + " 12:00:00"
+                    conn.execute("UPDATE payments SET status='paid',paid_at=?,amount_cents=?,estimated_amount_cents=?,notes=?,description=? WHERE id=?", (paid_at,actual,estimated,notes,description,pid))
+                    conn.execute("DELETE FROM movements WHERE movement_type='payment' AND ref_id=?",(pid,))
+                    conn.execute("INSERT INTO movements(store_id,movement_type,amount_cents,ref_id,note,created_at) VALUES(?,'payment',?,?,?,?)", (row["store_id"],-actual,pid,description,paid_at))
+                    conn.execute("UPDATE variable_purchases SET status='paid',paid_at=?,amount_cents=? WHERE payment_id=?",(paid_at,actual,pid))
+                return self._send_json({"ok":True})
+
             if path.startswith("/api/payments/") and path.endswith("/pay"):
                 parts = path.strip("/").split("/")
                 if len(parts) != 4: raise ValueError("Percorso non valido")

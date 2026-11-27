@@ -17,7 +17,7 @@ def record(key,store,day,description,amount,category,origin,status,url,method=''
     return dict(key=key,store=store,day=str(day or '')[:10],description=description or 'Senza descrizione',amount=amount,category=category or 'Da classificare',origin=origin,status=status,url=url,method=method,provenance=[],possible_duplicate=False)
 
 
-def collect(cur):
+def collect(cur, include_documents=True):
     rows=[]
     postings={r['source_key']:r for r in cur.execute('SELECT * FROM expense_program_postings').fetchall()}
     cash_tokens={r['cash_token'] for r in postings.values() if r['cash_token']}
@@ -59,22 +59,23 @@ def collect(cur):
                     if 'settled:'+str(r['id']) in postings:continue
                     source=json.loads(r['original_json'])
                     rows.append(record('settled:'+str(r['id']),STORE_MAP.get(source['store_id'],'aziende'),r['due_date'],source['description'],r['actual_cents'],source.get('category'),'Rata fissa saldata prima dell’importazione','settled','/gestionale/tutte-le-spese'))
-    for kind,table,datecol in [('fatture','invoices_docs','doc_date'),('spese-secondarie','secondary_expenses','expense_date')]:
-        for r in cur.execute(f'''SELECT s.id,s.store,s.{datecol} AS day,s.filename,d.supplier,d.amount,d.description FROM {table} s
-            LEFT JOIN digital_documents d ON d.kind={p()} AND d.doc_id=s.id AND d.store=s.store''',(kind,)).fetchall():
-            rows.append(record('doc:'+kind+':'+str(r['id']),r['store'],r['day'],r['description'] or r['supplier'] or r['filename'],cents(r['amount']) if r['amount'] is not None else None,'Da classificare','Fatture' if kind=='fatture' else 'Spese secondarie','document',f'/schede/{kind}/{r["id"]}' if r['amount'] is not None else f'/{kind}/{r["id"]}'))
-    for r in cur.execute('SELECT id,receipt_date,store,description,filename,spending_token FROM cash_expense_documents').fetchall():
-        key='receipt:'+str(r['id']);link=None
-        if r['spending_token'].startswith('expense:'):link='uscita:'+r['spending_token'].split(':',1)[1]
-        elif r['spending_token']:
-            link=next((x['key'] for x in rows if x['key'].startswith('cash:'+r['spending_token']+':')),None)
-            if not link:
-                posting=next((x for x in postings.values() if x['cash_token']==r['spending_token']),None)
-                if posting:link='uscita:'+str(posting['expense_id'])
-        target=next((x for x in rows if x['key']==link),None)
-        url='/contanti-nei-negozi/ricevute/'+str(r['id'])
-        if target:target['provenance'].append(dict(description='Ricevuta: '+(r['description'] or r['filename']),url=url,key=''))
-        else:rows.append(record(key,r['store'],r['receipt_date'],r['description'] or r['filename'],None,'Da classificare','Ricevute cash','document',url))
+    if include_documents:
+        for kind,table,datecol in [('fatture','invoices_docs','doc_date'),('spese-secondarie','secondary_expenses','expense_date')]:
+            for r in cur.execute(f'''SELECT s.id,s.store,s.{datecol} AS day,s.filename,d.supplier,d.amount,d.description FROM {table} s
+                LEFT JOIN digital_documents d ON d.kind={p()} AND d.doc_id=s.id AND d.store=s.store''',(kind,)).fetchall():
+                rows.append(record('doc:'+kind+':'+str(r['id']),r['store'],r['day'],r['description'] or r['supplier'] or r['filename'],cents(r['amount']) if r['amount'] is not None else None,'Da classificare','Fatture' if kind=='fatture' else 'Spese secondarie','document',f'/schede/{kind}/{r["id"]}' if r['amount'] is not None else f'/{kind}/{r["id"]}'))
+        for r in cur.execute('SELECT id,receipt_date,store,description,filename,spending_token FROM cash_expense_documents').fetchall():
+            key='receipt:'+str(r['id']);link=None
+            if r['spending_token'].startswith('expense:'):link='uscita:'+r['spending_token'].split(':',1)[1]
+            elif r['spending_token']:
+                link=next((x['key'] for x in rows if x['key'].startswith('cash:'+r['spending_token']+':')),None)
+                if not link:
+                    posting=next((x for x in postings.values() if x['cash_token']==r['spending_token']),None)
+                    if posting:link='uscita:'+str(posting['expense_id'])
+            target=next((x for x in rows if x['key']==link),None)
+            url='/contanti-nei-negozi/ricevute/'+str(r['id'])
+            if target:target['provenance'].append(dict(description='Ricevuta: '+(r['description'] or r['filename']),url=url,key=''))
+            else:rows.append(record(key,r['store'],r['receipt_date'],r['description'] or r['filename'],None,'Da classificare','Ricevute cash','document',url))
     categories={r['source_key']:r['category'] for r in cur.execute('SELECT * FROM expense_archive_categories').fetchall()}
     bykey={r['key']:r for r in rows}
     hidden=set()
@@ -187,3 +188,14 @@ def install(app,api):
             if form.get('selected')=='1':cur.execute(f'INSERT INTO expense_archive_selected VALUES({p()}) ON CONFLICT(source_key) DO NOTHING',(key,))
             else:cur.execute(f'DELETE FROM expense_archive_selected WHERE source_key={p()}',(key,))
         return RedirectResponse('/gestionale/tutte-le-spese',303)
+
+
+def financial_expenses(cur, store='ALL'):
+    """Same confirmed payments as the archive; never book estimates or evidence twice."""
+    rows=collect(cur, include_documents=False)
+    return [dict(id=int(r['key'].split(':')[1]) if r['key'].startswith('uscita:') else 0,
+                 flow_date=r['day'], store=r['store'], category=r['category'], supplier='',
+                 payment_method=r['method'], amount=r['amount']/100, notes=r['description'],
+                 ts=r['day'], source_url=r['url'], source_key=r['key'])
+            for r in rows if r['status']=='paid' and r['amount'] is not None
+            and not r['possible_duplicate'] and (store=='ALL' or r['store']==store)]

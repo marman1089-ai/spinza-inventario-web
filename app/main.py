@@ -2311,14 +2311,16 @@ def _expense_signature(row) -> tuple[str, str, str]:
     return signature, label, family
 
 
-def _build_expense_overview(cur, scope_store: str, period_type: str = 'month', anchor_s: str = ''):
+def _build_expense_overview(cur, scope_store: str, period_type: str = 'month', anchor_s: str = '', expense_rows=None):
     anchor_day = _parse_date_safe(anchor_s, date.today())
     period_type, start_d, end_d = _period_bounds(period_type, anchor_day)
     start_s = start_d.isoformat()
     end_s = end_d.isoformat()
     where_sql, params = _cash_scope_where(scope_store)
     ph = _ph()
-    rows = _dict_rows(cur, f"SELECT id, flow_date, store, category, supplier, payment_method, amount, notes FROM cash_expenses WHERE {where_sql} ORDER BY flow_date ASC, id ASC", params)
+    if expense_rows is None:
+        expense_rows = [dict(r, flow_date=str(r["flow_date"])) for r in _dict_rows(cur, f"SELECT * FROM cash_expenses WHERE {where_sql}", params)]
+    rows = expense_rows
 
     family_map = {}
     family_detail_map = {}
@@ -2353,6 +2355,7 @@ def _build_expense_overview(cur, scope_store: str, period_type: str = 'month', a
             fam['count'] += 1
             family_detail_map.setdefault(family, []).append({
                 'id': int(row.get('id') or 0),
+                'source_url': row.get('source_url') or '/gestionale/tutte-le-spese',
                 'date': flow_date,
                 'store': row.get('store') or '',
                 'store_label': STORES.get(row.get('store') or '', row.get('store') or ''),
@@ -2416,7 +2419,7 @@ def _build_expense_overview(cur, scope_store: str, period_type: str = 'month', a
         'category_options': _expense_category_options(),
     }
 
-def _build_cash_dashboard(cur, scope_store: str, period_type: str = 'week', anchor_s: str = ''):
+def _build_cash_dashboard(cur, scope_store: str, period_type: str = 'week', anchor_s: str = '', expense_rows=None):
     anchor_day = date.today()
     if anchor_s:
         try:
@@ -2428,18 +2431,24 @@ def _build_cash_dashboard(cur, scope_store: str, period_type: str = 'week', anch
 
     where_sql, params = _cash_scope_where(scope_store)
     ph = _ph()
+    if expense_rows is None:
+        expense_rows = [dict(r, flow_date=str(r["flow_date"])) for r in _dict_rows(cur, f"SELECT * FROM cash_expenses WHERE {where_sql}", params)]
     start_s = start_d.isoformat()
     end_s = end_d.isoformat()
     prev_start_s = prev_start.isoformat()
     prev_end_s = prev_end.isoformat()
 
     entries = _dict_rows(cur, f"SELECT store, flow_date, SUM(amount) AS total FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY store, flow_date ORDER BY flow_date ASC", params + (start_s, end_s))
-    expenses = _dict_rows(cur, f"SELECT store, flow_date, SUM(amount) AS total FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY store, flow_date ORDER BY flow_date ASC", params + (start_s, end_s))
+    expenses = [dict(store=r['store'], flow_date=r['flow_date'], total=r['amount']) for r in expense_rows if start_s <= r['flow_date'] <= end_s]
 
     by_entry = {(r['store'], str(r['flow_date'])): float(r.get('total') or 0) for r in entries}
-    by_expense = {(r['store'], str(r['flow_date'])): float(r.get('total') or 0) for r in expenses}
+    by_expense = {}
+    for r in expenses:
+        key = (r['store'], r['flow_date'])
+        by_expense[key] = by_expense.get(key, 0) + r['total']
 
     stores = list(STORES.keys()) if scope_store == 'ALL' else [scope_store]
+    if scope_store == 'ALL' and any(r['store']=='aziende' for r in expense_rows):stores.append('aziende')
     compare = []
     days_count = (end_d - start_d).days + 1
     day_list = [start_d + timedelta(days=i) for i in range(days_count)]
@@ -2475,13 +2484,13 @@ def _build_cash_dashboard(cur, scope_store: str, period_type: str = 'week', anch
         })
 
     income_current = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph}", params + (start_s, end_s))
-    expense_current = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph}", params + (start_s, end_s))
+    expense_current = sum(r['amount'] for r in expense_rows if start_s <= r['flow_date'] <= end_s)
     income_previous = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph}", params + (prev_start_s, prev_end_s))
-    expense_previous = _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph}", params + (prev_start_s, prev_end_s))
+    expense_previous = sum(r['amount'] for r in expense_rows if prev_start_s <= r['flow_date'] <= prev_end_s)
 
     totals = {
         'income_today': _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_entries WHERE {where_sql} AND flow_date={ph}", params + (date.today().isoformat(),)),
-        'expense_today': _fetch_one_float(cur, f"SELECT COALESCE(SUM(amount),0) FROM cash_expenses WHERE {where_sql} AND flow_date={ph}", params + (date.today().isoformat(),)),
+        'expense_today': sum(r['amount'] for r in expense_rows if r['flow_date']==date.today().isoformat()),
         'income_period': income_current,
         'expense_period': expense_current,
         'net_period': income_current - expense_current,
@@ -2492,25 +2501,21 @@ def _build_cash_dashboard(cur, scope_store: str, period_type: str = 'week', anch
         'expense_growth_pct': _pct_change(expense_current, expense_previous),
         'net_growth_pct': _pct_change(income_current - expense_current, income_previous - expense_previous),
         'entries_count': _fetch_one_int(cur, f"SELECT COUNT(*) FROM cash_entries WHERE {where_sql}", params),
-        'expenses_count': _fetch_one_int(cur, f"SELECT COUNT(*) FROM cash_expenses WHERE {where_sql}", params),
+        'expenses_count': len(expense_rows),
     }
     totals['net_today'] = totals['income_today'] - totals['expense_today']
     totals['margin_pct'] = round((totals['net_period'] / income_current) * 100.0, 1) if income_current > 0 else 0.0
     totals['cost_incidence_pct'] = round((expense_current / income_current) * 100.0, 1) if income_current > 0 else 0.0
 
     recent_entries = _dict_rows(cur, f"SELECT id, flow_date, store, payment_method, amount, notes, ts FROM cash_entries WHERE {where_sql} ORDER BY ts DESC, id DESC LIMIT 10", params)
-    recent_expenses = _dict_rows(cur, f"SELECT id, flow_date, store, category, supplier, payment_method, amount, notes, ts FROM cash_expenses WHERE {where_sql} ORDER BY ts DESC, id DESC LIMIT 10", params)
+    recent_expenses = sorted(expense_rows, key=lambda r:r['flow_date'], reverse=True)[:10]
 
     income_breakdown = _dict_rows(
         cur,
         f"SELECT LOWER(TRIM(payment_method)) AS name, COALESCE(SUM(amount),0) AS total FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY LOWER(TRIM(payment_method)) ORDER BY total DESC, name ASC",
         params + (start_s, end_s),
     )
-    raw_expense_rows = _dict_rows(
-        cur,
-        f"SELECT category, supplier, notes, amount FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph}",
-        params + (start_s, end_s),
-    )
+    raw_expense_rows = [r for r in expense_rows if start_s <= r['flow_date'] <= end_s]
     expense_groups = {}
     for erow in raw_expense_rows:
         family = _expense_family(erow)
@@ -2703,13 +2708,15 @@ def _next_month_start(month_key: str) -> date:
     return date(start.year, start.month + 1, 1)
 
 
-def _cash_month_summaries(cur, scope_store: str, limit: int | None = 120):
+def _cash_month_summaries(cur, scope_store: str, limit: int | None = 120, expense_rows=None):
     """Riepilogo mensile di entrate e uscite salvate nel gestionale.
 
     Il limite predefinito mantiene invariata la home esistente; la pagina storico
     può chiedere l'intera serie passando ``limit=None``.
     """
     where_sql, params = _cash_scope_where(scope_store)
+    if expense_rows is None:
+        expense_rows = [dict(r, flow_date=str(r["flow_date"])) for r in _dict_rows(cur, f"SELECT * FROM cash_expenses WHERE {where_sql}", params)]
     months = {}
 
     def slot(month_key: str):
@@ -2738,7 +2745,7 @@ def _cash_month_summaries(cur, scope_store: str, limit: int | None = 120):
         if store:
             item['stores'].add(store)
 
-    for row in _dict_rows(cur, f"SELECT store, flow_date, category, supplier, notes, amount FROM cash_expenses WHERE {where_sql}", params):
+    for row in expense_rows:
         flow_date = str(row.get('flow_date') or '').strip()
         if len(flow_date) < 7:
             continue
@@ -2918,29 +2925,28 @@ def _cash_month_delete_stats(cur, scope_store: str, month_key: str):
     return stats
 
 
-def _build_scope_period_chart(cur, scope_store: str, period_type: str = 'week', anchor_s: str = ''):
+def _build_scope_period_chart(cur, scope_store: str, period_type: str = 'week', anchor_s: str = '', expense_rows=None):
     anchor_day = _parse_date_safe(anchor_s, date.today())
     period_type, start_d, end_d = _period_bounds(period_type, anchor_day)
     ph = _ph()
     where_sql, params = _cash_scope_where(scope_store)
+    if expense_rows is None:
+        expense_rows = [dict(r, flow_date=str(r["flow_date"])) for r in _dict_rows(cur, f"SELECT * FROM cash_expenses WHERE {where_sql}", params)]
     start_s = start_d.isoformat()
     end_s = end_d.isoformat()
 
     entries = _dict_rows(cur, f"SELECT flow_date, SUM(amount) AS total FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date ORDER BY flow_date ASC", params + (start_s, end_s))
-    expenses = _dict_rows(cur, f"SELECT flow_date, SUM(amount) AS total FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date ORDER BY flow_date ASC", params + (start_s, end_s))
+    expenses = [dict(flow_date=r['flow_date'], total=r['amount']) for r in expense_rows if start_s <= r['flow_date'] <= end_s]
     by_entry = {str(r['flow_date']): float(r.get('total') or 0) for r in entries}
-    by_expense = {str(r['flow_date']): float(r.get('total') or 0) for r in expenses}
+    by_expense = {}
+    for r in expenses:by_expense[r['flow_date']] = by_expense.get(r['flow_date'], 0) + r['total']
 
     income_detail_rows = _dict_rows(
         cur,
         f"SELECT flow_date, LOWER(TRIM(payment_method)) AS name, COALESCE(SUM(amount),0) AS total FROM cash_entries WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} GROUP BY flow_date, LOWER(TRIM(payment_method)) ORDER BY flow_date ASC, total DESC",
         params + (start_s, end_s),
     )
-    expense_detail_rows = _dict_rows(
-        cur,
-        f"SELECT flow_date, category, supplier, notes, amount FROM cash_expenses WHERE {where_sql} AND flow_date BETWEEN {ph} AND {ph} ORDER BY flow_date ASC, amount DESC",
-        params + (start_s, end_s),
-    )
+    expense_detail_rows = [r for r in expense_rows if start_s <= r['flow_date'] <= end_s]
 
     income_details = {}
     for row in income_detail_rows:
@@ -3687,15 +3693,17 @@ def gestionale_home(request: Request, period_type: str = 'month', anchor_date: s
             """
             recent_docs = [dict(r) for r in cur.execute(sql, (store, store, store)).fetchall()]
 
-        compare, totals, recent_entries, recent_expenses, period_meta, insights = _build_cash_dashboard(cur, store, period_type, anchor_s)
-        period_chart = _build_scope_period_chart(cur, store, period_type, anchor_s)
+        from .expense_archive import financial_expenses
+        all_expenses = financial_expenses(cur, store)
+        compare, totals, recent_entries, recent_expenses, period_meta, insights = _build_cash_dashboard(cur, store, period_type, anchor_s, expense_rows=all_expenses)
+        period_chart = _build_scope_period_chart(cur, store, period_type, anchor_s, expense_rows=all_expenses)
         period_rows = period_chart.get('rows', [])
         chart_scale = period_chart.get('scale', {'ticks': [], 'max': 1.0})
-        expense_overview = _build_expense_overview(cur, store, period_type, anchor_s)
+        expense_overview = _build_expense_overview(cur, store, period_type, anchor_s, expense_rows=all_expenses)
         month_options = _month_options_for_scope(cur, store, selected_month)
         sales_store = store if store != 'ALL' else (active_store or 'spinza')
         sales_overview = _sales_month_overview(cur, sales_store, selected_month)
-        month_summaries = _cash_month_summaries(cur, store) if can_view_finance else []
+        month_summaries = _cash_month_summaries(cur, store, expense_rows=all_expenses) if can_view_finance else []
 
     prev_anchor = _shift_anchor_date(period_type, anchor_day, -1).isoformat()
     next_anchor = _shift_anchor_date(period_type, anchor_day, 1).isoformat()

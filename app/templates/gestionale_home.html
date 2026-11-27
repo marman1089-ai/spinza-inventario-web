@@ -74,7 +74,7 @@
       <div>
         <h2 style="margin:0 0 6px 0;">📊 Home gestionale</h2>
         {% if can_view_finance %}
-          <div class="muted">Appena entri vedi il periodo, i totali principali, l'andamento rispetto al periodo prima e cosa stai vendendo di più.</div>
+          <div class="muted">Le spese comprendono i pagamenti confermati di tutto il gestionale, incluso il Programma spese. Scadenze da pagare, importi da confermare e documenti non collegati a un pagamento restano nell’Archivio spese unico.</div>
         {% else %}
           <div class="muted">Vista generale documentale e operativa. La parte economica resta visibile solo ai profili autorizzati.</div>
         {% endif %}
@@ -272,7 +272,7 @@
               <td style="text-align:right;"><strong>€ {{ '%.2f'|format(item.amount or 0) }}</strong></td>
               <td>{{ item.category }}</td>
               <td>
-                {% if can_view_finance %}
+                {% if can_view_finance and item.id %}
                 <form method="post" action="/gestionale/uscite/{{ item.id }}/sposta-categoria" class="expense-move-form">
                   <input type="hidden" name="return_to" value="/gestionale?period_type={{ period_meta.type }}&month_key={{ selected_month }}&anchor_date={{ period_meta.anchor }}">
                   <select name="new_category" style="min-width:190px;">
@@ -282,6 +282,7 @@
                   </select>
                   <button class="btn2" type="submit">Sposta</button>
                 </form>
+                {% elif can_view_finance %}<a class="btn2" href="{{ item.source_url }}">Apri spesa</a>
                 {% endif %}
               </td>
             </tr>
