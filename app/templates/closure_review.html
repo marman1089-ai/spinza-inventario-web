@@ -4,13 +4,13 @@
 <link rel="stylesheet" href="/static/css/closure-reports.css?v=6">
 <div class="closing-page">
 <section class="card closing-header">
-  <div><span class="eyebrow">CONTROLLO ADMIN</span><h1>File da verificare</h1><p>Chiusure, foto, fatture e spese secondarie inviate dai dipendenti. Controlla ogni voce e confermala quando è corretta.</p></div>
+  <div><span class="eyebrow">CONTROLLO ADMIN</span><h1>File da verificare</h1><p>I report di chiusura aggiornano subito gli incassi, anche prima del controllo admin. Qui puoi correggerli; per bloccarli eliminali dal Report chiusura. Foto, fatture e spese secondarie restano disponibili per la verifica.</p></div>
   <a class="btn2" href="/admin">Pannello admin</a>
 </section>
 {% if draft %}
 <section class="card closing-editor">
   <h2>Chiusura #{{ draft.id }} · {{ stores[draft.store] }}</h2>
-  <p>Inserita da {{ draft.created_by }}. Modifica i dati e conferma quando sono corretti.</p>
+  <p>Inserita da {{ draft.created_by }} e già pubblicata negli incassi. Le correzioni aggiornano i movimenti collegati senza duplicarli.</p>
   {% set selected=draft.store %}{% set channels=draft.channels %}{% set form_date=draft.closure_date %}
   {% include '_closure_form.html' %}
 </section>

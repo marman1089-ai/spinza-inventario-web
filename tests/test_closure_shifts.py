@@ -53,7 +53,7 @@ class ShiftTests(unittest.TestCase):
             csrf=re.search(r'name="csrf" value="([^"]+)"',page.text)[1]
             return self.client.post('/report-chiusura/salva',data={
                 'csrf':csrf,'submission':token*43,'store':'spinza','closure_date':self.dt,
-                'shift_required':'1','shift_start':start,'shift_end':end,'cumulative_mode':'1',
+                'shift_required':'1','shift_start':start,'shift_end':end,'cumulative_mode':'1','cash_fund_mode':'excluded','cash_fund_initial':'0',
                 'channel':['POS','Cash'],'amount':[pos,cash]},follow_redirects=False)
         self.assertEqual(save('11:00','15:00','200','100','a').status_code,303)
         self.assertEqual(save('18:00','02:00','500','250','b').status_code,303)
@@ -84,10 +84,11 @@ class ShiftTests(unittest.TestCase):
             csrf=re.search(r'name="csrf" value="([^"]+)"',page.text)[1]
             response=self.client.post('/report-chiusura/salva',data={
                 'csrf':csrf,'submission':letter*43,'store':'spinza','closure_date':self.dt,
-                'shift_required':'1','shift_start':start,'shift_end':end,'cumulative_mode':'1',
+                'shift_required':'1','shift_start':start,'shift_end':end,'cumulative_mode':'1','cash_fund_mode':'excluded','cash_fund_initial':'0',
                 'channel':['POS','Cash'],'amount':[pos,cash]},follow_redirects=False)
             self.assertEqual(response.status_code,303)
-        self.assertEqual(len(self.sql('SELECT * FROM cash_entries')),0)
+        self.assertEqual(len(self.sql('SELECT * FROM cash_entries')),4)
+        self.assertAlmostEqual(self.sql('SELECT SUM(amount) AS n FROM cash_entries')[0]['n'],750)
         self.login()
         for rid,start,end,pos,cash in [(2,'18:00','02:00','500','250'),(1,'11:00','15:00','220','110')]:
             page=self.client.get('/admin/file-da-verificare',params={'report_id':rid})
@@ -96,10 +97,36 @@ class ShiftTests(unittest.TestCase):
             response=self.client.post('/admin/file-da-verificare/conferma',data={
                 'csrf':csrf,'report_id':rid,'closure_date':self.dt,
                 'channel':['POS','Cash'],'amount':[pos,cash],'shift_required':'1',
-                'shift_start':start,'shift_end':end,'cumulative_mode':'1'},follow_redirects=False)
+                'shift_start':start,'shift_end':end,'cumulative_mode':'1','cash_fund_mode':'excluded','cash_fund_initial':'0'},follow_redirects=False)
             self.assertEqual(response.status_code,303,response.text)
         self.assertEqual([r['total_cents'] for r in self.sql('SELECT total_cents FROM closure_reports ORDER BY id')],[33000,42000])
         self.assertAlmostEqual(self.sql('SELECT SUM(amount) AS n FROM cash_entries')[0]['n'],750)
+
+    def test_legacy_pending_backfill_is_once_and_deleted_reports_stay_deleted(self):
+        self.login(2)
+        page=self.client.get('/report-chiusura')
+        csrf=re.search(r'name="csrf" value="([^"]+)"',page.text)[1]
+        payload=dict(csrf=csrf,submission='v'*43,store='spinza',closure_date=self.dt,
+                     channel=['POS','Cash'],amount=['100','50'])
+        self.assertEqual(self.client.post('/report-chiusura/salva',data=payload,follow_redirects=False).status_code,303)
+        self.assertEqual(len(self.sql('SELECT * FROM cash_entries')),2)
+        self.assertIsNone(self.sql('SELECT reviewed_at FROM closure_report_reviews')[0]['reviewed_at'])
+        # Recreate the old state: saved staff report, not exported due to the old review gate.
+        self.sql('DELETE FROM cash_entries')
+        self.sql('DELETE FROM closure_report_exports')
+        from app import main
+        startup=next(fn for fn in main.app.router.on_startup if fn.__name__=='startup_reports')
+        startup();startup()
+        self.assertEqual(len(self.sql('SELECT * FROM cash_entries')),2)
+        self.assertEqual(self.sql('SELECT SUM(amount) AS n FROM cash_entries')[0]['n'],150)
+        self.login()
+        page=self.client.get('/report-chiusura')
+        csrf=re.search(r'name="csrf" value="([^"]+)"',page.text)[1]
+        self.assertEqual(self.client.post('/report-chiusura/elimina',data=dict(csrf=csrf,store='spinza',report_id=1),follow_redirects=False).status_code,303)
+        startup();startup()
+        self.assertEqual(self.sql('SELECT * FROM cash_entries'),[])
+        self.assertEqual(self.sql('SELECT * FROM closure_reports'),[])
+        self.assertEqual(self.client.post('/report-chiusura/salva',data=dict(payload,csrf=csrf),follow_redirects=False).status_code,409)
 
 if __name__=='__main__':
     unittest.main()

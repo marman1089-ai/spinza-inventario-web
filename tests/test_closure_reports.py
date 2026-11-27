@@ -276,12 +276,12 @@ class ReportsTest(unittest.TestCase):
             self.assertIn('action="/report-chiusura/salva"',staff_page)
             self.assertIn('<option value="" disabled selected>Seleziona una modalità</option>',staff_page)
             self.assertIn('Totale incassi del giorno <strong>160,00 €</strong>',staff_page)
-            self.assertIn('In attesa di conferma',staff_page)
+            self.assertIn('Pubblicato · da controllare',staff_page)
             app.router.on_startup[-1]()
             with db.connect() as c:
                 rid=c.cursor().execute('SELECT report_id FROM closure_report_reviews').fetchone()['report_id']
-                self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM cash_entries').fetchone()['n'],prior_income)
-                self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM cash_expenses').fetchone()['n'],prior_expenses)
+                self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM cash_entries').fetchone()['n'],prior_income+2)
+                self.assertEqual(c.cursor().execute('SELECT COUNT(*) AS n FROM cash_expenses').fetchone()['n'],prior_expenses+1)
             with self.assertRaises(HTTPException) as denied:
                 routes['/admin/file-da-verificare'](Request(session),rid)
             self.assertEqual(denied.exception.status_code,403)

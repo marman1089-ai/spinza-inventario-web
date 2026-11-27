@@ -73,8 +73,6 @@ def install(app, api):
             and str(row['closure_date'])==datetime.now(ZoneInfo('Europe/Rome')).date().isoformat()
         )
     def export_report(cur, row):
-        if cur.execute(f'SELECT 1 FROM closure_report_reviews WHERE report_id={ph()} AND reviewed_at IS NULL',(row['id'],)).fetchone():
-            return
         # Claim and accounting rows commit together; retries cannot duplicate income.
         claimed=cur.execute(f'INSERT INTO closure_report_exports(report_id) VALUES({ph()}) ON CONFLICT(report_id) DO NOTHING RETURNING report_id',(row['id'],)).fetchone()
         if not claimed: return
@@ -156,6 +154,8 @@ def install(app, api):
         init_reports()
         with connect() as conn:
             cur=conn.cursor()
+            if using_postgres():
+                cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ('closure-reports-write',))
             pending=cur.execute('SELECT r.* FROM closure_reports r LEFT JOIN closure_report_exports e ON e.report_id=r.id WHERE e.report_id IS NULL ORDER BY r.id').fetchall()
             for row in pending: export_report(cur,row)
     @app.get('/report-chiusura')
@@ -337,8 +337,6 @@ def install(app, api):
             lock=' FOR UPDATE' if using_postgres() else ''
             row=cur.execute(f'SELECT id,closure_date FROM closure_reports WHERE id={ph()} AND store={ph()}'+lock,(report_id,store)).fetchone()
             if not row: raise HTTPException(404,'Report non trovato.')
-            if cur.execute(f'SELECT 1 FROM closure_report_reviews WHERE report_id={ph()} AND reviewed_at IS NULL',(report_id,)).fetchone():
-                raise HTTPException(409,'Conferma prima la chiusura in File da verificare.')
             cur.execute(f'INSERT INTO closure_report_cash_checks(report_id,counted_cents,notes,updated_by,updated_at) VALUES({",".join([ph()]*5)}) ON CONFLICT(report_id) DO UPDATE SET counted_cents=excluded.counted_cents,notes=excluded.notes,updated_by=excluded.updated_by,updated_at=excluded.updated_at',
                         (report_id,counted,notes,user['username'],datetime.now(ZoneInfo('Europe/Rome')).isoformat(timespec='seconds')))
             api['_log'](cur,store=store,username=user['username'],action='UPDATE',category='CASSA',name=f'Verifica contanti report #{report_id}',delta=0)
@@ -478,6 +476,7 @@ def install(app, api):
             shift=report_shift(form)
             if shift:
                 cur.execute(f'INSERT INTO closure_report_shifts(report_id,start_time,end_time) VALUES({ph()},{ph()},{ph()}) ON CONFLICT(report_id) DO UPDATE SET start_time=excluded.start_time,end_time=excluded.end_time',(report_id,*shift))
+            clear_export(cur,row)
             cur.execute(f'UPDATE closure_reports SET closure_date={ph()},notes={ph()},lines_json={ph()},total_cents={ph()} WHERE id={ph()}',(day,notes,json.dumps(lines,ensure_ascii=False),total,report_id))
             cur.execute(f'INSERT INTO closure_report_expenses(report_id,lines_json) VALUES({ph()},{ph()}) ON CONFLICT(report_id) DO UPDATE SET lines_json=excluded.lines_json',(report_id,json.dumps(expenses,ensure_ascii=False)))
             cur.execute(f'DELETE FROM closure_report_cash_funds WHERE report_id={ph()}',(report_id,))
