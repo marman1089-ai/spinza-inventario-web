@@ -72,3 +72,42 @@ class VerificationPageTests(unittest.TestCase):
         self.assertEqual(self.client.get('/gestionale/verifica-chiusure?status=bad').status_code,422)
         self.login(2)
         self.assertEqual(self.client.get('/gestionale/verifica-chiusure').status_code,403)
+
+class ClosedDayTests(unittest.TestCase):
+    compare=VerificationMathTests.compare
+    def test_explicit_zero_closure_without_report_is_closed_not_missing(self):
+        d=doc(cash=None,card=None,uncollected=None);d['digital_total']=0
+        section=self.compare([], [d])[0];row=section['rows'][0]
+        self.assertEqual(row['status'],'Chiuso')
+        self.assertEqual(section['counts']['Chiuso'],1)
+        self.assertEqual(row['issues'],[])
+        self.assertTrue(row['closed'])
+        self.assertEqual([m['actual'] for m in row['metrics']],[0,0,0])
+    def test_zero_total_conflicts_and_unknown_total_are_not_silently_closed(self):
+        d=doc(cash=None,card=None,uncollected=None);d['digital_total']=0
+        row=self.compare([report()], [d])[0]['rows'][0]
+        self.assertEqual(row['status'],'Differenze')
+        self.assertEqual(row['excess'],20000)
+        d['digital_total']=None
+        self.assertEqual(self.compare([], [d])[0]['rows'][0]['status'],'Da completare')
+        d=doc();d['digital_total']=0
+        self.assertFalse(self.compare([report()], [d])[0]['rows'][0]['closed'])
+
+class ClosedDayPageTests(unittest.TestCase):
+    setUp=VerificationPageTests.setUp
+    login=fixture.ControlTests.login
+    sql=fixture.ControlTests.sql
+    def test_closed_badge_in_verification_and_digital_card_without_creating_reports(self):
+        cid=self.sql('INSERT INTO closures(store,closure_date,uploaded_by,filename,content_type,data) VALUES(?,?,?,?,?,?)',('spinza','2026-11-25','testadmin','zero.pdf','application/pdf',b'%PDF'))
+        self.sql('INSERT INTO digital_documents(kind,doc_id,store,doc_date,amount,updated_by,updated_at) VALUES(?,?,?,?,?,?,?)',('chiusure',cid,'spinza','2026-11-25',0,'testadmin','2026-11-25'))
+        url='/gestionale/verifica-chiusure?start=2026-11-24&end=2026-11-24&status=chiusi'
+        page=self.client.get(url)
+        self.assertEqual(page.status_code,200)
+        self.assertIn('Negozio chiuso',page.text)
+        self.assertNotIn('Manca il report della chiusura',page.text)
+        self.assertEqual(self.sql('SELECT * FROM closure_reports'),[])
+        card=self.client.get('/schede/chiusure/'+str(cid))
+        self.assertEqual(card.status_code,200)
+        self.assertIn('Negozio chiuso',card.text)
+        self.sql('UPDATE digital_documents SET amount=NULL WHERE doc_id=?',(cid,))
+        self.assertNotIn('Negozio chiuso',self.client.get('/schede/chiusure/'+str(cid)).text)

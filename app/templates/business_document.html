@@ -6,6 +6,7 @@
 {% if not job or job.state in ['pending','working'] %}<section class="card" role="status" id="bd-wait">{{ 'Controllo leggibilità e lettura in corso…' if job else 'Lettura non ancora avviata. L’admin può avviarla dal controllo di novembre.' }}<p>La scheda digitale apparirà automaticamente appena pronta.</p></section>{% endif %}
 {% if job and job.state=='error' %}<section class="card bd-warning" role="alert"><h2>Lettura non riuscita</h2><p>{{ job.error }}</p></section>{% endif %}
 {% if doc %}
+{% if closed %}<section class="card" role="status"><h2 style="margin:0">Negozio chiuso</h2><p class="muted">Chiusura digitale con totale vendite di 0,00 €.</p></section>{% endif %}
 <section class="card bd-total"><span>{{ 'Totale vendite del turno' if kind=='chiusure' else 'Totale da pagare' if kind=='fatture' else 'Totale spesa' }}</span><strong>{{ '%.2f'|format(doc.amount)|replace('.',',') if doc.amount is not none else 'Da verificare' }} {{ doc.currency }}</strong><small>Digitalizzato</small></section>
 <section class="card"><h2>01 / Riepilogo</h2><div class="bd-metrics">
 {% set metrics=[('cash','Contanti'),('card','Carte / POS'),('tickets','Ticket'),('uncollected','Non riscosso')] if kind=='chiusure' else [('taxable_amount','Imponibile'),('vat_amount','IVA'),('deposit_amount','Cauzione netta')] if kind=='fatture' else [('cash','Contanti'),('card','Carte / POS'),('cash_tendered','Consegnato'),('change','Resto')] %}

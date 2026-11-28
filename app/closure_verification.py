@@ -37,6 +37,10 @@ def cents(value):
     except (InvalidOperation,ValueError,TypeError):return None
 
 
+def is_closed_closure(total, details):
+    return cents(total)==0 and all(cents(details.get(key)) in (None,0) for key in LABELS)
+
+
 def daily_comparisons(reports, documents, first, last, stores):
     by_report=defaultdict(list);by_document=defaultdict(list)
     for row in reports:by_report[row['store'],str(row['closure_date'])[:10]].append(dict(row))
@@ -60,33 +64,39 @@ def daily_comparisons(reports, documents, first, last, stores):
                 conflicting_delivery='uncollected' in reported and reported['uncollected']!=delivery_total
                 reported['uncollected']=None if conflicting_delivery else delivery_total
             details=unpack(docs[0].get('details_json'),{}) if len(docs)==1 and docs[0].get('digital_id') is not None else {}
+            closed=len(docs)==1 and docs[0].get('digital_id') is not None and is_closed_closure(docs[0].get('digital_total'),details)
+            reported_activity=any((reported.get(key) or 0)>0 for key in LABELS)
             metrics=[];issues=[]
+            if closed and reported_activity:issues.append('Negozio chiuso nella cassa digitale, ma il report indica incassi: controllare')
+            if len(docs)==1 and cents(docs[0].get('digital_total'))==0 and not closed:
+                issues.append('Totale digitale a zero ma canali con importi: controllare la scheda')
             if conflicting_delivery:issues.append('Non riscosso esplicito diverso da Glovo + Deliveroo: controllare il report')
-            if not rs and docs:issues.append('Manca il report della chiusura')
+            if not rs and docs and not closed:issues.append('Manca il report della chiusura')
             if rs and not docs:issues.append('Manca la chiusura della cassa')
             if len(docs)>1:issues.append(f'{len(docs)} documenti: distinguere copie e turni prima del confronto')
             if len(docs)==1 and docs[0].get('digital_id') is None:
                 state=docs[0].get('job_state')
                 issues.append('Lettura digitale in corso' if state in ('pending','working') else 'Chiusura presente solo come foto o lettura non disponibile')
             for key in LABELS:
-                actual=cents(details.get(key));value=reported.get(key)
+                actual=0 if closed else cents(details.get(key));value=reported.get(key)
                 required=True
                 difference=value-actual if value is not None and actual is not None else None
                 metric=dict(key=key,label=LABELS[key],reported=value,actual=actual,difference=difference,required=required)
                 metrics.append(metric)
-                if rs and value is None:issues.append(f'{LABELS[key]} non indicati nel report')
+                if rs and value is None and not closed:issues.append(f'{LABELS[key]} non indicati nel report')
                 if len(docs)==1 and docs[0].get('digital_id') is not None and required and actual is None:issues.append(f'{LABELS[key]} non leggibili nella scheda digitale')
             missing=sum(-m['difference'] for m in metrics if m['difference'] is not None and m['difference']<0)
             excess=sum(m['difference'] for m in metrics if m['difference'] is not None and m['difference']>0)
             if not rs and not docs:status='Nessun dato'
             elif missing or excess:status='Differenze'
+            elif closed and not reported_activity and not issues:status='Chiuso'
             elif issues:status='Da completare'
             else:status='Coincide'
             rows.append(dict(day=ds,till_day=(day+timedelta(days=1)).isoformat(),store=store,reports=rs,documents=docs,
-                             metrics=metrics,issues=issues,status=status,missing=missing,excess=excess,
+                             metrics=metrics,issues=issues,status=status,closed=closed,missing=missing,excess=excess,
                              report_url='/report-chiusura?'+urlencode(dict(store=store,day=ds))))
             day-=timedelta(days=1)
-        counts={s:sum(r['status']==s for r in rows) for s in ('Coincide','Differenze','Da completare','Nessun dato')}
+        counts={s:sum(r['status']==s for r in rows) for s in ('Coincide','Chiuso','Differenze','Da completare','Nessun dato')}
         sections.append(dict(store=store,label=label,rows=rows,counts=counts,
                              missing=sum(r['missing'] for r in rows),excess=sum(r['excess'] for r in rows)))
     return sections
@@ -99,7 +109,7 @@ def install(app, api):
         if not user or not api['is_admin'](request):raise HTTPException(403,'Sezione riservata agli admin.')
         stores={key:STORE_LABELS[key] for key in ORDER if key in api['STORES']}
         if store!='ALL' and store not in stores:raise HTTPException(422,'Negozio non valido.')
-        if status not in ('tutti','differenze','incompleti','coincidenti','senza-dati'):raise HTTPException(422,'Filtro non valido.')
+        if status not in ('tutti','differenze','incompleti','coincidenti','chiusi','senza-dati'):raise HTTPException(422,'Filtro non valido.')
         today=api['_rome_today']()
         try:
             first=date.fromisoformat(start) if start else today.replace(day=1)
@@ -111,15 +121,15 @@ def install(app, api):
         with connect() as conn:
             cur=conn.cursor()
             reports=cur.execute(f'SELECT id,store,closure_date,lines_json FROM closure_reports WHERE store IN ({marks}) AND closure_date BETWEEN {p()} AND {p()} ORDER BY id',(*keys,first.isoformat(),last.isoformat())).fetchall()
-            documents=cur.execute(f'''SELECT c.id,c.store,c.closure_date,d.doc_id AS digital_id,t.details_json,j.state AS job_state
+            documents=cur.execute(f'''SELECT c.id,c.store,c.closure_date,d.doc_id AS digital_id,d.amount AS digital_total,t.details_json,j.state AS job_state
                 FROM closures c LEFT JOIN digital_documents d ON d.kind='chiusure' AND d.doc_id=c.id AND d.store=c.store
                 LEFT JOIN document_details t ON t.kind='chiusure' AND t.doc_id=c.id
                 LEFT JOIN document_ai_jobs j ON j.kind='chiusure' AND j.doc_id=c.id AND j.store=c.store
                 WHERE c.store IN ({marks}) AND c.closure_date BETWEEN {p()} AND {p()} ORDER BY c.id''',
                 (*keys,(first+timedelta(days=1)).isoformat(),(last+timedelta(days=1)).isoformat())).fetchall()
         sections=daily_comparisons(reports,documents,first,last,stores)
-        counts={s:sum(section['counts'][s] for section in sections) for s in ('Coincide','Differenze','Da completare','Nessun dato')}
-        chosen={'differenze':'Differenze','incompleti':'Da completare','coincidenti':'Coincide','senza-dati':'Nessun dato'}.get(status)
+        counts={s:sum(section['counts'][s] for section in sections) for s in ('Coincide','Chiuso','Differenze','Da completare','Nessun dato')}
+        chosen={'differenze':'Differenze','incompleti':'Da completare','coincidenti':'Coincide','chiusi':'Chiuso','senza-dati':'Nessun dato'}.get(status)
         for section in sections:
             if chosen:section['rows']=[row for row in section['rows'] if row['status']==chosen]
         return api['render']('closure_verification.html',request=request,user=user,brand=api['_effective_store'](request,user),

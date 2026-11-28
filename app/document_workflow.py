@@ -66,8 +66,10 @@ def install(app, api):
         user,src,sub,doc,job,details=access(request,kind,doc_id)
         if doc:
             doc=dict(doc);doc['lines']=json.loads(doc['lines_json'])
+        from .closure_verification import is_closed_closure
+        closed=kind=='chiusure' and doc is not None and is_closed_closure(doc['amount'],details)
         return api['render']('business_document.html',request=request,user=user,stores=api['STORES'],brand=src['store'],
-            kind=kind,label=KINDS[kind][2],src=src,submission=sub,doc=doc,job=job,details=details,csrf=csrf(request))
+            kind=kind,label=KINDS[kind][2],src=src,submission=sub,doc=doc,job=job,details=details,closed=closed,csrf=csrf(request))
 
     @app.get('/schede/{kind}/{doc_id}/stato')
     def status(request:Request,kind:str,doc_id:int):
