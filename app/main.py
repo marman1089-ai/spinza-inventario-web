@@ -5689,7 +5689,7 @@ def _store_switch_url(next_url: str, store: str) -> str:
         '/gestionale','/gestionale/dashboard','/gestionale/incassi','/gestionale/uscite',
         '/gestionale/storico-mensile','/gestionale/report-vendite','/gestionale/consumi',
         '/gestionale/archiviati','/gestionale/panoramica-totale',
-        '/gestionale/spese-pagamenti','/gestionale/tutte-le-spese','/gestionale/controllo-dati',
+        '/gestionale/spese-pagamenti','/gestionale/tutte-le-spese','/gestionale/controllo-dati','/gestionale/verifica-chiusure',
         '/contanti-nei-negozi/incassi','/contanti-nei-negozi/spese',
         '/contanti-nei-negozi/bilanci','/contanti-nei-negozi/ricevute',
         '/fatture','/fatture/importa-prodotti','/chiusure','/report-chiusura',
@@ -5720,7 +5720,7 @@ def _store_switch_url(next_url: str, store: str) -> str:
         '/inventario/fatture-settimana','/inventario-controllo','/admin',
         '/admin/fasce-orarie','/gestionale/report-vendite',
         '/gestionale/panoramica-totale','/report-chiusura',
-        '/gestionale/tutte-le-spese','/gestionale/controllo-dati','/gestionale/consumi'}
+        '/gestionale/tutte-le-spese','/gestionale/controllo-dati','/gestionale/verifica-chiusure','/gestionale/consumi'}
     if path in store_pages:
         params.append(('store',store))
     return path+('?' + urlencode(params) if params else '')+('#'+quote(target.fragment,safe='-_.~') if target.fragment else '')
@@ -10268,3 +10268,6 @@ install_expense_archive(app, globals())
 
 from .native_expenses import install as install_native_expenses
 install_native_expenses(app, globals())
+
+from .closure_verification import install as install_closure_verification
+install_closure_verification(app, globals())

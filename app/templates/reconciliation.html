@@ -3,6 +3,7 @@
 {% block content %}
 <style>.check-card{border:1px solid var(--border,#ddd);border-radius:16px;padding:20px;margin:18px 0}.check-head{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}.check-status{font-size:22px;font-weight:700}.check-scroll{overflow:auto}.check-table{width:100%;min-width:540px}.check-table th,.check-table td{padding:12px;text-align:right}.check-table th:first-child,.check-table td:first-child{text-align:left}.check-diff{font-size:20px;font-weight:700}.check-links{display:flex;gap:18px;flex-wrap:wrap;margin-top:16px}</style>
 <h1>Controllo dati</h1>
+<p><a class="btn2" href="/gestionale/verifica-chiusure">Verifica chiusure · tutti e tre i negozi</a></p>
 <p>Confronta report dei dipendenti, chiusure reali della cassa e contante trovato nei negozi.</p>
 <form method="get" class="check-head"><label>Negozio <select name="store">{% if brand == 'ALL' %}<option value="ALL">Tutti</option>{% endif %}{% for key,label in stores.items() %}{% if brand == 'ALL' or key == brand %}<option value="{{ key }}" {% if store == key %}selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}</select></label><label>Dal <input type="date" name="start" value="{{ start }}" required></label><label>Al <input type="date" name="end" value="{{ end }}" required></label><button type="submit">Confronta</button></form>
 <p>Il periodo si riferisce alla giornata del report. La cassa conserva la data reale del giorno successivo. Il contante trovato copre tutti i report successivi al conteggio precedente: i giorni saltati si sommano.</p>
